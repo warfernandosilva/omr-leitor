@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { @apply border-gray-200 dark:border-gray-800; }
+  body { @apply bg-gray-50 text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100; }
+  :focus-visible { @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-950; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 font-medium text-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 shadow-sm;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-blue-500 shadow-sm dark:bg-gray-900 dark:text-gray-100 dark:border-gray-700 dark:hover:bg-gray-800;
+  }
+  .btn-success {
+    @apply btn bg-emerald-600 text-white hover:bg-emerald-700 focus:ring-emerald-500 shadow-sm;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 shadow-sm;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .card {
+    @apply bg-white rounded-xl shadow-card border border-gray-200 p-6 dark:bg-gray-900 dark:border-gray-800;
+  }
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 placeholder-gray-400 dark:bg-gray-900 dark:border-gray-700 dark:text-gray-100 dark:placeholder-gray-500 min-h-[44px];
+  }
+  .label {
+    @apply block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1.5;
+  }
+  .page-title { @apply text-2xl font-bold tracking-tight text-gray-900 dark:text-white; }
+  .page-subtitle { @apply text-sm text-gray-500 dark:text-gray-400 mt-1; }
+  .table-th { @apply py-3 px-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400; }
+  .table-td { @apply py-3 px-3 text-sm; }
+  .badge { @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold; }
+  .badge-success { @apply badge bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300; }
+  .badge-warning { @apply badge bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300; }
+  .badge-danger { @apply badge bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300; }
+  .badge-info { @apply badge bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300; }
+  .empty-state { @apply card text-center py-12; }
+  .callout { @apply rounded-xl border p-4 text-sm leading-relaxed; }
+  .callout-info { @apply callout bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-950 dark:border-blue-900 dark:text-blue-200; }
+  .callout-warning { @apply callout bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950 dark:border-amber-900 dark:text-amber-200; }
+  .callout-danger { @apply callout bg-red-50 border-red-200 text-red-800 dark:bg-red-950 dark:border-red-900 dark:text-red-200; }
+  .callout-success { @apply callout bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-950 dark:border-emerald-900 dark:text-emerald-200; }
+}
+
+.print-answer-card {
+  width: 210mm;
+  height: 297mm;
+  margin: 0 auto;
+  background: #fff;
+  font-family: 'Arial', 'Helvetica', sans-serif;
+  color: #333333;
+  box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
+}
+
+.print-answer-card .id-box {
+  position: absolute;
+  border: 0.3mm solid #333333;
+  background: #fff;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+
+.print-answer-card .id-label {
+  font-size: 17.3pt;
+  line-height: 1;
+  padding-left: 1.45mm;
+  color: #333333;
+}
+
+.print-answer-card .id-value {
+  font-weight: bold;
+  line-height: 1;
+  margin-left: 4mm;
+  color: #333333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160mm;
+}
+
+.print-answer-card .student-qr {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.print-answer-card .divider {
+  position: absolute;
+  background: #333333;
+  box-sizing: border-box;
+  transform: translate(-50%, 0);
+}
+
+.print-answer-card .subject-title {
+  position: absolute;
+  font-weight: bold;
+  line-height: 1;
+  color: #333333;
+  transform: translate(-50%, -50%);
+  text-transform: uppercase;
+}
+
+.print-answer-card .opt-header {
+  position: absolute;
+  line-height: 1;
+  color: #333333;
+  transform: translate(-50%, -50%);
+}
+
+.print-answer-card .answer-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+}
+
+.print-answer-card .answer-row .q-num {
+  position: absolute;
+  top: 0;
+  transform: translate(-100%, -50%);
+  line-height: 1;
+  color: #333333;
+}
+
+.print-answer-card .bubble {
+  position: absolute;
+  top: 0;
+  width: 5.66mm;
+  height: 5.66mm;
+  border-radius: 50%;
+  border: 0.434mm solid #333333;
+  background: #fff;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+}
+
+.print-answer-card .card-id {
+  position: absolute;
+  bottom: 4mm;
+  right: 14mm;
+  font-size: 7pt;
+  color: #444;
+}
+
+.print-answer-card .aruco-marker {
+  position: absolute;
+  display: grid;
+  box-sizing: border-box;
+}
+
+.print-answer-card .aruco-cell {
+  width: 100%;
+  height: 100%;
+}
+
+@media print {
+  body * { visibility: hidden; }
+  .print-answer-card, .print-answer-card * { visibility: visible; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-answer-card {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 210mm;
+    height: 297mm;
+    margin: 0;
+  }
+  @page { size: A4 portrait; margin: 0; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.bubble-option {
+  @apply w-10 h-10 rounded-full border-2 border-gray-300 flex items-center justify-center cursor-pointer transition-all duration-200 text-sm font-bold hover:border-blue-500 hover:bg-blue-50 dark:border-gray-600 dark:hover:bg-gray-800;
+}
+.bubble-option.selected {
+  @apply border-blue-600 bg-blue-600 text-white;
+}
+.bubble-option.marked {
+  @apply border-red-500 bg-red-100 text-red-700;
+}
+.skeleton { @apply animate-pulse bg-gray-200 dark:bg-gray-800 rounded; }
+.card-hover { @apply transition-all duration-200 hover:shadow-md hover:-translate-y-0.5; }

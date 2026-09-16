@@ -1,0 +1,190 @@
+169 INFO: PyInstaller: 6.22.2, contrib hooks: 2026.7
+169 INFO: Python: 3.14.7
+190 INFO: Platform: Windows-11-10.0.26200-SP0
+191 INFO: Python environment: C:\Python314
+191 INFO: wrote C:\Users\Intel\Documents\Default Project\omr-backend\main.spec
+2202 INFO: Module search paths (PYTHONPATH):
+['C:\\Users\\Intel\\Documents\\Default Project\\omr-backend',
+ 'C:\\Python314\\python314.zip',
+ 'C:\\Python314\\DLLs',
+ 'C:\\Python314\\Lib',
+ 'C:\\Python314',
+ 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages',
+ 'C:\\Python314\\Lib\\site-packages',
+ 'C:\\Users\\Intel\\Documents\\Default Project\\omr-backend']
+3261 INFO: Appending 'datas' from .spec
+3269 INFO: checking Analysis
+3270 INFO: Building Analysis because Analysis-00.toc is non existent
+3270 INFO: Looking for Python shared library...
+3270 INFO: Using Python shared library: C:\Python314\python314.dll
+3270 INFO: Running Analysis Analysis-00.toc
+3270 INFO: Target bytecode optimization level: 0
+3270 INFO: Initializing module dependency graph...
+3278 INFO: Initializing module graph hook caches...
+3307 INFO: Analyzing modules for base_library.zip ...
+4064 INFO: Processing standard module hook 'hook-heapq.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+5134 INFO: Processing standard module hook 'hook-encodings.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+5591 INFO: Processing standard module hook 'hook-math.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+7626 INFO: Processing standard module hook 'hook-difflib.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+7775 INFO: Processing standard module hook 'hook-pickle.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+10646 INFO: Caching module dependency graph...
+10679 INFO: Analyzing C:\Users\Intel\Documents\Default Project\omr-backend\main.py
+10765 INFO: Processing standard module hook 'hook-cv2.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+11338 INFO: Processing standard module hook 'hook-numpy.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+11975 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+11977 INFO: SetuptoolsInfo: initializing cached setuptools info...
+13271 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+13425 INFO: Processing standard module hook 'hook-xml.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+13884 INFO: Processing standard module hook 'hook-sysconfig.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+13897 INFO: Processing standard module hook 'hook-_ctypes.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+15011 INFO: Processing standard module hook 'hook-platform.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+15467 INFO: Processing standard module hook 'hook-webbrowser.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+18591 INFO: Processing standard module hook 'hook-charset_normalizer.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+19514 INFO: Processing standard module hook 'hook-anyio.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+20711 INFO: Processing standard module hook 'hook-pydantic.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+21905 INFO: Processing standard module hook 'hook-zoneinfo.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+24802 INFO: Processing standard module hook 'hook-sqlalchemy.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+25969 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+25970 INFO: Setuptools: 'importlib_metadata' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.importlib_metadata'!
+25978 INFO: Processing standard module hook 'hook-setuptools.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+25994 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26032 INFO: Processing pre-safe-import-module hook 'hook-jaraco.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26033 INFO: Setuptools: 'jaraco' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco'!
+26072 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26073 INFO: Setuptools: 'more_itertools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.more_itertools'!
+26263 INFO: Processing standard module hook 'hook-_osx_support.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+26281 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26756 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+26758 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26768 INFO: Processing pre-safe-import-module hook 'hook-backports.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+26768 INFO: Setuptools: 'backports' appears to be a full setuptools-vendored copy - creating alias to 'setuptools._vendor.backports'!
+27470 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+27471 INFO: Setuptools: 'tomli' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.tomli'!
+28142 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+28143 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+28212 INFO: Processing standard module hook 'hook-setuptools._vendor.importlib_metadata.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+28239 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+28240 INFO: Setuptools: 'zipp' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.zipp'!
+33624 INFO: Processing standard module hook 'hook-cryptography.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+34911 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+35133 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\pre_safe_import_module'
+35831 INFO: Processing standard module hook 'hook-bcrypt.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+36924 INFO: Processing standard module hook 'hook-PIL.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+37087 INFO: Processing standard module hook 'hook-PIL.Image.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+37563 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+37880 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+38878 INFO: Processing standard module hook 'hook-reportlab.lib.utils.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+39005 INFO: Processing standard module hook 'hook-reportlab.pdfbase._fontdata.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+42005 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+42273 INFO: Processing standard module hook 'hook-uvicorn.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+44199 INFO: Processing standard module hook 'hook-websockets.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+46443 INFO: Analyzing hidden import 'psycopg'
+46853 INFO: Processing standard module hook 'hook-psycopg_binary.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+48028 INFO: Analyzing hidden import 'reportlab.graphics.barcode'
+48218 INFO: Analyzing hidden import 'reportlab.graphics.barcode.code128'
+48247 INFO: Analyzing hidden import 'reportlab.graphics.barcode.code39'
+48269 INFO: Analyzing hidden import 'reportlab.graphics.barcode.code93'
+48285 INFO: Analyzing hidden import 'reportlab.graphics.barcode.ecc200datamatrix'
+48315 INFO: Analyzing hidden import 'reportlab.graphics.barcode.fourstate'
+48324 INFO: Analyzing hidden import 'reportlab.graphics.barcode.lto'
+48339 INFO: Analyzing hidden import 'reportlab.graphics.barcode.test'
+48403 INFO: Analyzing hidden import 'reportlab.graphics.charts.axes'
+48565 INFO: Analyzing hidden import 'reportlab.graphics.charts.barcharts'
+48671 INFO: Analyzing hidden import 'reportlab.graphics.charts.dotbox'
+48812 INFO: Analyzing hidden import 'reportlab.graphics.charts.doughnut'
+48840 INFO: Analyzing hidden import 'reportlab.graphics.charts.markers'
+48849 INFO: Analyzing hidden import 'reportlab.graphics.charts.slidebox'
+48865 INFO: Analyzing hidden import 'reportlab.graphics.charts.spider'
+48891 INFO: Analyzing hidden import 'reportlab.graphics.samples'
+48897 INFO: Analyzing hidden import 'reportlab.graphics.samples.bubble'
+48916 INFO: Analyzing hidden import 'reportlab.graphics.samples.clustered_bar'
+48928 INFO: Analyzing hidden import 'reportlab.graphics.samples.clustered_column'
+48940 INFO: Analyzing hidden import 'reportlab.graphics.samples.exploded_pie'
+48950 INFO: Analyzing hidden import 'reportlab.graphics.samples.filled_radar'
+48961 INFO: Analyzing hidden import 'reportlab.graphics.samples.line_chart'
+48972 INFO: Analyzing hidden import 'reportlab.graphics.samples.linechart_with_markers'
+48984 INFO: Analyzing hidden import 'reportlab.graphics.samples.radar'
+48996 INFO: Analyzing hidden import 'reportlab.graphics.samples.runall'
+49005 INFO: Analyzing hidden import 'reportlab.graphics.samples.scatter'
+49016 INFO: Analyzing hidden import 'reportlab.graphics.samples.scatter_lines'
+49027 INFO: Analyzing hidden import 'reportlab.graphics.samples.scatter_lines_markers'
+49038 INFO: Analyzing hidden import 'reportlab.graphics.samples.simple_pie'
+49049 INFO: Analyzing hidden import 'reportlab.graphics.samples.stacked_bar'
+49060 INFO: Analyzing hidden import 'reportlab.graphics.samples.stacked_column'
+49072 INFO: Analyzing hidden import 'reportlab.graphics.svgpath'
+49100 INFO: Analyzing hidden import 'reportlab.graphics.testdrawings'
+49109 INFO: Analyzing hidden import 'reportlab.graphics.widgets.adjustableArrow'
+49122 INFO: Analyzing hidden import 'reportlab.graphics.widgets.eventcal'
+49139 INFO: Analyzing hidden import 'reportlab.graphics.widgets.table'
+49154 INFO: Analyzing hidden import 'reportlab.lib.codecharts'
+49241 INFO: Analyzing hidden import 'reportlab.lib.extformat'
+49252 INFO: Analyzing hidden import 'reportlab.lib.fontfinder'
+49274 INFO: Analyzing hidden import 'reportlab.lib.pygments2xpre'
+49294 INFO: Processing standard module hook 'hook-pygments.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+51111 INFO: Analyzing hidden import 'reportlab.lib.testutils'
+51137 INFO: Analyzing hidden import 'reportlab.lib.yaml'
+51149 INFO: Analyzing hidden import 'reportlab.pdfbase._can_cmap_data'
+51158 INFO: Analyzing hidden import 'reportlab.pdfbase.pdfform'
+51189 INFO: Analyzing hidden import 'reportlab.platypus.figures'
+51215 INFO: Analyzing hidden import 'reportlab.platypus.para'
+51308 INFO: Analyzing hidden import 'reportlab.platypus.tableofcontents'
+51339 INFO: Analyzing hidden import 'reportlab.rl_settings'
+51350 INFO: Analyzing hidden import 'qrcode.compat.etree'
+51358 INFO: Analyzing hidden import 'qrcode.console_scripts'
+51427 INFO: Analyzing hidden import 'qrcode.image.styles.moduledrawers.svg'
+51458 INFO: Analyzing hidden import 'qrcode.release'
+51466 INFO: Analyzing hidden import 'qrcode.tests'
+51467 INFO: Analyzing hidden import 'qrcode.tests.consts'
+51473 INFO: Analyzing hidden import 'qrcode.tests.test_example'
+51624 INFO: Processing standard module hook 'hook-pytest.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+52144 INFO: Processing standard module hook 'hook-py.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+54075 INFO: Analyzing hidden import 'qrcode.tests.test_qrcode'
+54096 INFO: Analyzing hidden import 'qrcode.tests.test_qrcode_pil'
+54110 INFO: Analyzing hidden import 'qrcode.tests.test_qrcode_pypng'
+54118 INFO: Analyzing hidden import 'qrcode.tests.test_qrcode_svg'
+54127 INFO: Analyzing hidden import 'qrcode.tests.test_release'
+54134 INFO: Analyzing hidden import 'qrcode.tests.test_script'
+54147 INFO: Analyzing hidden import 'qrcode.tests.test_util'
+54153 INFO: Processing module hooks (post-graph stage)...
+56180 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+61983 INFO: Processing standard module hook 'hook-sqlalchemy.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+62439 WARNING: Hidden import "pysqlite2" not found!
+62439 WARNING: Hidden import "MySQLdb" not found!
+62450 INFO: Processing standard module hook 'hook-psycopg2.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+64285 INFO: Processing standard module hook 'hook-sqlite3.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks'
+64844 WARNING: Hidden import "mx.DateTime" not found!
+64845 INFO: Processing standard module hook 'hook-tzdata.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\stdhooks'
+65287 INFO: Performing binary vs. data reclassification (882 entries)
+67321 INFO: Looking for ctypes DLLs
+67444 INFO: Analyzing run-time hooks ...
+67453 INFO: Including run-time hook 'pyi_rth_inspect.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+67456 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+67459 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+67461 INFO: Including run-time hook 'pyi_rth_setuptools.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\PyInstaller\\hooks\\rthooks'
+67463 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\_pyinstaller_hooks_contrib\\rthooks'
+67509 INFO: Creating base_library.zip...
+67530 INFO: Looking for dynamic libraries
+70288 INFO: Extra DLL search directories (AddDllDirectory): ['C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\numpy.libs', 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\psycopg_binary.libs', 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\psycopg2_binary.libs', 'C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\cv2\\../../x64/vc17/bin']
+70288 INFO: Extra DLL search directories (PATH): ['C:\\Users\\Intel\\AppData\\Roaming\\Python\\Python314\\site-packages\\cv2\\../../x64/vc17/bin']
+71265 INFO: Warnings written to C:\Users\Intel\Documents\Default Project\omr-backend\build\main\warn-main.txt
+71435 INFO: Graph cross-reference written to C:\Users\Intel\Documents\Default Project\omr-backend\build\main\xref-main.html
+71525 INFO: checking PYZ
+71525 INFO: Building PYZ because PYZ-00.toc is non existent
+71525 INFO: Building PYZ (ZlibArchive) C:\Users\Intel\Documents\Default Project\omr-backend\build\main\PYZ-00.pyz
+72665 INFO: Building PYZ (ZlibArchive) C:\Users\Intel\Documents\Default Project\omr-backend\build\main\PYZ-00.pyz completed successfully.
+72740 INFO: checking PKG
+72740 INFO: Building PKG because PKG-00.toc is non existent
+72740 INFO: Building PKG (CArchive) main.pkg
+81518 INFO: Building PKG (CArchive) main.pkg completed successfully.
+81538 INFO: Bootloader C:\Users\Intel\AppData\Roaming\Python\Python314\site-packages\PyInstaller\bootloader\Windows-64bit-intel\run.exe
+81538 INFO: checking EXE
+81538 INFO: Building EXE because EXE-00.toc is non existent
+81538 INFO: Building EXE from EXE-00.toc
+81538 INFO: Copying bootloader EXE to C:\Users\Intel\Documents\Default Project\omr-backend\dist\main.exe
+81602 INFO: Copying icon to EXE
+81636 INFO: Copying 0 resources to EXE
+81636 INFO: Embedding manifest in EXE
+81664 INFO: Appending PKG archive to EXE
+81729 INFO: Fixing EXE headers
+82611 INFO: Building EXE from EXE-00.toc completed successfully.
+82632 INFO: Build complete! The results are available in: C:\Users\Intel\Documents\Default Project\omr-backend\dist

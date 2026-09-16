@@ -1,0 +1,80 @@
+{
+  "name": "omr-app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "electron:dev": "cross-env ELECTRON_START_URL=http://localhost:5173 electron .",
+    "pre-electron:build": "node -e \"const fs=require('fs'); const p='../omr-backend/dist/main.exe'; if(!fs.existsSync(require('path').resolve(__dirname,p))){console.error('ERRO: '+p+' nao encontrado. Rode: cd omr-backend && build-backend-exe.bat'); process.exit(1)} else console.log('Backend exe ok: '+p)\"",
+    "electron:build": "tsc -b && vite build && electron-builder --win --x64"
+  },
+  "dependencies": {
+    "@react-pdf/renderer": "^4.9.0",
+    "canvas": "^3.2.3",
+    "html2canvas": "^1.4.1",
+    "js-aruco2": "^2.0.0",
+    "jspdf": "^4.2.1",
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.2",
+    "recharts": "^3.10.1",
+    "uuid": "^14.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "build": {
+    "appId": "com.omr.app",
+    "productName": "OMR Correcao",
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../omr-backend/dist/main.exe",
+        "to": "backend/main.exe"
+      },
+      {
+        "from": "../omr-backend/dist/main",
+        "to": "backend/main"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^11.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.15.0",
+    "@typescript-eslint/parser": "^7.15.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.5.4",
+    "cross-env": "^10.1.0",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react-hooks": "^4.6.2",
+    "eslint-plugin-react-refresh": "^0.4.7",
+    "jsdom": "^30.0.1",
+    "postcss": "^8.5.26",
+    "sharp": "^0.35.3",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.2.2",
+    "vite": "^5.3.4",
+    "vitest": "^4.1.11"
+  }
+}

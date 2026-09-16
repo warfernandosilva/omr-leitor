@@ -1,0 +1,17 @@
+
+C:\Users\Intel\Documents\Default Project\omr-leitor\omr-backend\auth.py:21: UserWarning: JWT_SECRET não definido — usando chave dev insegura. Defina JWT_SECRET em produção.
+  warnings.warn("JWT_SECRET não definido — usando chave dev insegura. Defina JWT_SECRET em produção.", UserWarning)
+INFO:     Started server process [3824]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8010 (Press CTRL+C to quit)
+INFO:     127.0.0.1:61659 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56132 - "OPTIONS /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52721 - "OPTIONS /api/auth/me HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52721 - "GET /api/auth/me HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:56132 - "GET /api/auth/me HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:50668 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63826 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:65272 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:65272 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:65272 - "POST /api/auth/login HTTP/1.1" 401 Unauthorized
