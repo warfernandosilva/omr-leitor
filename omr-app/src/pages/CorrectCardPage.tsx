@@ -119,6 +119,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const activeExam = selectedExamId ? exams.find(e => e.id === selectedExamId) : null;
 
+  // Geometria do overlay: prefere o modelo DETECTADO pelo backend (fallback
+  // cruzado) e avisa se divergir do modelo da prova selecionada.
+  const overlaySae = omrResult?.templateUsed ? omrResult.templateUsed === 'sae' : isSaeExam(activeExam);
+  const templateMismatch = !!omrResult?.templateUsed && !!activeExam
+    && (omrResult.templateUsed === 'sae') !== isSaeExam(activeExam);
+
   const startCamera = async () => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       fileInputRef.current?.click();
@@ -835,7 +841,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
                 {/* overlay SVG na geometria do template 1448x2048 */}
                 <svg viewBox={`0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-                  {isSaeExam(activeExam) ? (
+                  {overlaySae ? (
                     <g>
                       {Array.from({ length: activeExam.totalQuestions }, (_, i) => {
                         const q = i + 1;
@@ -897,7 +903,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   }
                   {/* marcações duplicadas em laranja */}
                   {(omrResult?.duplicateQuestions ?? []).map(q => {
-                    if (isSaeExam(activeExam)) {
+                    if (overlaySae) {
                       const marks = omrResult?.duplicateMarks?.[q] ?? [];
                       return marks.map(letter => {
                         const ci = ['A', 'B', 'C', 'D'].indexOf(letter);
@@ -921,8 +927,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
-          {(omrResult.lowConfidence ?? []).length > 0 && (
+          {templateMismatch && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+              <strong>Atenção:</strong> o cartão fotografado é do modelo{' '}
+              <strong>{omrResult?.templateUsed === 'sae' ? 'Avaliação Contínua' : 'Padrão'}</strong>,
+              mas a prova selecionada usa o modelo{' '}
+              <strong>{isSaeExam(activeExam) ? 'Avaliação Contínua' : 'Padrão'}</strong>.
+              A leitura foi feita no modelo detectado — confira se a prova está correta antes de salvar.
+            </div>
+          )}
+
+          {(omrResult.lowConfidence ?? []).length > 0 && (            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
               <strong>Atenção:</strong> As questões {(omrResult.lowConfidence ?? []).join(', ')} foram identificadas com baixa confiança.
               Verifique manualmente abaixo.
             </div>

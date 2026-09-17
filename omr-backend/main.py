@@ -75,6 +75,7 @@ class ProcessResponse(BaseModel):
     all_ratios: dict[int, dict[str, float]] | None = None
     card_id: str | None = None
     rectified_image: str | None = None  # base64 dataURL da imagem retificada (para overlay perfeito)
+    template_used: str | None = None  # "padrao" | "sae" — modelo detectado (fallback cruzado)
     error: str | None = None
 
 
@@ -394,7 +395,8 @@ async def process_omr(
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
 
     result: OMRResult | None
-    if template == "sae":
+    template_used = template if template in ("padrao", "sae") else "padrao"
+    if template_used == "sae":
         result = process_sae_image(image, n_questions=questions_per_subject)
     else:
         result = process_image(
@@ -403,8 +405,26 @@ async def process_omr(
             layout_mode=layout_mode,
         )
 
+    # Fallback cruzado: clientes antigos (app de captura no celular, Flutter)
+    # não enviam `template` — se o modelo pedido falhar, tenta o outro antes
+    # de desistir. A resposta indica qual foi usado (template_used).
+    if result is None and template_used == "padrao":
+        sae_result = process_sae_image(image, n_questions=questions_per_subject)
+        if sae_result is not None:
+            result = sae_result
+            template_used = "sae"
+    elif result is None and template_used == "sae":
+        std_result = process_image(
+            image,
+            questions_per_subject=questions_per_subject,
+            layout_mode=layout_mode,
+        )
+        if std_result is not None:
+            result = std_result
+            template_used = "padrao"
+
     if result is None:
-        if template == "sae":
+        if template_used == "sae":
             try:
                 from omr.detector_sae import detect_sae_corners as _dm_sae
                 det = _dm_sae(image)
@@ -413,12 +433,14 @@ async def process_omr(
                 return ProcessResponse(success=False, error="Falha ao retificar a imagem SAE (foto muito borrada ou escura). Tente com melhor iluminação.")
             except Exception:
                 return ProcessResponse(success=False, error="Âncoras SAE não detectadas ou geometria inválida")
-        # diagnóstico fino para UX
+        # diagnóstico fino para UX (padrão falhou E fallback SAE falhou)
         try:
             from omr.detector import detect_markers as _dm, validate_geometry as _vg
+            from omr.detector_sae import detect_sae_corners as _dm_sae
             det = _dm(image)
-            if det.missing_ids:
-                return ProcessResponse(success=False, error=f"Marcadores ArUco não encontrados (faltam IDs {det.missing_ids}). Garanta que os 4 cantos pretos estão visíveis, foto nítida e sem sombra.")
+            sae_det = _dm_sae(image)
+            if det.missing_ids and not sae_det.found:
+                return ProcessResponse(success=False, error=f"Nenhum cartão detectado: faltam ArUco {det.missing_ids} e quadrados SAE ({', '.join(sae_det.missing)}). Garanta que os 4 cantos estão visíveis, foto nítida e sem sombra.")
             if not _vg(det.markers):
                 return ProcessResponse(success=False, error="Geometria dos marcadores inválida — foto torta ou cartão dobrado. Tente de cima, com o cartão plano.")
             # marcadores ok mas falha no warp/QR — ainda processa? aqui é caso de blur extremo
@@ -449,6 +471,7 @@ async def process_omr(
         all_ratios={str(k): v for k, v in result.all_ratios.items()},
         card_id=result.qr_id,
         rectified_image=rectified_b64,
+        template_used=template_used,
     )
 
 

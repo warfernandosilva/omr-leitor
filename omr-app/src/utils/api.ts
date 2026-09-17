@@ -28,6 +28,7 @@ export interface ProcessResult {
   allRatios?: Record<number, Record<string, number>>;
   cardId?: string;
   rectifiedImage?: string;
+  templateUsed?: 'padrao' | 'sae';
   error?: string;
 }
 
@@ -104,6 +105,7 @@ export async function processImage(
     ) : undefined,
     cardId: data.card_id || undefined,
     rectifiedImage: data.rectified_image || undefined,
+    templateUsed: data.template_used === 'sae' ? 'sae' : data.template_used === 'padrao' ? 'padrao' : undefined,
     error: data.error,
   };
 }
