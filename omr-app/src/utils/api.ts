@@ -483,6 +483,8 @@ export interface DBExam {
   subject_mat: string;
   questions_per_subject: number;
   layout_mode: 'dual' | 'single';
+  template: 'padrao' | 'sae' | 'colar';
+  sae_spec: Record<string, unknown> | null;
   grade_scale: string;
   answer_key: Record<string, string> | null;
   created_at: string | null;

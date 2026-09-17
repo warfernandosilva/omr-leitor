@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, DEFAULT_SAE_SPEC, SAE_MAX_QUESTIONS } from '../types';
-import { saveExam, getExams, deleteExam } from '../utils/storage';
+import { saveExam, getExams, deleteExam, applyRemoteExams } from '../utils/storage';
 import { MAX_QUESTIONS_PER_SUBJECT, MAX_QUESTIONS_SINGLE } from '../utils/card-template';
-import { syncExam, getExamsFromDB, deleteExamFromDB } from '../utils/api';
+import { syncExam, getExamsFromDB, deleteExamFromDB, checkHealth } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -22,6 +22,8 @@ export default function NewExamPage({ onNavigate }: Props) {
   const [gradeScale, setGradeScale] = useState<Exam['gradeScale']>('0-10');
   const [saved, setSaved] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const isSae = templateType === 'sae';
   const isColar = templateType === 'colar';
@@ -29,32 +31,36 @@ export default function NewExamPage({ onNavigate }: Props) {
   const maxQps = !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
   const totalQuestions = isCustom || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
 
-  useEffect(() => {
-    getExamsFromDB().then(dbExams => {
+  const refreshFromServer = async (silent: boolean) => {
+    if (syncing) return;
+    if (!(await checkHealth())) {
+      if (!silent) setSyncMsg('Backend inalcançável — confira se está rodando.');
+      return;
+    }
+    setSyncing(true);
+    try {
+      const dbExams = await getExamsFromDB();
+      const stats = applyRemoteExams(dbExams, user?.id);
       const local = getExams(user?.id);
-      const localIds = new Set(local.map(e => e.id));
-      for (const db of dbExams) {
-        if (!localIds.has(db.external_id)) {
-          saveExam({
-            id: db.external_id,
-            name: db.titulo,
-            subjectLP: db.subject_lp,
-            subjectMat: db.subject_mat,
-            questionsPerSubject: db.questions_per_subject,
-            totalQuestions: db.layout_mode === 'single' ? db.questions_per_subject : db.questions_per_subject * 2,
-            createdAt: db.created_at || new Date().toISOString(),
-            gradeScale: (db.grade_scale as Exam['gradeScale']) || '0-10',
-            answerKey: (db.answer_key as Record<number, string> | null) || null,
-            layoutMode: db.layout_mode as Exam['layoutMode'],
-          }, user?.id);
-        }
-      }
       const dbIds = new Set(dbExams.map(d => d.external_id));
       for (const ex of local) {
         if (!dbIds.has(ex.id)) syncExam(ex).catch(() => {});
       }
       setExams(getExams(user?.id));
-    }).catch(() => {});
+      const total = stats.added + stats.updated;
+      setSyncMsg(total > 0
+        ? `Provas atualizadas do servidor (+${stats.added} novas, ${stats.updated} atualizadas).`
+        : (silent ? null : 'Provas já atualizadas.'));
+    } catch {
+      if (!silent) setSyncMsg('Falha ao buscar provas do servidor.');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshFromServer(true).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
   const handleQpsChange = (raw: string) => {
@@ -311,7 +317,18 @@ export default function NewExamPage({ onNavigate }: Props) {
 
       {exams.length > 0 && (
         <div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-3">Provas Cadastradas</h2>
+          <div className="flex items-center justify-between mb-3 max-w-2xl">
+            <h2 className="text-lg font-semibold text-gray-900">Provas Cadastradas</h2>
+            <button
+              type="button"
+              onClick={() => refreshFromServer(false)}
+              disabled={syncing}
+              className="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+            >
+              {syncing ? 'Atualizando...' : '⟳ Atualizar do servidor'}
+            </button>
+          </div>
+          {syncMsg && <p className="text-xs text-gray-500 mb-2">{syncMsg}</p>}
           <div className="space-y-2 max-w-2xl">
             {exams.map((exam) => (
               <div key={exam.id} className="card flex items-center justify-between p-4">

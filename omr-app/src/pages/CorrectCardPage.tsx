@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, StudentResult, isSaeExam, isSaeFamilyExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
-import { getExams, saveResult } from '../utils/storage';
+import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
   processImage as apiProcessImage, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
+  getExamsFromDB, checkHealth,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
@@ -71,7 +72,32 @@ function countResults(
 export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const { user } = useAuth();
   const userId = user?.id;
-  const exams = getExams(userId);
+  const [exams, setExams] = useState<Exam[]>(() => getExams(userId));
+  const [syncMsg, setSyncMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+
+  // Traz provas/gabaritos do servidor (fonte oficial). Servidor vence conflitos.
+  const refreshExamsFromServer = async (silent: boolean) => {
+    if (!userId || syncing) return;
+    if (!(await checkHealth())) {
+      if (!silent) setSyncMsg('Backend inalcançável — confira se está rodando.');
+      return;
+    }
+    setSyncing(true);
+    try {
+      const remote = await getExamsFromDB();
+      const stats = applyRemoteExams(remote, userId);
+      setExams(getExams(userId));
+      const total = stats.added + stats.updated;
+      setSyncMsg(total > 0
+        ? `Provas atualizadas do servidor (+${stats.added} novas, ${stats.updated} atualizadas).`
+        : (silent ? null : 'Provas já atualizadas.'));
+    } catch {
+      if (!silent) setSyncMsg('Falha ao buscar provas do servidor.');
+    } finally {
+      setSyncing(false);
+    }
+  };
   const [selectedExamId, setSelectedExamId] = useState(examId || '');
   const [studentName, setStudentName] = useState('');
   const [step, setStep] = useState<'form' | 'capture' | 'processing' | 'review' | 'saved'>('form');
@@ -93,30 +119,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Se celular tem provas vazias mas está logado, tenta sincronizar uma vez do servidor (sem quebrar a página)
+  // Auto-merge ao abrir a correção: gabarito preenchido no PC chega ao celular.
+  // (Servidor vence conflitos; provas só-locais são preservadas.)
   useEffect(() => {
-    if (exams.length > 0 || !userId) return;
-    let cancelled = false;
-    import('../utils/api').then(({ getExamsFromDB }) => getExamsFromDB().then(remote => {
-      if (cancelled || !remote.length) return;
-      import('../utils/storage').then(({ saveExam }) => {
-        for (const av of remote) {
-          saveExam({
-            id: av.external_id, name: av.titulo, subjectLP: av.subject_lp, subjectMat: av.subject_mat,
-            questionsPerSubject: av.questions_per_subject,
-            totalQuestions: av.layout_mode === 'single' ? av.questions_per_subject : av.questions_per_subject * 2,
-            createdAt: av.created_at || new Date().toISOString(),
-            gradeScale: av.grade_scale as Exam['gradeScale'],
-            answerKey: av.answer_key as Record<number, string> | null,
-            layoutMode: av.layout_mode as Exam['layoutMode'],
-          }, userId);
-        }
-        if (!cancelled) window.location.reload();
-      });
-    }).catch(()=>{}) );
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    refreshExamsFromServer(true).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -703,7 +711,20 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       {mode === 'individual' && step === 'form' && (
         <div className="card max-w-2xl space-y-4">
           <div>
-              <label className="label">Selecione a Prova *</label>
+              <div className="flex items-center justify-between">
+                <label className="label">Selecione a Prova *</label>
+                <button
+                  type="button"
+                  onClick={() => refreshExamsFromServer(false)}
+                  disabled={syncing}
+                  className="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                >
+                  {syncing ? 'Atualizando...' : '⟳ Atualizar do servidor'}
+                </button>
+              </div>
+              {syncMsg && (
+                <p className="text-xs text-gray-500 mb-1">{syncMsg}</p>
+              )}
               {exams.length === 0 ? (
                 <div className="text-sm text-gray-500">
                   <p>Nenhuma prova cadastrada neste aparelho.</p>

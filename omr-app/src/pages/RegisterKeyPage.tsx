@@ -20,6 +20,8 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   const [selectedExamId, setSelectedExamId] = useState(examId || '');
   const [answerKey, setAnswerKey] = useState<Record<number, string>>({});
   const [saved, setSaved] = useState(false);
+  const [serverState, setServerState] = useState<'idle' | 'saving' | 'ok' | 'error'>('idle');
+  const [serverError, setServerError] = useState<string | null>(null);
 
   useEffect(() => {
     if (examId) {
@@ -44,6 +46,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   const handleSetAnswer = (q: number, answer: string) => {
     setAnswerKey(prev => ({ ...prev, [q]: answer }));
     setSaved(false);
+    setServerState('idle');
   };
 
   const handleSave = async () => {
@@ -55,7 +58,14 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
     }
 
     saveExam({ ...activeExam, answerKey }, userId);
-    putAnswerKeyDB(activeExam.id, answerKey).catch(() => {});
+    setServerState('saving');
+    try {
+      await putAnswerKeyDB(activeExam.id, answerKey);
+      setServerState('ok');
+    } catch (err) {
+      setServerState('error');
+      setServerError(err instanceof Error ? err.message : 'Falha ao salvar no servidor.');
+    }
     setSaved(true);
   };
 
@@ -67,6 +77,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
     }
     setAnswerKey(newKey);
     setSaved(false);
+    setServerState('idle');
   };
 
   const filledCount = Object.keys(answerKey).length;
@@ -153,6 +164,13 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
               {saved && (
                 <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm">
                   Gabarito salvo com sucesso!
+                  {serverState === 'saving' && <span className="block text-xs mt-1">Enviando ao servidor...</span>}
+                  {serverState === 'ok' && <span className="block text-xs mt-1">✔ Salvo no servidor — disponível no celular.</span>}
+                  {serverState === 'error' && (
+                    <span className="block text-xs mt-1 text-red-600">
+                      ✖ Só neste aparelho! Falha ao salvar no servidor: {serverError} Verifique o backend e salve de novo.
+                    </span>
+                  )}
                 </div>
               )}
 

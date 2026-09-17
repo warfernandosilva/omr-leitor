@@ -1,4 +1,5 @@
-import { Exam, StudentResult } from '../types';
+import { Exam, StudentResult, SaeSpec, DEFAULT_SAE_SPEC } from '../types';
+import type { DBExam } from './api';
 
 const STORAGE_KEY = 'omr-app-data';
 
@@ -30,6 +31,8 @@ function migrateExam(raw: unknown): Exam {
     gradeScale: e.gradeScale || '0-10',
     answerKey: e.answerKey || null,
     layoutMode: e.layoutMode === 'single' ? 'single' : 'dual',
+    templateType: e.templateType === 'sae' || e.templateType === 'colar' ? e.templateType : undefined,
+    saeSpec: e.saeSpec,
   };
 }
 
@@ -71,6 +74,84 @@ export function saveExam(exam: Exam, userId?: string | number): void {
   if (idx >= 0) data.exams[idx] = exam;
   else data.exams.push(exam);
   saveData(data, userId);
+}
+
+export interface MergeStats {
+  added: number;
+  updated: number;
+}
+
+function remoteSaeSpec(raw: Record<string, unknown> | null | undefined): SaeSpec | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const get = (k: keyof SaeSpec, fb: string): string =>
+    typeof raw[k as string] === 'string' ? String(raw[k as string]) : fb;
+  const titulo = Array.isArray(raw.titulo) && (raw.titulo as unknown[]).every(t => typeof t === 'string')
+    ? (raw.titulo as string[]).slice(0, 4)
+    : [...DEFAULT_SAE_SPEC.titulo];
+  while (titulo.length < 4) titulo.push('');
+  return {
+    ano: get('ano', DEFAULT_SAE_SPEC.ano),
+    programa_linha1: get('programa_linha1', DEFAULT_SAE_SPEC.programa_linha1),
+    programa_linha2: get('programa_linha2', DEFAULT_SAE_SPEC.programa_linha2),
+    titulo,
+    caderno: get('caderno', DEFAULT_SAE_SPEC.caderno),
+    disciplina: get('disciplina', DEFAULT_SAE_SPEC.disciplina),
+    serie: get('serie', DEFAULT_SAE_SPEC.serie),
+    qr_payload: get('qr_payload', DEFAULT_SAE_SPEC.qr_payload),
+    codigo_barras: get('codigo_barras', DEFAULT_SAE_SPEC.codigo_barras),
+  };
+}
+
+/**
+ * Mescla provas vindas do servidor (fonte oficial) com as locais.
+ * - Insere as ausentes; o SERVIDOR vence nos campos espelhados (inclui answerKey).
+ * - Provas só-locais são preservadas. createdAt local é mantido se o remoto não trouxer.
+ */
+export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exam[]; stats: MergeStats } {
+  const merged = local.map(e => ({ ...e }));
+  const byId = new Map(merged.map(e => [e.id, e]));
+  let added = 0, updated = 0;
+
+  for (const db of remote) {
+    const layoutMode = db.layout_mode === 'single' ? 'single' : 'dual';
+    const templateType = db.template === 'sae' || db.template === 'colar' ? db.template : undefined;
+    const qps = db.questions_per_subject;
+    const exam: Exam = {
+      id: db.external_id,
+      name: db.titulo,
+      subjectLP: db.subject_lp,
+      subjectMat: db.subject_mat,
+      questionsPerSubject: qps,
+      totalQuestions: layoutMode === 'single' ? qps : qps * 2,
+      createdAt: db.created_at || byId.get(db.external_id)?.createdAt || new Date().toISOString(),
+      gradeScale: (db.grade_scale as Exam['gradeScale']) || '0-10',
+      answerKey: (db.answer_key as Record<number, string> | null) || null,
+      layoutMode,
+      templateType,
+      saeSpec: templateType === 'sae' ? remoteSaeSpec(db.sae_spec) : undefined,
+    };
+    const prev = byId.get(db.external_id);
+    if (!prev) {
+      merged.push(exam);
+      byId.set(exam.id, exam);
+      added++;
+    } else {
+      const before = JSON.stringify({ ...prev, createdAt: undefined });
+      Object.assign(prev, exam, { createdAt: prev.createdAt || exam.createdAt });
+      const after = JSON.stringify({ ...prev, createdAt: undefined });
+      if (before !== after) updated++;
+    }
+  }
+  return { merged, stats: { added, updated } };
+}
+
+/** Aplica o merge direto no localStorage. Retorna estatísticas. */
+export function applyRemoteExams(remote: DBExam[], userId?: string | number): MergeStats {
+  const data = loadData(userId);
+  const { merged, stats } = mergeRemoteExams(data.exams, remote);
+  data.exams = merged;
+  saveData(data, userId);
+  return stats;
 }
 
 export function deleteExam(id: string, userId?: string | number): void {
