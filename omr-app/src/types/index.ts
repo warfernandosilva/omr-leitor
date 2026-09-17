@@ -9,8 +9,8 @@ export interface Exam {
   gradeScale: '0-10' | '0-100' | 'count';
   answerKey: Record<number, string> | null;
   layoutMode?: 'dual' | 'single';
-  /** Modelo do cartão: 'padrao' (ArUco) ou 'sae' (Avaliação Contínua, quadrados). */
-  templateType?: 'padrao' | 'sae';
+  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua) ou 'colar' (Colar em Avaliação, só grade). */
+  templateType?: 'padrao' | 'sae' | 'colar';
   /** Cabeçalho editável do cartão SAE (só quando templateType === 'sae'). */
   saeSpec?: SaeSpec;
 }
@@ -44,6 +44,17 @@ export const SAE_MAX_QUESTIONS = 28;
 
 export function isSaeExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'sae';
+}
+
+/** SAE e Colar compartilham a mesma geometria de grade/âncoras (leitura e overlay). */
+export function isSaeFamilyExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
+  return exam?.templateType === 'sae' || exam?.templateType === 'colar';
+}
+
+export function templateLabel(t?: Exam['templateType']): string {
+  if (t === 'sae') return 'Avaliação Contínua';
+  if (t === 'colar') return 'Colar em Avaliação';
+  return 'Padrão';
 }
 
 export interface OMRResult {

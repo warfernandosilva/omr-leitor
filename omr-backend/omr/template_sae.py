@@ -129,23 +129,16 @@ def _dashed_rect(d: ImageDraw.ImageDraw, box: tuple[int, int, int, int],
         y += 14
 
 
-def generate_sae_card(
-    spec: SaeSpec | None = None,
-    student_name: str | None = None,
-    qr_override: str | None = None,
-) -> np.ndarray:
-    spec = spec or SaeSpec()
-    n = spec.clamped_questions()
-    name = (student_name or spec.nome_aluno or "").strip()
-    qr_data = (qr_override or spec.qr_payload or "").strip() or "SAE"
-
-    img = np.ones((PAGE_H, PAGE_W, 3), dtype=np.uint8) * 255
-    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    d = ImageDraw.Draw(pil)
-
+def _draw_sae_header(
+    d: ImageDraw.ImageDraw,
+    pil: Image.Image,
+    spec: SaeSpec,
+    name: str,
+    qr_data: str,
+) -> None:
+    """Desenha todo o cabeçalho (topo, badge, ficha cinza, QR, nome, nascimento)."""
     black = (0, 0, 0)
     gray_text = (90, 102, 102)
-    num_bg = (215, 219, 219)
     card_bg = (238, 241, 241)
     card_line = (154, 165, 165)
     accent = (125, 139, 140)
@@ -227,6 +220,30 @@ def generate_sae_card(
             d.line([(lx, box_y0), (lx, box_y1)], fill=card_line, width=2)
         gx += gw + 24
 
+
+def generate_sae_card(
+    spec: SaeSpec | None = None,
+    student_name: str | None = None,
+    qr_override: str | None = None,
+    header: bool = True,
+) -> np.ndarray:
+    spec = spec or SaeSpec()
+    n = spec.clamped_questions()
+    name = (student_name or spec.nome_aluno or "").strip()
+    qr_data = (qr_override or spec.qr_payload or "").strip() or "SAE"
+
+    img = np.ones((PAGE_H, PAGE_W, 3), dtype=np.uint8) * 255
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    d = ImageDraw.Draw(pil)
+
+    black = (0, 0, 0)
+    gray_text = (90, 102, 102)
+    num_bg = (215, 219, 219)
+    card_line = (154, 165, 165)
+
+    if header:
+        _draw_sae_header(d, pil, spec, name, qr_data)
+
     # ─── Âncoras ───
     for cx, cy in CORNER_CENTERS.values():
         x0, y0 = cx - CORNER_SIZE // 2, cy - CORNER_SIZE // 2
@@ -269,13 +286,25 @@ def generate_sae_card(
             if r < last_r:
                 _dashed_hline(d, bx, bx + SAE_BLOCK_W, y + SAE_ROW_STEP // 2, card_line)
 
-    # ─── Código de barras (texto) ───
-    font_bar = load_font(34)
-    bbox = d.textbbox((0, 0), spec.codigo_barras or "", font=font_bar)
-    d.text((1300 - (bbox[2] - bbox[0]), 1900), spec.codigo_barras or "",
-           fill=black, font=font_bar)
+    # ─── Código de barras (texto, só com cabeçalho) ───
+    if header:
+        font_bar = load_font(34)
+        bbox = d.textbbox((0, 0), spec.codigo_barras or "", font=font_bar)
+        d.text((1300 - (bbox[2] - bbox[0]), 1900), spec.codigo_barras or "",
+               fill=black, font=font_bar)
 
     return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+
+
+def generate_colar_card(n_questoes: int = 26) -> np.ndarray:
+    """Cartão 'Colar em Avaliação': só âncoras + grade (sem cabeçalho/QR)."""
+    return generate_sae_card(SaeSpec(n_questoes=n_questoes), header=False)
+
+
+def generate_colar_card_bytes(fmt: str = "PNG", n_questoes: int = 26) -> bytes:
+    img = generate_colar_card(n_questoes)
+    pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    buf = io.BytesIO(); pil.save(buf, format=fmt); return buf.getvalue()
 
 
 def generate_sae_card_png(output_path: str | Path, spec: SaeSpec | None = None, **kw) -> Path:
@@ -335,6 +364,9 @@ SAE_COORDS = {
     "max_questions": SAE_MAX_QUESTIONS,
     "qr_size": SAE_QR_SIZE, "qr_pos": list(SAE_QR_POS),
 }
+
+# "Colar em Avaliação": mesma geometria do SAE (só âncoras + grade).
+COLAR_COORDS = dict(SAE_COORDS)
 
 
 if __name__ == "__main__":

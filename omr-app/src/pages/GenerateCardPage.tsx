@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
-import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, isSaeExam } from '../types';
+import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, isSaeExam, templateLabel } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { generateBlankCard, checkHealth, syncExam } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
@@ -37,6 +37,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
     : exam ?? undefined;
 
   const isSae = isSaeExam(activeExam);
+  const isColar = activeExam?.templateType === 'colar';
 
   // Carrega o cabeçalho SAE salvo na prova ao trocar de prova
   useEffect(() => {
@@ -141,7 +142,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
     try {
       const blob = await buildServerPdf();
       if (blob) {
-        downloadBlob(blob, `${isSae ? 'cartao-sae' : 'cartao-resposta'}-${cardId}.pdf`);
+        downloadBlob(blob, `${isColar ? 'colar-avaliacao' : isSae ? 'cartao-sae' : 'cartao-resposta'}-${cardId}.pdf`);
         setSourceNote('PDF gerado pelo servidor — idêntico aos gabaritos oficiais (sem QR/nome).');
         return;
       }
@@ -203,7 +204,12 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
               {activeExam && (
                 <div className="bg-gray-50 rounded-lg p-4 text-sm">
                   <p><strong>Prova:</strong> {activeExam.name}</p>
-                  {isSae ? (
+                  {isColar ? (
+                    <>
+                      <p><strong>Modelo:</strong> Colar em Avaliação (só o gabarito, sem cabeçalho)</p>
+                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                    </>
+                  ) : isSae ? (
                     <>
                       <p><strong>Modelo:</strong> Avaliação Contínua (cabeçalho editável abaixo)</p>
                       <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
@@ -328,11 +334,11 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
                   </PDFDownloadLink>
                 </div>
               </div>
-            ) : isSae ? (
+            ) : isSae || isColar ? (
               <div className="print-answer-card shadow-2xl flex items-center justify-center p-8 text-center text-sm text-gray-500">
                 {loadingPng
                   ? 'Carregando prévia do servidor...'
-                  : 'A prévia do cartão “Avaliação Contínua” é gerada pelo backend Python. Verifique se o backend está rodando e recarregue a página.'}
+                  : `A prévia do cartão "${templateLabel(activeExam.templateType)}" é gerada pelo backend Python. Verifique se o backend está rodando e recarregue a página.`}
               </div>
             ) : (
               <div className="print-answer-card shadow-2xl" style={{ position: 'relative' }}>
@@ -347,7 +353,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
         )}
       </div>
 
-      {showPreview && activeExam && !isSae && (
+      {showPreview && activeExam && !isSae && !isColar && (
         <div id="print-card" className="print-answer-card" style={{ position: 'fixed', left: -10000, top: 0, zIndex: -1 }}>
           <AnswerCard exam={activeExam} cardId={cardId} />
         </div>

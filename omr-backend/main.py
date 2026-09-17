@@ -42,6 +42,7 @@ from omr.template import (
 )
 from omr.template_sae import (
     SaeSpec, generate_sae_card_bytes, build_sae_batch_pdf, SAE_COORDS,
+    generate_colar_card_bytes, COLAR_COORDS,
 )
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
@@ -126,7 +127,7 @@ class CardRequest(BaseModel):
     format: str = "PNG"  # PNG ou PDF
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae
+    template: str = "padrao"  # padrao | sae | colar
     sae: SaeSpecRequest | None = None
 
 
@@ -151,7 +152,7 @@ class ExamSyncRequest(BaseModel):
     subject_mat: str = "MATEMÁTICA"
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae
+    template: str = "padrao"  # padrao | sae | colar
     sae: SaeSpecRequest | None = None  # cabeçalho editável (só SAE)
     grade_scale: str | None = None
     answer_key: dict | None = None
@@ -211,6 +212,11 @@ def template_coords():
 @app.get("/api/template/sae-coords")
 def template_sae_coords():
     return SAE_COORDS
+
+
+@app.get("/api/template/colar-coords")
+def template_colar_coords():
+    return COLAR_COORDS
 
 
 # ─── Auth ───
@@ -348,7 +354,7 @@ async def process_omr(
     file: UploadFile = File(...),
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
-    template: str = Form("padrao"),  # padrao | sae (sae: questions_per_subject = total)
+    template: str = Form("padrao"),  # padrao | sae | colar (colar: mesma grade do sae, sem QR)
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa uma imagem (foto/scan) do cartão preenchido."""
@@ -397,8 +403,8 @@ async def process_omr(
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
 
     result: OMRResult | None
-    template_used = template if template in ("padrao", "sae") else "padrao"
-    if template_used == "sae":
+    template_used = template if template in ("padrao", "sae", "colar") else "padrao"
+    if template_used in ("sae", "colar"):
         result = process_sae_image(image, n_questions=questions_per_subject)
     else:
         result = process_image(
@@ -410,12 +416,13 @@ async def process_omr(
     # Fallback cruzado: clientes antigos (app de captura no celular, Flutter)
     # não enviam `template` — se o modelo pedido falhar, tenta o outro antes
     # de desistir. A resposta indica qual foi usado (template_used).
+    # (colar tem a mesma geometria do sae: o fallback "sae" o cobre.)
     if result is None and template_used == "padrao":
         sae_result = process_sae_image(image, n_questions=questions_per_subject)
         if sae_result is not None:
             result = sae_result
             template_used = "sae"
-    elif result is None and template_used == "sae":
+    elif result is None and template_used in ("sae", "colar"):
         std_result = process_image(
             image,
             questions_per_subject=questions_per_subject,
@@ -426,7 +433,7 @@ async def process_omr(
             template_used = "padrao"
 
     if result is None:
-        if template_used == "sae":
+        if template_used in ("sae", "colar"):
             try:
                 from omr.detector_sae import detect_sae_corners as _dm_sae
                 det = _dm_sae(image)
@@ -525,6 +532,22 @@ def grade_omr(req: GradeRequest, current_user: User = Depends(auth.get_current_u
 def generate_card_endpoint(req: CardRequest, current_user: User = Depends(auth.get_current_user)):
     """Gera cartão-resposta EM BRANCO como imagem — mesmo desenho dos oficiais."""
     fmt = req.format.upper()
+
+    if req.template == "colar":
+        # "Colar em Avaliação": só âncoras + grade, sem cabeçalho/QR
+        from omr.template_sae import SAE_MAX_QUESTIONS
+        n = max(1, min(SAE_MAX_QUESTIONS, int(req.questions_per_subject or 26)))
+        if fmt == "PDF":
+            data = generate_colar_card_bytes("PDF", n)
+            media, fname = "application/pdf", "colar-avaliacao.pdf"
+        else:
+            data = generate_colar_card_bytes("PNG", n)
+            media, fname = "image/png", "colar-avaliacao.png"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
 
     if req.template == "sae":
         spec = (req.sae or SaeSpecRequest()).to_spec()
@@ -635,8 +658,8 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     if req.layout_mode not in ("dual", "single"):
         raise HTTPException(status_code=400, detail="layout_mode deve ser 'dual' ou 'single'")
     av.layout_mode = req.layout_mode
-    if req.template not in ("padrao", "sae"):
-        raise HTTPException(status_code=400, detail="template deve ser 'padrao' ou 'sae'")
+    if req.template not in ("padrao", "sae", "colar"):
+        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae' ou 'colar'")
     av.template = req.template
     if req.sae is not None:
         spec = req.sae.to_spec()
@@ -784,6 +807,11 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
     """
     av = _get_avaliacao(db, external_id)
     auth.require_owner_or_admin(av, current_user)
+    if (av.template or "padrao") == "colar":
+        raise HTTPException(
+            status_code=400,
+            detail="Modelo 'Colar em Avaliação' é avulso (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.",
+        )
     gabaritos = db.scalars(
         select(GabaritoNomeado)
         .where(GabaritoNomeado.avaliacao_id == av.id)

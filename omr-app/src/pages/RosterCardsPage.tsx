@@ -62,6 +62,8 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
 
   const students = result?.students ?? [];
   const n = students.length;
+  const isColarExam = activeExam?.templateType === 'colar';
+  const COLAR_BLOCK_MSG = 'Provas "Colar em Avaliação" são avulsas (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -98,6 +100,7 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
 
   const handleImportOnly = async () => {
     if (!activeExam || !result || n === 0) return;
+    if (isColarExam) { setGenError(COLAR_BLOCK_MSG); return; }
     setImportingOnly(true);
     setGenError(null);
     setStage('');
@@ -126,6 +129,7 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
 
   const handleGenerate = async () => {
     if (!activeExam || !result || n === 0) return;
+    if (isColarExam) { setGenError(COLAR_BLOCK_MSG); return; }
     setGenError(null);
     setStep('generating');
     try {
@@ -276,6 +280,11 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
                     <option key={x.id} value={x.id}>{x.name}</option>
                   ))}
                 </select>
+              )}
+              {isColarExam && (
+                <p className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+                  {COLAR_BLOCK_MSG}
+                </p>
               )}
             </div>
 

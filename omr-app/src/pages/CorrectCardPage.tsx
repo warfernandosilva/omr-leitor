@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, StudentResult, isSaeExam } from '../types';
+import { AppView, Exam, StudentResult, isSaeExam, isSaeFamilyExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult } from '../utils/storage';
 import {
@@ -121,9 +121,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   // Geometria do overlay: prefere o modelo DETECTADO pelo backend (fallback
   // cruzado) e avisa se divergir do modelo da prova selecionada.
-  const overlaySae = omrResult?.templateUsed ? omrResult.templateUsed === 'sae' : isSaeExam(activeExam);
+  // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay.
+  const detectedIsFamily = omrResult?.templateUsed === 'sae' || omrResult?.templateUsed === 'colar';
+  const overlaySae = omrResult?.templateUsed ? detectedIsFamily : isSaeFamilyExam(activeExam);
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
-    && (omrResult.templateUsed === 'sae') !== isSaeExam(activeExam);
+    && detectedIsFamily !== isSaeFamilyExam(activeExam);
 
   const startCamera = async () => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -221,7 +223,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
-      const templateUsado = isSaeExam(activeExam) ? 'sae' : 'padrao';
+      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaeExam(activeExam) ? 'sae' : 'padrao';
       const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado);
       setProcessingProgress(100);
 
@@ -930,9 +932,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           {templateMismatch && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
               <strong>Atenção:</strong> o cartão fotografado é do modelo{' '}
-              <strong>{omrResult?.templateUsed === 'sae' ? 'Avaliação Contínua' : 'Padrão'}</strong>,
+              <strong>{templateLabel(omrResult?.templateUsed)}</strong>,
               mas a prova selecionada usa o modelo{' '}
-              <strong>{isSaeExam(activeExam) ? 'Avaliação Contínua' : 'Padrão'}</strong>.
+              <strong>{templateLabel(activeExam?.templateType)}</strong>.
               A leitura foi feita no modelo detectado — confira se a prova está correta antes de salvar.
             </div>
           )}
