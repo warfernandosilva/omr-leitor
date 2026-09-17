@@ -40,7 +40,11 @@ from omr.template import (
     generate_card, generate_card_png,
     generate_card_bytes, build_batch_pdf, TEMPLATE_COORDS,
 )
+from omr.template_sae import (
+    SaeSpec, generate_sae_card_bytes, build_sae_batch_pdf, SAE_COORDS,
+)
 from omr.reader import process_image, OMRResult
+from omr.reader_sae import process_sae_image
 from omr.grading import grade, GradingResult
 
 app = FastAPI(title="OMR Backend", version="2.0.0")
@@ -92,12 +96,37 @@ class GradeResponse(BaseModel):
     total_questions: int
 
 
+class SaeSpecRequest(BaseModel):
+    """Todos os campos editáveis do cartão SAE (defaults = imagem de referência)."""
+    ano: str = "2026"
+    programa_linha1: str = "AVALIAÇÃO CONTÍNUA DA APRENDIZAGEM"
+    programa_linha2: str = "NOS ANOS FINAIS - CICLO II"
+    titulo: list[str] = ["AVALIAÇÃO CONTÍNUA", "DA APRENDIZAGEM", "NOS ANOS FINAIS", "CICLO II"]
+    caderno: str = "M0901"
+    disciplina: str = "MATEMÁTICA"
+    serie: str = "9º ano do Ensino Fundamental"
+    qr_payload: str = "2269M0901"
+    n_questoes: int = 26
+    codigo_barras: str = "6357256532"
+
+    def to_spec(self) -> SaeSpec:
+        return SaeSpec(
+            ano=self.ano, programa_linha1=self.programa_linha1,
+            programa_linha2=self.programa_linha2, titulo=list(self.titulo or []),
+            caderno=self.caderno, disciplina=self.disciplina, serie=self.serie,
+            qr_payload=self.qr_payload, n_questoes=self.n_questoes,
+            codigo_barras=self.codigo_barras,
+        )
+
+
 class CardRequest(BaseModel):
     subject_lp: str = "LÍNGUA PORTUGUESA"
     subject_mat: str = "MATEMÁTICA"
     format: str = "PNG"  # PNG ou PDF
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
+    template: str = "padrao"  # padrao | sae
+    sae: SaeSpecRequest | None = None
 
 
 class BatchStudent(BaseModel):
@@ -174,6 +203,11 @@ def health():
 @app.get("/api/template/coords")
 def template_coords():
     return TEMPLATE_COORDS
+
+
+@app.get("/api/template/sae-coords")
+def template_sae_coords():
+    return SAE_COORDS
 
 
 # ─── Auth ───
@@ -311,6 +345,7 @@ async def process_omr(
     file: UploadFile = File(...),
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
+    template: str = Form("padrao"),  # padrao | sae (sae: questions_per_subject = total)
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa uma imagem (foto/scan) do cartão preenchido."""
@@ -358,13 +393,26 @@ async def process_omr(
     if image is None:
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
 
-    result: OMRResult | None = process_image(
-        image,
-        questions_per_subject=questions_per_subject,
-        layout_mode=layout_mode,
-    )
+    result: OMRResult | None
+    if template == "sae":
+        result = process_sae_image(image, n_questions=questions_per_subject)
+    else:
+        result = process_image(
+            image,
+            questions_per_subject=questions_per_subject,
+            layout_mode=layout_mode,
+        )
 
     if result is None:
+        if template == "sae":
+            try:
+                from omr.detector_sae import detect_sae_corners as _dm_sae
+                det = _dm_sae(image)
+                if not det.found:
+                    return ProcessResponse(success=False, error=f"Quadrados dos cantos não encontrados (faltam: {', '.join(det.missing)}). Garanta que os 4 quadrados pretos estão visíveis, foto nítida e sem sombra.")
+                return ProcessResponse(success=False, error="Falha ao retificar a imagem SAE (foto muito borrada ou escura). Tente com melhor iluminação.")
+            except Exception:
+                return ProcessResponse(success=False, error="Âncoras SAE não detectadas ou geometria inválida")
         # diagnóstico fino para UX
         try:
             from omr.detector import detect_markers as _dm, validate_geometry as _vg
@@ -451,6 +499,22 @@ def grade_omr(req: GradeRequest, current_user: User = Depends(auth.get_current_u
 @app.post("/api/card/generate")
 def generate_card_endpoint(req: CardRequest, current_user: User = Depends(auth.get_current_user)):
     """Gera cartão-resposta EM BRANCO como imagem — mesmo desenho dos oficiais."""
+    fmt = req.format.upper()
+
+    if req.template == "sae":
+        spec = (req.sae or SaeSpecRequest()).to_spec()
+        if fmt == "PDF":
+            data = generate_sae_card_bytes("PDF", spec)
+            media, fname = "application/pdf", "cartao-sae.pdf"
+        else:
+            data = generate_sae_card_bytes("PNG", spec)
+            media, fname = "image/png", "cartao-sae.png"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
     kw = dict(
         questions_per_subject=req.questions_per_subject,
         layout_mode=req.layout_mode,

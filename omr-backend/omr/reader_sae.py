@@ -1,0 +1,122 @@
+"""
+Leitor OMR do modelo SAE (Avaliação Contínua).
+
+Pipeline:
+1. Detectar 4 quadrados -> homografia foto->template 1448×2048
+2. Warp + CLAHE + checagem de blur
+3. QR Code da ficha cinza (identifica o cartão)
+4. Leitura das bolhas A–D (reaproveita _bubble_score e limiares do modelo padrão)
+"""
+
+from __future__ import annotations
+
+import cv2
+import numpy as np
+
+from .config import BLUR_BLOCK, FLOOR, LOW_CONF_THRESHOLD, MARGIN
+from .detector_sae import detect_sae_corners, sae_homography
+from .reader import OMRResult, _bubble_score, _decode_qr_from
+from .template_sae import (
+    PAGE_W, PAGE_H,
+    SAE_BLOCKS_X, SAE_BUBBLE_DX, SAE_BUBBLE_RADIUS,
+    SAE_FIRST_ROW_Y, SAE_ROW_STEP, SAE_ROWS_PER_BLOCK,
+    SAE_MAX_QUESTIONS,
+    SAE_QR_POS, SAE_QR_SIZE,
+    sae_block_rows,
+)
+
+
+def _decode_sae_qr(gray_rectified: np.ndarray) -> str | None:
+    qx, qy = SAE_QR_POS
+    half = SAE_QR_SIZE // 2 + 40
+    cx, cy = qx + SAE_QR_SIZE // 2, qy + SAE_QR_SIZE // 2
+    h, w = gray_rectified.shape[:2]
+    x0 = max(0, int(cx - half)); y0 = max(0, int(cy - half))
+    x1 = min(w, int(cx + half)); y1 = min(h, int(cy + half))
+    if x1 <= x0 or y1 <= y0:
+        return None
+    crop = gray_rectified[y0:y1, x0:x1]
+    data = _decode_qr_from(crop)
+    if data:
+        return data
+    big = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+    return _decode_qr_from(big)
+
+
+def process_sae_image(
+    image: np.ndarray,
+    n_questions: int | None = None,
+) -> OMRResult | None:
+    """Pipeline completo OMR-SAE. n_questions = total de questões (1..28)."""
+    n = max(1, min(SAE_MAX_QUESTIONS, int(n_questions or 26)))
+
+    det = detect_sae_corners(image)
+    if not det.found:
+        return None
+
+    M = sae_homography(det.centers)
+    if M is None:
+        return None
+    try:
+        rectified = cv2.warpPerspective(image, M, (PAGE_W, PAGE_H))
+    except cv2.error:
+        return None
+
+    gray = cv2.cvtColor(rectified, cv2.COLOR_BGR2GRAY) if len(rectified.shape) == 3 else rectified
+
+    blur_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    if blur_var < BLUR_BLOCK:
+        return None
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    qr_id = _decode_sae_qr(gray)
+
+    letters = ["A", "B", "C", "D"]
+    # Máscara um pouco menor que a bolha: ignora o contorno impresso e mede
+    # só o interior (marca de lápis/caneta). Bolhas vazias ≈ 0.05.
+    radius = max(6, int(round(SAE_BUBBLE_RADIUS)) - 2)
+    all_ratios: dict[int, dict[str, float]] = {}
+
+    for q, b, r in sae_block_rows(n):
+        y = SAE_FIRST_ROW_Y + r * SAE_ROW_STEP
+        bx = SAE_BLOCKS_X[b]
+        q_ratios: dict[str, float] = {}
+        for i, dx in enumerate(SAE_BUBBLE_DX):
+            score = _bubble_score(gray, bx + dx, y, radius=radius)
+            q_ratios[letters[i]] = score
+        all_ratios[q] = q_ratios
+
+    answers: dict[int, str] = {}
+    blank: list[int] = []
+    duplicates: list[int] = []
+    dup_marks: dict[int, list[str]] = {}
+    low_conf: list[int] = []
+
+    for q_num, ratios in all_ratios.items():
+        ordered = sorted(ratios.items(), key=lambda kv: kv[1], reverse=True)
+        best_letter, best_score = ordered[0]
+        second_score = ordered[1][1] if len(ordered) > 1 else 0
+
+        if best_score < FLOOR:
+            blank.append(q_num)
+        elif best_score - second_score < MARGIN and best_score > FLOOR:
+            duplicates.append(q_num)
+            dup_marks[q_num] = sorted(l for l, s in ratios.items() if s >= FLOOR)
+        elif best_score < LOW_CONF_THRESHOLD:
+            low_conf.append(q_num)
+            answers[q_num] = best_letter
+        else:
+            answers[q_num] = best_letter
+
+    return OMRResult(
+        answers=answers,
+        blank_questions=blank,
+        duplicate_questions=duplicates,
+        low_confidence=low_conf,
+        all_ratios=all_ratios,
+        rectified=rectified,
+        qr_id=qr_id,
+        duplicate_marks=dup_marks,
+    )

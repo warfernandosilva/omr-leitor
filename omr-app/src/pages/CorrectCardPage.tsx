@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, StudentResult } from '../types';
+import { AppView, Exam, StudentResult, isSaeExam } from '../types';
+import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult } from '../utils/storage';
 import {
   processImage as apiProcessImage, ProcessResult,
@@ -214,7 +215,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
-      const result = await apiProcessImage(file, qpsUsado, modoUsado);
+      const templateUsado = isSaeExam(activeExam) ? 'sae' : 'padrao';
+      const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado);
       setProcessingProgress(100);
 
       setOmrResult(result);
@@ -833,7 +835,30 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
                 {/* overlay SVG na geometria do template 1448x2048 */}
                 <svg viewBox={`0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-                  {(() => { const qYs = questionYFor(activeExam.questionsPerSubject); return Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
+                  {isSaeExam(activeExam) ? (
+                    <g>
+                      {Array.from({ length: activeExam.totalQuestions }, (_, i) => {
+                        const q = i + 1;
+                        return (
+                          <g key={q}>
+                            {[0, 1, 2, 3].map((ci) => {
+                              const letter = ['A', 'B', 'C', 'D'][ci];
+                              const [x, y] = saeBubbleCenter(q, ci);
+                              const key = activeExam.answerKey?.[q];
+                              const isMarked = manualAnswers[q] === letter;
+                              const isCorrect = key ? letter === key : false;
+                              let stroke = '#333'; let fill = 'none'; let sw = 2;
+                              if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
+                              else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
+                              else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
+                              return <circle key={`sae-${q}-${letter}`} cx={x} cy={y} r={SAE_BUBBLE_RADIUS} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                            })}
+                          </g>
+                        );
+                      })}
+                    </g>
+                  ) : (
+                  (() => { const qYs = questionYFor(activeExam.questionsPerSubject); return Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
                     const q = i + 1;
                     const y = qYs[i];
                     const qGlobalPort = q;
@@ -868,9 +893,19 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         })}
                       </g>
                     );
-                  })})()}
+                  })})())
+                  }
                   {/* marcações duplicadas em laranja */}
                   {(omrResult?.duplicateQuestions ?? []).map(q => {
+                    if (isSaeExam(activeExam)) {
+                      const marks = omrResult?.duplicateMarks?.[q] ?? [];
+                      return marks.map(letter => {
+                        const ci = ['A', 'B', 'C', 'D'].indexOf(letter);
+                        if (ci < 0) return null;
+                        const [x, y] = saeBubbleCenter(q, ci);
+                        return <circle key={`dup-${q}-${letter}`} cx={x} cy={y} r={SAE_BUBBLE_RADIUS + 4} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
+                      });
+                    }
                     const y = questionYFor(activeExam.questionsPerSubject)[(q - 1) % activeExam.questionsPerSubject];
                     const isMat = activeExam.layoutMode !== 'single' && q > activeExam.questionsPerSubject;
                     const xs = isMat ? MATHEMATICS_X : PORTUGUESE_X;

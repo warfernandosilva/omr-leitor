@@ -65,15 +65,19 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
+import type { SaeSpec } from '../types';
+
 export async function processImage(
   file: File,
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
+  template?: 'padrao' | 'sae',
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('questions_per_subject', String(questionsPerSubject ?? 22));
   formData.append('layout_mode', layoutMode ?? 'dual');
+  formData.append('template', template ?? 'padrao');
 
   const res = await fetch(`${API_BASE}/api/omr/process`, {
     method: 'POST',
@@ -151,7 +155,7 @@ export async function generateBlankCard(
   subjectLp: string,
   subjectMat: string,
   format: 'PNG' | 'PDF',
-  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single' },
+  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae'; sae?: SaeSpec },
 ): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/card/generate`, {
     method: 'POST',
@@ -162,6 +166,8 @@ export async function generateBlankCard(
       format,
       questions_per_subject: opts?.questionsPerSubject ?? 22,
       layout_mode: opts?.layoutMode ?? 'dual',
+      template: opts?.template ?? 'padrao',
+      sae: opts?.sae ? { ...opts.sae, n_questoes: opts?.questionsPerSubject ?? 26 } : null,
     }),
   });
   if (!res.ok) throw new Error(`Falha ao gerar cartão no servidor (${res.status})`);

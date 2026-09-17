@@ -9,6 +9,41 @@ export interface Exam {
   gradeScale: '0-10' | '0-100' | 'count';
   answerKey: Record<number, string> | null;
   layoutMode?: 'dual' | 'single';
+  /** Modelo do cartão: 'padrao' (ArUco) ou 'sae' (Avaliação Contínua, quadrados). */
+  templateType?: 'padrao' | 'sae';
+  /** Cabeçalho editável do cartão SAE (só quando templateType === 'sae'). */
+  saeSpec?: SaeSpec;
+}
+
+/** Cabeçalho editável do cartão "Avaliação Contínua" (espelha SaeSpec do backend). */
+export interface SaeSpec {
+  ano: string;
+  programa_linha1: string;
+  programa_linha2: string;
+  titulo: string[];
+  caderno: string;
+  disciplina: string;
+  serie: string;
+  qr_payload: string;
+  codigo_barras: string;
+}
+
+export const DEFAULT_SAE_SPEC: SaeSpec = {
+  ano: '2026',
+  programa_linha1: 'AVALIAÇÃO CONTÍNUA DA APRENDIZAGEM',
+  programa_linha2: 'NOS ANOS FINAIS - CICLO II',
+  titulo: ['AVALIAÇÃO CONTÍNUA', 'DA APRENDIZAGEM', 'NOS ANOS FINAIS', 'CICLO II'],
+  caderno: 'M0901',
+  disciplina: 'MATEMÁTICA',
+  serie: '9º ano do Ensino Fundamental',
+  qr_payload: '2269M0901',
+  codigo_barras: '6357256532',
+};
+
+export const SAE_MAX_QUESTIONS = 28;
+
+export function isSaeExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
+  return exam?.templateType === 'sae';
 }
 
 export interface OMRResult {

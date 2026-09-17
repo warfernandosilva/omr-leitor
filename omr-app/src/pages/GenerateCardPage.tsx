@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
-import { AppView, Exam } from '../types';
-import { getExam, getExams } from '../utils/storage';
+import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, isSaeExam } from '../types';
+import { getExam, getExams, saveExam } from '../utils/storage';
 import { generateBlankCard, checkHealth } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
 import CardPdfDocument from '../components/pdf/CardPdfDocument';
@@ -26,6 +26,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
   const [sourceNote, setSourceNote] = useState<string | null>(null);
   const [pngUrl, setPngUrl] = useState<string | null>(null);
   const [loadingPng, setLoadingPng] = useState(false);
+  const [saeSpec, setSaeSpec] = useState<SaeSpec>({ ...DEFAULT_SAE_SPEC });
 
   useEffect(() => {
     if (examId) setSelectedExamId(examId);
@@ -34,6 +35,26 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
   const activeExam: Exam | undefined = selectedExamId
     ? exams.find(e => e.id === selectedExamId)
     : exam ?? undefined;
+
+  const isSae = isSaeExam(activeExam);
+
+  // Carrega o cabeçalho SAE salvo na prova ao trocar de prova
+  useEffect(() => {
+    setSaeSpec({ ...DEFAULT_SAE_SPEC, ...(activeExam?.saeSpec ?? {}) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedExamId]);
+
+  const setSae = (patch: Partial<SaeSpec>) => setSaeSpec(prev => ({ ...prev, ...patch }));
+  const setSaeTitulo = (i: number, v: string) =>
+    setSaeSpec(prev => ({ ...prev, titulo: prev.titulo.map((t, j) => (j === i ? v : t)) }));
+
+  const persistSae = () => {
+    if (!activeExam) return;
+    saveExam(
+      { ...activeExam, saeSpec: { ...saeSpec }, subjectLP: saeSpec.disciplina.trim() || activeExam.subjectLP, subjectMat: saeSpec.disciplina.trim() || activeExam.subjectMat },
+      userId,
+    );
+  };
 
   // PNG oficial do backend para o preview react-pdf (mesma imagem dos gabaritos)
   useEffect(() => {
@@ -51,7 +72,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
           activeExam.subjectLP,
           activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
           'PNG',
-          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode },
+          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined },
         );
         if (cancelled) return;
         urlRef.current = URL.createObjectURL(blob);
@@ -67,7 +88,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPreview, activeExam?.id, activeExam?.subjectLP, activeExam?.subjectMat, activeExam?.questionsPerSubject, activeExam?.layoutMode]);
+  }, [showPreview, activeExam?.id, activeExam?.subjectLP, activeExam?.subjectMat, activeExam?.questionsPerSubject, activeExam?.layoutMode, activeExam?.templateType, JSON.stringify(saeSpec)]);
 
   // PDF oficial do backend (mesmo desenho dos gabaritos personalizados)
   const buildServerPdf = async (): Promise<Blob | null> => {
@@ -78,7 +99,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
         activeExam.subjectLP,
         activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
         'PDF',
-        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode },
+        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined },
       );
     } catch {
       return null;
@@ -115,7 +136,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
     try {
       const blob = await buildServerPdf();
       if (blob) {
-        downloadBlob(blob, `cartao-resposta-${cardId}.pdf`);
+        downloadBlob(blob, `${isSae ? 'cartao-sae' : 'cartao-resposta'}-${cardId}.pdf`);
         setSourceNote('PDF gerado pelo servidor — idêntico aos gabaritos oficiais (sem QR/nome).');
         return;
       }
@@ -177,14 +198,75 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
               {activeExam && (
                 <div className="bg-gray-50 rounded-lg p-4 text-sm">
                   <p><strong>Prova:</strong> {activeExam.name}</p>
-                  <p><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>
-                  <p><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
+                  {isSae ? (
+                    <>
+                      <p><strong>Modelo:</strong> Avaliação Contínua (cabeçalho editável abaixo)</p>
+                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>
+                      <p><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
+                    </>
+                  )}
                   <p className="text-xs text-gray-400 mt-2">ID do cartão: {cardId}</p>
                 </div>
               )}
 
+              {activeExam && isSae && (
+                <div className="border border-violet-200 rounded-lg p-4 space-y-3 bg-violet-50/50">
+                  <p className="text-sm font-medium text-violet-800">Cabeçalho do cartão — Avaliação Contínua</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Ano</label>
+                      <input className="input" value={saeSpec.ano} onChange={(e) => setSae({ ano: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Caderno</label>
+                      <input className="input" value={saeSpec.caderno} onChange={(e) => setSae({ caderno: e.target.value })} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Programa (linha 1)</label>
+                    <input className="input" value={saeSpec.programa_linha1} onChange={(e) => setSae({ programa_linha1: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label">Programa (linha 2)</label>
+                    <input className="input" value={saeSpec.programa_linha2} onChange={(e) => setSae({ programa_linha2: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label">Título (4 linhas)</label>
+                    <div className="space-y-2">
+                      {saeSpec.titulo.map((t, i) => (
+                        <input key={i} className="input" value={t} onChange={(e) => setSaeTitulo(i, e.target.value)} />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Disciplina</label>
+                      <input className="input" value={saeSpec.disciplina} onChange={(e) => setSae({ disciplina: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Série</label>
+                      <input className="input" value={saeSpec.serie} onChange={(e) => setSae({ serie: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">QR Code (texto)</label>
+                      <input className="input font-mono" value={saeSpec.qr_payload} onChange={(e) => setSae({ qr_payload: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="label">Código de barras (texto)</label>
+                      <input className="input font-mono" value={saeSpec.codigo_barras} onChange={(e) => setSae({ codigo_barras: e.target.value })} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <button
-                onClick={() => setShowPreview(true)}
+                onClick={() => { if (isSae) persistSae(); setShowPreview(true); }}
                 disabled={!selectedExamId}
                 className="btn btn-primary"
               >
@@ -241,6 +323,12 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
                   </PDFDownloadLink>
                 </div>
               </div>
+            ) : isSae ? (
+              <div className="print-answer-card shadow-2xl flex items-center justify-center p-8 text-center text-sm text-gray-500">
+                {loadingPng
+                  ? 'Carregando prévia do servidor...'
+                  : 'A prévia do cartão “Avaliação Contínua” é gerada pelo backend Python. Verifique se o backend está rodando e recarregue a página.'}
+              </div>
             ) : (
               <div className="print-answer-card shadow-2xl" style={{ position: 'relative' }}>
                 {loadingPng ? (
@@ -254,7 +342,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
         )}
       </div>
 
-      {showPreview && activeExam && (
+      {showPreview && activeExam && !isSae && (
         <div id="print-card" className="print-answer-card" style={{ position: 'fixed', left: -10000, top: 0, zIndex: -1 }}>
           <AnswerCard exam={activeExam} cardId={cardId} />
         </div>

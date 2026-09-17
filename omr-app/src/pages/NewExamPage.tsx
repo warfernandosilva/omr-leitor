@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam } from '../types';
+import { AppView, Exam, DEFAULT_SAE_SPEC, SAE_MAX_QUESTIONS } from '../types';
 import { saveExam, getExams, deleteExam } from '../utils/storage';
 import { MAX_QUESTIONS_PER_SUBJECT, MAX_QUESTIONS_SINGLE } from '../utils/card-template';
 import { syncExam, getExamsFromDB, deleteExamFromDB } from '../utils/api';
@@ -14,6 +14,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const { user } = useAuth();
   const [exams, setExams] = useState(() => getExams(user?.id));
   const [name, setName] = useState('');
+  const [templateType, setTemplateType] = useState<'padrao' | 'sae'>('padrao');
   const [layoutMode, setLayoutMode] = useState<'dual' | 'single'>('dual');
   const [subjectLP, setSubjectLP] = useState('LÍNGUA PORTUGUESA');
   const [subjectMat, setSubjectMat] = useState('MATEMÁTICA');
@@ -22,8 +23,9 @@ export default function NewExamPage({ onNavigate }: Props) {
   const [saved, setSaved] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  const maxQps = layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT;
-  const totalQuestions = layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
+  const isSae = templateType === 'sae';
+  const maxQps = isSae ? SAE_MAX_QUESTIONS : layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT;
+  const totalQuestions = isSae || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
 
   useEffect(() => {
     getExamsFromDB().then(dbExams => {
@@ -59,6 +61,13 @@ export default function NewExamPage({ onNavigate }: Props) {
     setQuestionsPerSubject(v);
   };
 
+  const handleTemplateChange = (t: 'padrao' | 'sae') => {
+    setTemplateType(t);
+    if (t === 'sae' && questionsPerSubject > SAE_MAX_QUESTIONS) {
+      setQuestionsPerSubject(SAE_MAX_QUESTIONS);
+    }
+  };
+
   const handleModeChange = (mode: 'dual' | 'single') => {
     setLayoutMode(mode);
     if (questionsPerSubject > (mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT)) {
@@ -75,13 +84,15 @@ export default function NewExamPage({ onNavigate }: Props) {
       id: editingId || uuidv4(),
       name: name.trim(),
       subjectLP: subjectLP.trim(),
-      subjectMat: layoutMode === 'single' ? subjectLP.trim() : subjectMat.trim(),
+      subjectMat: isSae ? subjectLP.trim() : layoutMode === 'single' ? subjectLP.trim() : subjectMat.trim(),
       questionsPerSubject,
       totalQuestions,
       createdAt: new Date().toISOString(),
       gradeScale,
       answerKey: null,
-      layoutMode,
+      layoutMode: isSae ? 'single' : layoutMode,
+      templateType,
+      saeSpec: isSae ? { ...DEFAULT_SAE_SPEC } : undefined,
     };
 
     saveExam(exam, user?.id);
@@ -100,6 +111,7 @@ export default function NewExamPage({ onNavigate }: Props) {
       setExams(getExams(user?.id));
       setEditingId(null);
       setName('');
+      setTemplateType('padrao');
       setSubjectLP('LÍNGUA PORTUGUESA');
       setSubjectMat('MATEMÁTICA');
     }
@@ -108,6 +120,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const handleEdit = (exam: Exam) => {
     setEditingId(exam.id);
     setName(exam.name);
+    setTemplateType(exam.templateType === 'sae' ? 'sae' : 'padrao');
     setLayoutMode(exam.layoutMode === 'single' ? 'single' : 'dual');
     setSubjectLP(exam.subjectLP);
     setSubjectMat(exam.subjectMat);
@@ -142,6 +155,37 @@ export default function NewExamPage({ onNavigate }: Props) {
           </div>
 
           <div>
+            <label className="label">Modelo do Cartão *</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleTemplateChange('padrao')}
+                className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                  templateType === 'padrao'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Padrão
+                <span className="block text-xs font-normal text-gray-400">ArUco nos cantos · 1 ou 2 disciplinas</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTemplateChange('sae')}
+                className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                  templateType === 'sae'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Avaliação Contínua
+                <span className="block text-xs font-normal text-gray-400">cabeçalho editável · até {SAE_MAX_QUESTIONS} questões</span>
+              </button>
+            </div>
+          </div>
+
+          {!isSae && (
+          <div>
             <label className="label">Disciplinas *</label>
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -170,19 +214,20 @@ export default function NewExamPage({ onNavigate }: Props) {
               </button>
             </div>
           </div>
+          )}
 
           <div>
-            <label className="label">{layoutMode === 'single' ? 'Disciplina *' : 'Disciplina 1 (Língua Portuguesa) *'}</label>
+            <label className="label">{isSae || layoutMode === 'single' ? 'Disciplina *' : 'Disciplina 1 (Língua Portuguesa) *'}</label>
             <input
               type="text"
               className="input"
-              placeholder={layoutMode === 'single' ? 'Ex: CIÊNCIAS' : 'Ex: LÍNGUA PORTUGUESA'}
+              placeholder={isSae ? 'Ex: MATEMÁTICA' : layoutMode === 'single' ? 'Ex: CIÊNCIAS' : 'Ex: LÍNGUA PORTUGUESA'}
               value={subjectLP}
               onChange={(e) => setSubjectLP(e.target.value)}
             />
           </div>
 
-          {layoutMode === 'dual' && (
+          {!isSae && layoutMode === 'dual' && (
             <div>
               <label className="label">Disciplina 2 (Matemática) *</label>
               <input
@@ -196,7 +241,7 @@ export default function NewExamPage({ onNavigate }: Props) {
           )}
 
           <div>
-            <label className="label">Questões{layoutMode === 'dual' ? ' por Disciplina' : ''} *</label>
+            <label className="label">Questões{!isSae && layoutMode === 'dual' ? ' por Disciplina' : ''} *</label>
             <input
               type="number"
               className="input"
@@ -207,7 +252,8 @@ export default function NewExamPage({ onNavigate }: Props) {
             />
             <p className="text-xs text-gray-400 mt-1">
               1 a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.
-              {layoutMode === 'dual' && ' O padrão do layout é 22 por disciplina.'}
+              {!isSae && layoutMode === 'dual' && ' O padrão do layout é 22 por disciplina.'}
+              {isSae && ' O cabeçalho do cartão (caderno, série, QR etc.) é editado na tela de geração.'}
             </p>
           </div>
 
@@ -238,7 +284,7 @@ export default function NewExamPage({ onNavigate }: Props) {
             </button>
             {editingId && (
               <button
-                onClick={() => { setEditingId(null); setName(''); setSubjectLP('LÍNGUA PORTUGUESA'); setSubjectMat('MATEMÁTICA'); }}
+                onClick={() => { setEditingId(null); setName(''); setTemplateType('padrao'); setSubjectLP('LÍNGUA PORTUGUESA'); setSubjectMat('MATEMÁTICA'); }}
                 className="btn btn-secondary"
               >
                 Cancelar
@@ -257,6 +303,9 @@ export default function NewExamPage({ onNavigate }: Props) {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{exam.name}</p>
                   <p className="text-sm text-gray-500">
+                    {exam.templateType === 'sae' && (
+                      <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">Avaliação Contínua</span>
+                    )}
                     {exam.layoutMode === 'single'
                       ? exam.subjectLP
                       : `${exam.subjectLP} + ${exam.subjectMat}`}
