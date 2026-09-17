@@ -6,8 +6,9 @@ const API_BASE = (() => {
   if (envUrl) return envUrl.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
     const h = window.location.hostname;
-    // ngrok / tunneling: usa o mesmo host https via proxy do Vite (/api -> localhost:8010)
-    if (h && (h.endsWith('ngrok-free.app') || h.endsWith('ngrok.io') || h.endsWith('ngrok.app'))) return '';
+    // ngrok / tunneling: usa o mesmo host https via proxy do Vite (/api -> localhost:8010).
+    // Qualquer host contendo "ngrok" (ngrok-free.app, ngrok-free.dev, ngrok.io, domínios reservados).
+    if (h && /ngrok/i.test(h)) return '';
     if (h && h !== 'localhost' && h !== '127.0.0.1') return `${window.location.protocol}//${h}:8010`;
   }
   return 'http://localhost:8010';
