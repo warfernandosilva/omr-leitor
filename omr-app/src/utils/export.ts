@@ -82,3 +82,67 @@ export function downloadXLSX(results: StudentResult[], exams: Exam[]): void {
   XLSX.utils.book_append_sheet(wb, ws, 'Resultados');
   XLSX.writeFile(wb, `resultados_omr_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
+
+// ─── Lote SAEV (LP/MAT): NOME,LP_Q1..LP_Qn,MAT_Q1..MAT_Qn ───
+// n = maior questionsPerSubject entre as provas DUAIS do filtro.
+// Resultados de provas não-duais (single/SAE/Colar) são ignorados (contados em skipped).
+
+export interface SaevLoteResult {
+  csv: string;
+  skipped: number;
+}
+
+function saevCell(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+export function exportSaevLoteCsv(results: StudentResult[], exams: Exam[]): SaevLoteResult {
+  const byExam = new Map<string, Exam>();
+  for (const e of exams) if (e) byExam.set(e.id, e);
+
+  let qps = 0;
+  for (const r of results) {
+    const exam = byExam.get(r.examId);
+    if (exam && exam.layoutMode !== 'single' && exam.templateType !== 'sae' && exam.templateType !== 'colar') {
+      qps = Math.max(qps, exam.questionsPerSubject || 0);
+    }
+  }
+
+  const headers = ['NOME'];
+  for (let i = 1; i <= qps; i++) headers.push(`LP_Q${i}`);
+  for (let i = 1; i <= qps; i++) headers.push(`MAT_Q${i}`);
+
+  const rows: string[][] = [];
+  let skipped = 0;
+  for (const r of results) {
+    const exam = byExam.get(r.examId);
+    const dual = !!exam && exam.layoutMode !== 'single' && exam.templateType !== 'sae' && exam.templateType !== 'colar';
+    if (!dual) {
+      skipped++;
+      continue;
+    }
+    const n = exam!.questionsPerSubject || 0;
+    const row: string[] = [r.studentName];
+    for (let i = 1; i <= qps; i++) row.push(i <= n ? (r.answers[i] || '') : '');
+    for (let i = 1; i <= qps; i++) row.push(i <= n ? (r.answers[n + i] || '') : '');
+    rows.push(row);
+  }
+
+  const csv = [headers, ...rows].map(row => row.map(saevCell).join(',')).join('\r\n');
+  return { csv, skipped };
+}
+
+export function downloadSaevCsv(results: StudentResult[], exams: Exam[]): void {
+  const { csv, skipped } = exportSaevLoteCsv(results, exams);
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `saev_lote_LP_MAT_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  if (skipped > 0) {
+    alert(`${skipped} resultado(s) de provas não-duais (1 disciplina/SAE/Colar) foram ignorados neste lote.`);
+  }
+}

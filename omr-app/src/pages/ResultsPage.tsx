@@ -3,7 +3,7 @@ import { AppView } from '../types';
 import PageHeader from '../components/ui/PageHeader';
 import EmptyState from '../components/ui/EmptyState';
 import { getResults, getExams, deleteResult } from '../utils/storage';
-import { downloadCSV, downloadXLSX } from '../utils/export';
+import { downloadCSV, downloadXLSX, downloadSaevCsv } from '../utils/export';
 import { computeSubjectStats } from '../utils/exam';
 import { getResultadosFromDB, deleteResultadoDB, DBResultado } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -67,6 +67,7 @@ export default function ResultsPage({ onNavigate }: Props) {
 
   const handleExportCSV = () => downloadCSV(filtered, exams);
   const handleExportXLSX = () => downloadXLSX(filtered, exams);
+  const handleExportSaev = () => downloadSaevCsv(filtered, exams);
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este resultado?')) return;
@@ -92,6 +93,12 @@ export default function ResultsPage({ onNavigate }: Props) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
             CSV
+          </button>
+          <button onClick={handleExportSaev} title="Lote SAEV: NOME,LP_Q1..N,MAT_Q1..N (só provas duais)" className="btn btn-secondary btn-sm min-h-[44px]" disabled={filtered.length === 0}>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            CSV SAEV
           </button>
           <button onClick={handleExportXLSX} className="btn btn-primary btn-sm min-h-[44px]" disabled={filtered.length === 0}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
