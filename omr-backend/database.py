@@ -80,6 +80,8 @@ def init_db() -> None:
     # Migração: colunas adicionadas após a primeira versão do banco
     _ensure_column("avaliacoes", "questions_per_subject", "INTEGER NOT NULL DEFAULT 22")
     _ensure_column("avaliacoes", "layout_mode", "VARCHAR(10) NOT NULL DEFAULT 'dual'")
+    _ensure_column("avaliacoes", "template", "VARCHAR(10) NOT NULL DEFAULT 'padrao'")
+    _ensure_column("avaliacoes", "sae_spec", "JSON")
     _ensure_column("avaliacoes", "grade_scale", "VARCHAR(10) NOT NULL DEFAULT '0-10'")
     _ensure_column("avaliacoes", "answer_key", "JSON")
     _ensure_column("avaliacoes", "owner_id", "INTEGER REFERENCES users(id)")

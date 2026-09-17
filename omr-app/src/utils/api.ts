@@ -258,6 +258,8 @@ export async function syncExam(exam: {
   subjectMat: string;
   questionsPerSubject?: number;
   layoutMode?: 'dual' | 'single';
+  templateType?: 'padrao' | 'sae';
+  saeSpec?: SaeSpec;
 }): Promise<SyncExamResult> {
   const res = await fetch(`${API_BASE}/api/exams/sync`, {
     method: 'POST',
@@ -269,6 +271,10 @@ export async function syncExam(exam: {
       subject_mat: exam.subjectMat,
       questions_per_subject: exam.questionsPerSubject ?? 22,
       layout_mode: exam.layoutMode ?? 'dual',
+      template: exam.templateType ?? 'padrao',
+      sae: exam.templateType === 'sae' && exam.saeSpec
+        ? { ...exam.saeSpec, n_questoes: exam.questionsPerSubject ?? 26 }
+        : null,
     }),
   });
   if (!res.ok) throw new Error(`Falha ao sincronizar a prova (${res.status})`);

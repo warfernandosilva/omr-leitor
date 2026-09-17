@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
 import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, isSaeExam } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
-import { generateBlankCard, checkHealth } from '../utils/api';
+import { generateBlankCard, checkHealth, syncExam } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
 import CardPdfDocument from '../components/pdf/CardPdfDocument';
 import { useAuth } from '../context/AuthContext';
@@ -50,10 +50,15 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
 
   const persistSae = () => {
     if (!activeExam) return;
-    saveExam(
-      { ...activeExam, saeSpec: { ...saeSpec }, subjectLP: saeSpec.disciplina.trim() || activeExam.subjectLP, subjectMat: saeSpec.disciplina.trim() || activeExam.subjectMat },
-      userId,
-    );
+    const updated: Exam = {
+      ...activeExam,
+      saeSpec: { ...saeSpec },
+      subjectLP: saeSpec.disciplina.trim() || activeExam.subjectLP,
+      subjectMat: saeSpec.disciplina.trim() || activeExam.subjectMat,
+    };
+    saveExam(updated, userId);
+    // Sincroniza o cabeçalho com o backend para o PDF em lote por alunos
+    syncExam(updated).catch(() => {});
   };
 
   // PNG oficial do backend para o preview react-pdf (mesma imagem dos gabaritos)

@@ -53,6 +53,8 @@ class Avaliacao(Base, TimestampMixin):
     subject_mat: Mapped[str] = mapped_column(String(120), nullable=False, default="MATEMÁTICA")
     questions_per_subject: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
     layout_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="dual")  # dual | single
+    template: Mapped[str] = mapped_column(String(10), nullable=False, default="padrao")  # padrao | sae
+    sae_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # cabeçalho editável do cartão SAE
     grade_scale: Mapped[str] = mapped_column(String(10), nullable=False, default="0-10")
     answer_key: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)

@@ -151,6 +151,8 @@ class ExamSyncRequest(BaseModel):
     subject_mat: str = "MATEMÁTICA"
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
+    template: str = "padrao"  # padrao | sae
+    sae: SaeSpecRequest | None = None  # cabeçalho editável (só SAE)
     grade_scale: str | None = None
     answer_key: dict | None = None
 
@@ -633,6 +635,20 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     if req.layout_mode not in ("dual", "single"):
         raise HTTPException(status_code=400, detail="layout_mode deve ser 'dual' ou 'single'")
     av.layout_mode = req.layout_mode
+    if req.template not in ("padrao", "sae"):
+        raise HTTPException(status_code=400, detail="template deve ser 'padrao' ou 'sae'")
+    av.template = req.template
+    if req.sae is not None:
+        spec = req.sae.to_spec()
+        av.sae_spec = {
+            "ano": spec.ano, "programa_linha1": spec.programa_linha1,
+            "programa_linha2": spec.programa_linha2, "titulo": spec.titulo,
+            "caderno": spec.caderno, "disciplina": spec.disciplina,
+            "serie": spec.serie, "qr_payload": spec.qr_payload,
+            "codigo_barras": spec.codigo_barras,
+        }
+    elif req.template != "sae":
+        av.sae_spec = None
     if req.grade_scale is not None:
         av.grade_scale = req.grade_scale
     if req.answer_key is not None:
@@ -647,6 +663,8 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
         "turma": av.turma,
         "questions_per_subject": av.questions_per_subject,
         "layout_mode": av.layout_mode,
+        "template": av.template,
+        "sae_spec": av.sae_spec,
         "grade_scale": av.grade_scale,
         "answer_key": av.answer_key,
     }
@@ -793,11 +811,28 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
     ]
 
     out_buf = io.BytesIO()
-    pages_drawn = build_batch_pdf(
-        registros, av.subject_lp, av.subject_mat, out_buf,
-        questions_per_subject=av.questions_per_subject,
-        layout_mode=av.layout_mode,
-    )
+    if (av.template or "padrao") == "sae":
+        # Cartão Avaliação Contínua com o cabeçalho editado no frontend
+        stored = dict(av.sae_spec or {})
+        spec = SaeSpec(
+            ano=stored.get("ano", "2026"),
+            programa_linha1=stored.get("programa_linha1", "AVALIAÇÃO CONTÍNUA DA APRENDIZAGEM"),
+            programa_linha2=stored.get("programa_linha2", "NOS ANOS FINAIS - CICLO II"),
+            titulo=stored.get("titulo") or ["AVALIAÇÃO CONTÍNUA", "DA APRENDIZAGEM", "NOS ANOS FINAIS", "CICLO II"],
+            caderno=stored.get("caderno", "M0901"),
+            disciplina=stored.get("disciplina") or av.subject_lp,
+            serie=stored.get("serie", "9º ano do Ensino Fundamental"),
+            qr_payload=stored.get("qr_payload", "2269M0901"),
+            n_questoes=av.questions_per_subject,
+            codigo_barras=stored.get("codigo_barras", "6357256532"),
+        )
+        pages_drawn = build_sae_batch_pdf(registros, spec, out_buf)
+    else:
+        pages_drawn = build_batch_pdf(
+            registros, av.subject_lp, av.subject_mat, out_buf,
+            questions_per_subject=av.questions_per_subject,
+            layout_mode=av.layout_mode,
+        )
 
     if pages_drawn != len(registros):
         raise HTTPException(
