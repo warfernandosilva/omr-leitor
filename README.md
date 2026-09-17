@@ -58,6 +58,7 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
 - **Tela branca no .exe** — faltava `vite.config.ts:base './'` (já corrigido); refaça `electron:build`.
 - **Backend não empacotado** — rode `build-backend-exe.bat` antes de `electron:build`.
 - **Celular não loga em 192.168.x.x** — libere firewall: `netsh advfirewall firewall add rule ... localport=8010/5173`, mesma Wi-Fi, e `CORS_ORIGIN_REGEX` em `main.py:50` já libera `192.168.*`.
+- **Câmera ao vivo no celular (captura automática)** — o Chrome exige HTTPS: use `ngrok http 5173` no PC e abra a URL https no celular (o proxy `/api→8010` já funciona com host ngrok). Sem HTTPS, cai no fallback de upload (sem auto-captura). Na tela de correção: aponte para o cartão, aguarde travar (vibra+bip), confira a prévia e toque em Enviar.
 - **Círculos desalinhados** — só a 1ª linha batia quando `questionsPerSubject !=22`; agora `CorrectCardPage.tsx:836` usa `questionYFor(n)` e `rectified_image` (`main.py:381`) para overlay 1:1.
 - **Cache Electron** `Unable to create cache` — silenciado via `%TEMP%\omr-electron-userdata` em `electron/main.cjs`.
 
