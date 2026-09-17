@@ -15,7 +15,65 @@ const API_BASE = (() => {
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('omr_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  const h: Record<string, string> = {
+    // Bypass oficial da página de aviso do ngrok para XHR/fetch (inócuo em LAN/uso direto)
+    'ngrok-skip-browser-warning': 'true',
+  };
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+/** Base resolvida (para exibir/diagnosticar). '' = mesma origem (proxy /api do Vite ou ngrok). */
+export function getApiBase(): string {
+  if (API_BASE) return API_BASE;
+  if (typeof window !== 'undefined') return window.location.origin;
+  return '';
+}
+
+async function fetchTimeout(input: string, init: RequestInit, ms = 10000): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = window.setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(input, { ...init, signal: ctrl.signal });
+  } finally {
+    window.clearTimeout(t);
+  }
+}
+
+export interface ConnectionTest {
+  ok: boolean;
+  detail: string;
+}
+
+/** Testa o alcance da API (usado na tela de login para diagnosticar ngrok/rede). */
+export async function testConnection(): Promise<ConnectionTest> {
+  const base = getApiBase();
+  try {
+    const res = await fetchTimeout(`${API_BASE}/api/health`, { headers: authHeaders() }, 8000);
+    if (!res.ok) return { ok: false, detail: `API respondeu HTTP ${res.status} em ${base}/api/health` };
+    let db = '';
+    try {
+      const j = (await res.json()) as { db?: string };
+      if (j?.db) db = ` (banco: ${j.db})`;
+    } catch {
+      /* corpo fora do padrão */
+    }
+    return { ok: true, detail: `API alcançável${db}` };
+  } catch (err) {
+    return { ok: false, detail: classifyNetworkError(err, base) };
+  }
+}
+
+export function classifyNetworkError(err: unknown, base?: string): string {
+  const where = base || getApiBase();
+  if (err instanceof DOMException && err.name === 'AbortError') {
+    return `Tempo esgotado falando com ${where} (8s). Confira o túnel ngrok (porta 5173), o backend :8010 no PC e o 'Visit Site' desta URL.`;
+  }
+  const m = err instanceof Error ? err.message : String(err ?? '');
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(m)) {
+    return `Sem resposta da API em ${where}. Checklist: 1) backend :8010 rodando no PC; 2) 'ngrok http 5173' ativo (não 8010); 3) URL do dia + 'Visit Site' clicado; 4) mesma internet no celular (sem VPN/bloqueio).`;
+  }
+  return m || 'Falha de rede ao falar com a API.';
 }
 
 export interface ProcessResult {
@@ -519,11 +577,16 @@ export function getToken(): string | null {
 }
 
 export async function register(email: string, nome: string, password: string): Promise<{ access_token: string; user: AuthUser }> {
-  const res = await fetch(`${API_BASE}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, nome, password }),
-  });
+  let res: Response;
+  try {
+    res = await fetchTimeout(`${API_BASE}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ email, nome, password }),
+    }, 12000);
+  } catch (err) {
+    throw new Error(classifyNetworkError(err));
+  }
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
@@ -539,12 +602,20 @@ export async function login(email: string, password: string): Promise<{ access_t
   const params = new URLSearchParams();
   params.append('username', email);
   params.append('password', password);
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString(),
-  });
+  let res: Response;
+  try {
+    res = await fetchTimeout(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...authHeaders() },
+      body: params.toString(),
+    }, 12000);
+  } catch (err) {
+    throw new Error(classifyNetworkError(err));
+  }
   if (!res.ok) {
+    if (res.status === 400 || res.status === 401 || res.status === 422) {
+      throw new Error('E-mail ou senha inválidos.');
+    }
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
     throw new Error(detail);

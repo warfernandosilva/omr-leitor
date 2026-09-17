@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { getApiBase, testConnection, ConnectionTest } from '../utils/api';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -9,6 +10,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [connTest, setConnTest] = useState<ConnectionTest | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,6 +122,23 @@ export default function LoginPage() {
           <p className="text-xs text-gray-400 text-center mt-4">
             Ao registrar, o primeiro usuário do sistema torna-se administrador automaticamente.
           </p>
+
+          <div className="mt-4 pt-3 border-t border-gray-100">
+            <p className="text-xs text-gray-400 text-center break-all">API: {getApiBase() || '(mesma origem)'}/api</p>
+            <button
+              type="button"
+              disabled={testing}
+              onClick={async () => { setTesting(true); setConnTest(null); setConnTest(await testConnection()); setTesting(false); }}
+              className="mt-2 w-full text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+            >
+              {testing ? 'Testando...' : 'Testar conexão com a API'}
+            </button>
+            {connTest && (
+              <p className={`mt-1 text-xs text-center ${connTest.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+                {connTest.ok ? `✔ ${connTest.detail}` : `✖ ${connTest.detail}`}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </div>
