@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { analyzeFrame, FrameAnalysis, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
+import { analyzeFrame, FrameAnalysis, DEFAULT_THRESHOLDS, GuideThresholds } from '../utils/frame-guides';
 
 // Amostragem do vídeo para análise (equilíbrio velocidade × precisão)
 const SAMPLE_W = 320;
@@ -11,6 +11,8 @@ export type AutoStatus = 'idle' | 'searching' | 'locked' | 'frozen';
 interface UseAutoCaptureOpts {
   enabled: boolean;
   onLocked: () => void;
+  // Limiares calibrados por modelo de gabarito (padrão: genérico)
+  thresholds?: GuideThresholds;
 }
 
 function beep(): void {
@@ -34,7 +36,7 @@ function beep(): void {
 
 export function useAutoCapture(
   videoRef: React.RefObject<HTMLVideoElement>,
-  { enabled, onLocked }: UseAutoCaptureOpts,
+  { enabled, onLocked, thresholds = DEFAULT_THRESHOLDS }: UseAutoCaptureOpts,
 ) {
   const [analysis, setAnalysis] = useState<FrameAnalysis | null>(null);
   const [lockProgress, setLockProgress] = useState(0); // 0..1
@@ -52,6 +54,8 @@ export function useAutoCapture(
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const onLockedRef = useRef(onLocked);
   onLockedRef.current = onLocked;
+  const thresholdsRef = useRef(thresholds);
+  thresholdsRef.current = thresholds;
 
   const fireLocked = useCallback(() => {
     setStatus('frozen');
@@ -110,7 +114,7 @@ export function useAutoCapture(
       for (let i = 0, j = 0; i < px.length; i += 4, j++) {
         gray[j] = (px[i] * 77 + px[i + 1] * 150 + px[i + 2] * 29) >> 8;
       }
-      const a = analyzeFrame(gray, sw, sh, DEFAULT_THRESHOLDS);
+      const a = analyzeFrame(gray, sw, sh, thresholdsRef.current);
       setAnalysis(a);
       if (a.locked) {
         streakRef.current += 1;

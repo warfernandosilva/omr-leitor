@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, StudentResult, isSaeExam, isSaeFamilyExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
@@ -12,6 +12,9 @@ import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { useAutoCapture } from '../hooks/useAutoCapture';
 import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
+import {
+  guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide,
+} from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT, BUBBLE_RADIUS, PORTUGUESE_X, MATHEMATICS_X, questionYFor } from '../utils/card-template';
 import { useAuth } from '../context/AuthContext';
 
@@ -172,6 +175,39 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const activeExam = selectedExamId ? exams.find(e => e.id === selectedExamId) : null;
 
+  // ─── Guia de captura adaptado ao gabarito da prova ───
+  const captureTemplate = activeExam?.templateType === 'colar'
+    ? 'colar'
+    : isSaeExam(activeExam) ? 'sae' : 'padrao';
+  const guideThresholds = useMemo(() => thresholdsFor(captureTemplate), [captureTemplate]);
+  // Mede o visor para desenhar o maior A4 sem distorção
+  const viewRef = useRef<HTMLDivElement>(null);
+  const [viewSize, setViewSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    if (step !== 'capture') return;
+    const el = viewRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      const r = entries[0].contentRect;
+      setViewSize(prev => {
+        const w = Math.round(r.width), h = Math.round(r.height);
+        return prev.w === w && prev.h === h ? prev : { w, h };
+      });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [step]);
+  const guide = useMemo(
+    () => (viewSize.w > 0 && viewSize.h > 0
+      ? guideRectFor(viewSize.w, viewSize.h)
+      : fallbackGuide()),
+    [viewSize],
+  );
+  const anchorTargets = useMemo(
+    () => anchorTargetsFor(captureTemplate, guide),
+    [guide, captureTemplate],
+  );
+
   // Geometria do overlay: prefere o modelo DETECTADO pelo backend (fallback
   // cruzado) e avisa se divergir do modelo da prova selecionada.
   // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay.
@@ -300,6 +336,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     useAutoCapture(videoRef, {
       enabled: step === 'capture' && autoMode && !confirmUrl,
       onLocked: handleAutoLocked,
+      thresholds: guideThresholds,
     });
 
   // Cronômetro da busca: após ~8s sem trava, sugere a captura manual
@@ -977,27 +1014,33 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             <span className="text-sm text-gray-700 text-left">Captura automática por enquadramento</span>
           </button>
 
-          <div className="relative bg-black rounded-xl overflow-hidden mb-4">
-            <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl" style={{ maxHeight: '60dvh', objectFit: 'cover' }} />
-            {/* guia de enquadramento A4 (coords normalizadas 0..100, mesmo nos 3 modelos) */}
+          <div ref={viewRef} className="relative bg-black overflow-hidden mb-4 -mx-6 rounded-none sm:mx-0 sm:rounded-xl">
+            <video ref={videoRef} autoPlay playsInline muted className="w-full sm:rounded-xl" style={{ height: 'min(78dvh, 640px)', objectFit: 'cover' }} />
+            {/* chip do modelo da prova */}
+            {autoMode && !confirmUrl && (
+              <span className="absolute top-2 left-2 z-10 text-[11px] font-semibold text-white bg-black/55 rounded-full px-2.5 py-1 pointer-events-none">
+                {templateLabel(activeExam?.templateType)}
+              </span>
+            )}
+            {/* guia A4 calculado para o visor + alvos das âncoras do modelo (0..100) */}
             {autoMode && !confirmUrl && (
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none">
                 {/* scrim: escurece fora do guia para dar contraste em mesa clara */}
                 <path
-                  d="M0,0 H100 V100 H0 Z M22,6 H78 V94 H22 Z"
+                  d={`M0,0 H100 V100 H0 Z M${guide.x},${guide.y} H${guide.x + guide.w} V${guide.y + guide.h} H${guide.x} Z`}
                   fill="rgba(0,0,0,0.5)"
                   fillRule="evenodd"
                 />
                 {/* moldura do guia — verde ao travar */}
                 <rect
-                  x="22" y="6" width="56" height="88" fill="none" rx="1"
+                  x={guide.x} y={guide.y} width={guide.w} height={guide.h} fill="none" rx="1"
                   stroke={frameAnalysis?.locked ? '#22c55e' : 'rgba(255,255,255,0.9)'}
                   strokeWidth="0.8"
                 />
                 {/* cantoneiras grossas do guia */}
                 {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
-                  const gx = k === 'TL' || k === 'BL' ? 22 : 78;
-                  const gy = k === 'TL' || k === 'TR' ? 6 : 94;
+                  const gx = k === 'TL' || k === 'BL' ? guide.x : guide.x + guide.w;
+                  const gy = k === 'TL' || k === 'TR' ? guide.y : guide.y + guide.h;
                   const sx = k === 'TL' || k === 'BL' ? 1 : -1;
                   const sy = k === 'TL' || k === 'TR' ? 1 : -1;
                   const L = 9;
@@ -1006,6 +1049,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     <g key={k} stroke={c} strokeWidth="1.8" strokeLinecap="round">
                       <line x1={gx} y1={gy} x2={gx + sx * L} y2={gy} />
                       <line x1={gx} y1={gy} x2={gx} y2={gy + sy * L} />
+                    </g>
+                  );
+                })}
+                {/* 🎯 alvos: onde as 4 âncoras do modelo devem cair */}
+                {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
+                  const p = anchorTargets[k];
+                  const c = frameAnalysis?.locked ? '#22c55e' : '#fbbf24';
+                  return (
+                    <g key={`t-${k}`} stroke={c} strokeWidth="0.9" fill="none" opacity="0.95">
+                      <circle cx={p.x} cy={p.y} r="2.4" />
+                      <circle cx={p.x} cy={p.y} r="0.4" fill={c} stroke="none" />
                     </g>
                   );
                 })}
