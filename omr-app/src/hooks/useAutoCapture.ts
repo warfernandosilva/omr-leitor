@@ -41,8 +41,12 @@ export function useAutoCapture(
   const [status, setStatus] = useState<AutoStatus>('idle');
   const [torchOn, setTorchOn] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
+  const [zoomSupported, setZoomSupported] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [maxZoom, setMaxZoom] = useState(1);
 
   const streakRef = useRef(0);
+  const attemptsRef = useRef(0);
   const lastRef = useRef(0);
   const rafRef = useRef(0);
   const sampleCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -66,6 +70,10 @@ export function useAutoCapture(
       setStatus('idle');
       setLockProgress(0);
       setTorchOn(false);
+      setZoomSupported(false);
+      setZoom(1);
+      setMaxZoom(1);
+      attemptsRef.current = 0;
       streakRef.current = 0;
       return;
     }
@@ -123,21 +131,30 @@ export function useAutoCapture(
     return () => cancelAnimationFrame(rafRef.current);
   }, [enabled, videoRef, fireLocked]);
 
-  // Detecta suporte à lanterna quando o stream existe
+  // Detecta suporte à lanterna e ao zoom quando o stream existe
+  // (Android/Chrome expõem via getCapabilities; iOS não — segue oculto)
   useEffect(() => {
     if (!enabled) return;
+    attemptsRef.current = 0;
     const id = window.setInterval(() => {
+      attemptsRef.current += 1;
       const track = (videoRef.current?.srcObject as MediaStream | null)
         ?.getVideoTracks?.()?.[0] as MediaStreamTrack | undefined;
       try {
-        const caps = track?.getCapabilities?.() as unknown as { torch?: boolean } | undefined;
+        const caps = track?.getCapabilities?.() as unknown as {
+          torch?: boolean; zoom?: { min?: number; max?: number };
+        } | undefined;
         if (caps?.torch) {
           setTorchSupported(true);
-          window.clearInterval(id);
+        }
+        if (caps?.zoom && typeof caps.zoom.max === 'number' && caps.zoom.max > 1) {
+          setZoomSupported(true);
+          setMaxZoom(caps.zoom.max);
         }
       } catch {
         /* ignora */
       }
+      if (attemptsRef.current > 15) window.clearInterval(id);
     }, 800);
     return () => window.clearInterval(id);
   }, [enabled, videoRef]);
@@ -155,11 +172,27 @@ export function useAutoCapture(
     }
   }, [torchOn, videoRef]);
 
+  const setZoomLevel = useCallback(async (z: number) => {
+    const track = (videoRef.current?.srcObject as MediaStream | null)
+      ?.getVideoTracks?.()?.[0] as (MediaStreamTrack & { applyConstraints?: (c: unknown) => Promise<void> }) | undefined;
+    if (!track?.applyConstraints) return;
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: z }] } as unknown as MediaTrackConstraints);
+      setZoom(z);
+    } catch {
+      setZoomSupported(false);
+    }
+  }, [videoRef]);
+
   const reset = useCallback(() => {
     streakRef.current = 0;
     setLockProgress(0);
     setStatus('searching');
   }, []);
 
-  return { analysis, lockProgress, status, torchOn, torchSupported, toggleTorch, reset };
+  return {
+    analysis, lockProgress, status,
+    torchOn, torchSupported, toggleTorch,
+    zoomSupported, zoom, maxZoom, setZoomLevel, reset,
+  };
 }

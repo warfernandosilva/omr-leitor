@@ -131,6 +131,14 @@ function laplacianVariance(
   return sumSq / n - mean * mean;
 }
 
+// Nitidez de um buffer grayscale (0..∞; maior = mais nítido).
+// Reaproveitado pelo portão de nitidez na hora da captura.
+export function measureSharpness(
+  gray: Uint8Array | Uint8ClampedArray, w: number, h: number,
+): number {
+  return laplacianVariance(gray, w, h);
+}
+
 export function analyzeFrame(
   gray: Uint8Array | Uint8ClampedArray,
   w: number,

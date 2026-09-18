@@ -11,6 +11,7 @@ import {
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { useAutoCapture } from '../hooks/useAutoCapture';
+import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT, BUBBLE_RADIUS, PORTUGUESE_X, MATHEMATICS_X, questionYFor } from '../utils/card-template';
 import { useAuth } from '../context/AuthContext';
 
@@ -69,6 +70,37 @@ function countResults(
   return { correct, incorrect, blank };
 }
 
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+// Nitidez de um dataUrl (mesma escala do analisador: 320px de largura)
+function scoreSharpness(dataUrl: string): Promise<number> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const W = 320;
+        const H = Math.max(1, Math.round((img.height / Math.max(1, img.width)) * W));
+        const c = document.createElement('canvas');
+        c.width = W;
+        c.height = H;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        if (!ctx) { resolve(0); return; }
+        ctx.drawImage(img, 0, 0, W, H);
+        const d = ctx.getImageData(0, 0, W, H).data;
+        const gray = new Uint8Array(W * H);
+        for (let i = 0, j = 0; i < d.length; i += 4, j++) {
+          gray[j] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+        }
+        resolve(measureSharpness(gray, W, H));
+      } catch {
+        resolve(0);
+      }
+    };
+    img.onerror = () => resolve(0);
+    img.src = dataUrl;
+  });
+}
+
 export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const { user } = useAuth();
   const userId = user?.id;
@@ -110,6 +142,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // Captura automática por enquadramento
   const [autoMode, setAutoMode] = useState(true);
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
+  // Modo contínuo: após salvar, volta direto à câmera (correção em série)
+  const [continuous, setContinuous] = useState(false);
+  const [sessionCount, setSessionCount] = useState(0);
+  // Visor imersivo: flash do obturador, tempo de busca e portão de nitidez
+  const [flashOn, setFlashOn] = useState(false);
+  const [searchSecs, setSearchSecs] = useState(0);
+  const [sharpRetry, setSharpRetry] = useState<string | null>(null);
+  const flashTimerRef = useRef(0);
+  const sharpFailsRef = useRef(0);
 
   // Lote
   const [mode, setMode] = useState<'individual' | 'lote'>('individual');
@@ -206,19 +247,72 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     processOMR(dataUrl);
   };
 
-  // Travou o enquadramento → congela a prévia para o usuário CONFIRMAR o envio
-  const handleAutoLocked = () => {
-    if (confirmUrl) return;
-    const dataUrl = captureDataUrl();
-    if (dataUrl) setConfirmUrl(dataUrl);
-    else resetAuto();
+  // Captura silenciosa (sem setError): usada pelo multi-shot do portão de nitidez
+  const grabFrameSilent = (): string | null => {
+    if (!videoRef.current || !canvasRef.current) return null;
+    const video = videoRef.current;
+    if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) return null;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(video, 0, 0);
+    try {
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      return dataUrl && dataUrl.length >= 200 ? dataUrl : null;
+    } catch {
+      return null;
+    }
   };
 
-  const { analysis: frameAnalysis, lockProgress, torchOn, torchSupported, toggleTorch, reset: resetAuto } =
+  // Travou o enquadramento → multi-shot com portão de nitidez:
+  // captura até 3 frames e confirma o mais nítido; se todos saírem
+  // tremidos, descarta e continua tentando (sem travar o fluxo).
+  const handleAutoLocked = async () => {
+    if (confirmUrl) return;
+    let best: string | null = null;
+    let bestScore = -1;
+    for (let i = 0; i < 3; i++) {
+      const shot = grabFrameSilent();
+      if (shot) {
+        const s = await scoreSharpness(shot);
+        if (s > bestScore) { bestScore = s; best = shot; }
+        if (s >= DEFAULT_THRESHOLDS.minSharpness * 2) break;
+      }
+      if (i < 2) await sleep(150);
+    }
+    if (best && (bestScore >= DEFAULT_THRESHOLDS.minSharpness || sharpFailsRef.current >= 2)) {
+      sharpFailsRef.current = 0;
+      setSharpRetry(null);
+      setConfirmUrl(best);
+      setFlashOn(true);
+      window.clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(() => setFlashOn(false), 220);
+    } else {
+      sharpFailsRef.current += 1;
+      setSharpRetry('Imagem tremida — segure firme, tentando de novo…');
+      resetAuto();
+    }
+  };
+
+  const { analysis: frameAnalysis, lockProgress, torchOn, torchSupported, toggleTorch,
+    zoomSupported, zoom, maxZoom, setZoomLevel, reset: resetAuto } =
     useAutoCapture(videoRef, {
       enabled: step === 'capture' && autoMode && !confirmUrl,
       onLocked: handleAutoLocked,
     });
+
+  // Cronômetro da busca: após ~8s sem trava, sugere a captura manual
+  useEffect(() => {
+    if (step !== 'capture' || !autoMode || confirmUrl) {
+      setSearchSecs(0);
+      return;
+    }
+    setSearchSecs(0);
+    sharpFailsRef.current = 0;
+    const id = window.setInterval(() => setSearchSecs(s => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [step, autoMode, confirmUrl]);
 
   const confirmAutoCapture = () => {
     if (!confirmUrl) return;
@@ -230,6 +324,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const retryAutoCapture = () => {
     setConfirmUrl(null);
+    setSharpRetry(null);
     resetAuto();
   };
 
@@ -446,7 +541,23 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     };
 
     saveResult(result, userId);
-    setStep('saved');
+    setSessionCount(c => c + 1);
+    if (continuous) {
+      // Modo contínuo: volta direto à câmera com a mesma prova
+      setStudentName('');
+      setCapturedImage(null);
+      setOmrResult(null);
+      setManualAnswers({});
+      setError(null);
+      setProcessingProgress(0);
+      setIdentified(null);
+      setConfirmUrl(null);
+      setSharpRetry(null);
+      resetAuto();
+      await startCamera();
+    } else {
+      setStep('saved');
+    }
   };
 
   const resetForm = () => {
@@ -669,8 +780,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Corrigir Cartão-Resposta</h1>
-      <p className="text-gray-500 mb-4">Capture ou envie a foto do cartão preenchido pelo aluno</p>
+      {/* Visor imersivo: sem título/subtítulo no passo da câmera */}
+      {step !== 'capture' && (
+        <>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">Corrigir Cartão-Resposta</h1>
+          <p className="text-gray-500 mb-4">Capture ou envie a foto do cartão preenchido pelo aluno</p>
+        </>
+      )}
 
       {step === 'form' && (
         <div className="flex gap-2 mb-6">
@@ -770,6 +886,24 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
           )}
 
+          <button
+            type="button"
+            role="switch"
+            aria-checked={continuous}
+            onClick={() => setContinuous(c => !c)}
+            className="inline-flex items-center gap-3 min-h-[48px] cursor-pointer"
+          >
+            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${continuous ? 'bg-blue-600' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${continuous ? 'translate-x-6' : 'translate-x-1'}`} />
+            </span>
+            <span className="text-sm text-gray-700 text-left">Correção contínua <span className="text-gray-400">(vários cartões em sequência)</span></span>
+          </button>
+          {sessionCount > 0 && (
+            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+              {sessionCount} cartão(ões) corrigido(s) nesta sessão
+            </p>
+          )}
+
           <div className="flex gap-3">
             <button
               onClick={startCamera}
@@ -811,38 +945,71 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       {step === 'capture' && (
         <div className="card max-w-2xl">
-          <div className="mb-4">
-            <p className="text-sm text-gray-600 mb-2">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="text-sm text-gray-600">
               {autoMode && !confirmUrl
-                ? 'Aponte para o cartão — a captura é automática ao travar o enquadramento.'
-                : 'Posicione o cartão-resposta na frente da câmera. Certifique-se de que está:'}
+                ? 'Aponte para o cartão — a captura é automática ao travar.'
+                : 'Enquadre o cartão-resposta na moldura.'}
             </p>
-            {(!autoMode || confirmUrl) && (
-              <ul className="text-xs text-gray-500 list-disc list-inside space-y-1">
-                <li>Bem iluminado (sem sombras sobre os círculos)</li>
-                <li>Plano e sem dobraduras</li>
-                <li>Totalmente visível dentro da moldura</li>
-              </ul>
+            {sessionCount > 0 && (
+              <span className="shrink-0 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                {sessionCount} corrigido(s)
+              </span>
             )}
-            <label className="mt-2 inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                className="w-4 h-4 accent-blue-600"
-                checked={autoMode}
-                onChange={(e) => { setAutoMode(e.target.checked); setConfirmUrl(null); }}
-              />
-              Captura automática por enquadramento
-            </label>
           </div>
+          {(!autoMode || confirmUrl) && (
+            <ul className="text-xs text-gray-500 list-disc list-inside space-y-1 mb-3">
+              <li>Bem iluminado (sem sombras sobre os círculos)</li>
+              <li>Plano e sem dobraduras</li>
+              <li>Totalmente visível dentro da moldura</li>
+            </ul>
+          )}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoMode}
+            onClick={() => { setAutoMode(a => !a); setConfirmUrl(null); setSharpRetry(null); }}
+            className="mb-3 inline-flex items-center gap-3 min-h-[48px] cursor-pointer"
+          >
+            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${autoMode ? 'bg-blue-600' : 'bg-gray-300'}`}>
+              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${autoMode ? 'translate-x-6' : 'translate-x-1'}`} />
+            </span>
+            <span className="text-sm text-gray-700 text-left">Captura automática por enquadramento</span>
+          </button>
 
           <div className="relative bg-black rounded-xl overflow-hidden mb-4">
-            <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl" style={{ maxHeight: '400px', objectFit: 'cover' }} />
-            {/* overlay do guia de enquadramento (coords normalizadas 0..100) */}
+            <video ref={videoRef} autoPlay playsInline muted className="w-full rounded-xl" style={{ maxHeight: '60dvh', objectFit: 'cover' }} />
+            {/* guia de enquadramento A4 (coords normalizadas 0..100, mesmo nos 3 modelos) */}
             {autoMode && !confirmUrl && (
               <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none">
-                {/* guia A4 central */}
-                <rect x="22" y="6" width="56" height="88" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="0.6" strokeDasharray="3 2" rx="1" />
-                {/* cantoneiras detectadas */}
+                {/* scrim: escurece fora do guia para dar contraste em mesa clara */}
+                <path
+                  d="M0,0 H100 V100 H0 Z M22,6 H78 V94 H22 Z"
+                  fill="rgba(0,0,0,0.5)"
+                  fillRule="evenodd"
+                />
+                {/* moldura do guia — verde ao travar */}
+                <rect
+                  x="22" y="6" width="56" height="88" fill="none" rx="1"
+                  stroke={frameAnalysis?.locked ? '#22c55e' : 'rgba(255,255,255,0.9)'}
+                  strokeWidth="0.8"
+                />
+                {/* cantoneiras grossas do guia */}
+                {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
+                  const gx = k === 'TL' || k === 'BL' ? 22 : 78;
+                  const gy = k === 'TL' || k === 'TR' ? 6 : 94;
+                  const sx = k === 'TL' || k === 'BL' ? 1 : -1;
+                  const sy = k === 'TL' || k === 'TR' ? 1 : -1;
+                  const L = 9;
+                  const c = frameAnalysis?.locked ? '#22c55e' : '#ffffff';
+                  return (
+                    <g key={k} stroke={c} strokeWidth="1.8" strokeLinecap="round">
+                      <line x1={gx} y1={gy} x2={gx + sx * L} y2={gy} />
+                      <line x1={gx} y1={gy} x2={gx} y2={gy + sy * L} />
+                    </g>
+                  );
+                })}
+                {/* cantoneiras detectadas nos cantos reais do cartão */}
                 {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
                   const p = frameAnalysis?.corners[k];
                   if (!p) return null;
@@ -865,6 +1032,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             {confirmUrl && (
               <img src={confirmUrl} alt="Prévia travada" className="absolute inset-0 w-full h-full object-cover" />
             )}
+            {/* flash do obturador ao travar */}
+            {flashOn && (
+              <div className="absolute inset-0 bg-white pointer-events-none" />
+            )}
             {!autoMode && (
               <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-lg pointer-events-none" />
             )}
@@ -875,40 +1046,72 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             <div className="mb-4">
               <div className="flex items-center justify-between text-sm mb-1">
                 <span className={frameAnalysis?.locked ? 'text-emerald-600 font-medium' : 'text-gray-600'}>
-                  {frameAnalysis ? frameAnalysis.hint : 'Apontando a câmera...'}
+                  {sharpRetry ?? (frameAnalysis ? frameAnalysis.hint : 'Apontando a câmera...')}
                 </span>
                 <span className="text-xs text-gray-400">{frameAnalysis ? `${frameAnalysis.found}/4 cantos` : ''}</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
                 <div className="bg-emerald-500 h-2 rounded-full transition-all duration-150" style={{ width: `${Math.round(lockProgress * 100)}%` }} />
               </div>
+              {/* fallback manual: trava não engata há ~8s */}
+              {searchSecs >= 8 && !frameAnalysis?.locked && (
+                <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                  Enquadramento difícil? Toque em <strong>Capturar agora</strong> para forçar a captura.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* zoom óptico/digital (só onde o aparelho expõe — Android/Chrome) */}
+          {autoMode && !confirmUrl && zoomSupported && (
+            <div className="flex items-center gap-2 mb-4">
+              <span aria-hidden>🔍</span>
+              <input
+                type="range"
+                min={1}
+                max={maxZoom}
+                step={0.1}
+                value={zoom}
+                onChange={(e) => setZoomLevel(Number(e.target.value))}
+                className="flex-1 accent-blue-600"
+                aria-label="Zoom da câmera"
+              />
+              <span className="text-xs text-gray-500 w-9 text-right">{zoom.toFixed(1)}x</span>
             </div>
           )}
 
           <canvas ref={canvasRef} className="hidden" />
 
           {confirmUrl ? (
-            <div className="flex gap-3">
-              <button onClick={confirmAutoCapture} className="btn btn-success flex-1">
+            <div className="flex gap-3 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
+              <button onClick={confirmAutoCapture} className="btn btn-success flex-1 min-h-[48px]">
                 Enviar para correção
               </button>
-              <button onClick={retryAutoCapture} className="btn btn-secondary">
+              <button onClick={retryAutoCapture} className="btn btn-secondary min-h-[48px]">
                 Repetir
               </button>
             </div>
           ) : (
-            <div className="flex gap-3">
+            <div className="flex gap-3 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
               {!autoMode && (
-                <button onClick={captureFrame} className="btn btn-primary flex-1">
+                <button onClick={captureFrame} className="btn btn-primary flex-1 min-h-[48px]">
                   Capturar
                 </button>
               )}
-              {autoMode && torchSupported && (
-                <button onClick={toggleTorch} className={`btn flex-1 ${torchOn ? 'btn-success' : 'btn-secondary'}`}>
-                  {torchOn ? '🔦 Lanterna ligada' : '🔦 Lanterna'}
+              {autoMode && (
+                <button
+                  onClick={captureFrame}
+                  className={`btn btn-secondary flex-1 min-h-[48px] ${searchSecs >= 8 && !frameAnalysis?.locked ? 'animate-pulse border-amber-400' : ''}`}
+                >
+                  Capturar agora
                 </button>
               )}
-              <button onClick={() => { stopCamera(); setConfirmUrl(null); setStep('form'); }} className="btn btn-secondary">
+              {autoMode && torchSupported && (
+                <button onClick={toggleTorch} className={`btn min-h-[48px] ${torchOn ? 'btn-success' : 'btn-secondary'}`}>
+                  {torchOn ? '🔦 Ligada' : '🔦'}
+                </button>
+              )}
+              <button onClick={() => { stopCamera(); setConfirmUrl(null); setSharpRetry(null); setStep('form'); }} className="btn btn-secondary min-h-[48px]">
                 Cancelar
               </button>
             </div>
