@@ -13,9 +13,9 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .config import BLUR_BLOCK, FLOOR, LOW_CONF_THRESHOLD, MARGIN
+from .config import BLUR_BLOCK
 from .detector_sae import detect_sae_corners, sae_homography
-from .reader import OMRResult, _bubble_score, _decode_qr_from
+from .reader import OMRResult, _bubble_score, _decode_qr_from, classify_question
 from .template_sae import (
     PAGE_W, PAGE_H,
     SAE_BLOCKS_X, SAE_BUBBLE_DX, SAE_BUBBLE_RADIUS,
@@ -95,20 +95,17 @@ def process_sae_image(
     low_conf: list[int] = []
 
     for q_num, ratios in all_ratios.items():
-        ordered = sorted(ratios.items(), key=lambda kv: kv[1], reverse=True)
-        best_letter, best_score = ordered[0]
-        second_score = ordered[1][1] if len(ordered) > 1 else 0
-
-        if best_score < FLOOR:
+        status, best_letter, marks = classify_question(ratios)
+        if status == "blank":
             blank.append(q_num)
-        elif best_score - second_score < MARGIN and best_score > FLOOR:
+        elif status == "duplicate":
             duplicates.append(q_num)
-            dup_marks[q_num] = sorted(l for l, s in ratios.items() if s >= FLOOR)
-        elif best_score < LOW_CONF_THRESHOLD:
+            dup_marks[q_num] = marks
+        elif status == "low":
             low_conf.append(q_num)
-            answers[q_num] = best_letter
+            answers[q_num] = best_letter  # type: ignore[assignment]
         else:
-            answers[q_num] = best_letter
+            answers[q_num] = best_letter  # type: ignore[assignment]
 
     return OMRResult(
         answers=answers,

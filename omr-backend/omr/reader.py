@@ -50,6 +50,31 @@ class OMRResult:
     duplicate_marks: dict[int, list[str]] | None = None
 
 
+def classify_question(ratios: dict[str, float]) -> tuple[str, str | None, list[str]]:
+    """Classifica uma questão a partir dos scores A–D.
+
+    Devolve (status, melhor_letra, marcas):
+    - blank: melhor abaixo do piso — nada marcado;
+    - duplicate: DUAS ou mais acima do piso com gap < MARGIN — dupla real;
+    - low: ambíguo (uma no piso e demais abaixo, ou melhor fraco) — conferência manual;
+    - ok: vencedor claro.
+
+    A exigência da segunda acima do piso evita que duas bolhas VAZIAS
+    com score elevado por ruído (foto de celular) virem "duplicada".
+    """
+    ordered = sorted(ratios.items(), key=lambda kv: kv[1], reverse=True)
+    best_letter, best_score = ordered[0]
+    second_score = ordered[1][1] if len(ordered) > 1 else 0.0
+    if best_score < FLOOR:
+        return "blank", None, []
+    if second_score >= FLOOR and best_score - second_score < MARGIN:
+        marks = sorted(letter for letter, s in ratios.items() if s >= FLOOR)
+        return "duplicate", None, marks
+    if best_score < LOW_CONF_THRESHOLD or best_score - second_score < MARGIN:
+        return "low", best_letter, []
+    return "ok", best_letter, []
+
+
 def _sample_bubble_ratio(
     gray: np.ndarray, x: int, y: int, radius: int = int(BUBBLE_RADIUS)
 ) -> float:
@@ -274,6 +299,9 @@ def process_image(
 
     all_ratios: dict[int, dict[str, float]] = {}
     letters = ["A", "B", "C", "D"]
+    # Máscara um pouco menor que a bolha: ignora o contorno impresso e mede
+    # só o interior (marca de lápis/caneta). Bolhas vazias ≈ 0.05.
+    inner_radius = max(6, int(radius) - 2)
 
     for q, y in enumerate(question_y):
         q_num = q + 1
@@ -281,7 +309,7 @@ def process_image(
         q_ratios: dict[str, float] = {}
 
         for i, x in enumerate(xs):
-            score = _bubble_score(gray, int(x), y, radius=int(radius))
+            score = _bubble_score(gray, int(x), y, radius=inner_radius)
             q_ratios[letters[i]] = score
 
         all_ratios[q_num] = q_ratios
@@ -293,7 +321,7 @@ def process_image(
             q_ratios: dict[str, float] = {}
 
             for i, x in enumerate(MAT_X):
-                score = _bubble_score(gray, int(x), y)
+                score = _bubble_score(gray, int(x), y, radius=inner_radius)
                 q_ratios[letters[i]] = score
 
             all_ratios[q_num] = q_ratios
@@ -305,22 +333,17 @@ def process_image(
     low_conf: list[int] = []
 
     for q_num, ratios in all_ratios.items():
-        sorted_ratios = sorted(ratios.items(), key=lambda x: x[1], reverse=True)
-        best_letter, best_score = sorted_ratios[0]
-        second_score = sorted_ratios[1][1] if len(sorted_ratios) > 1 else 0
-
-        if best_score < FLOOR:
+        status, best_letter, marks = classify_question(ratios)
+        if status == "blank":
             blank.append(q_num)
-        elif best_score - second_score < MARGIN and best_score > FLOOR:
+        elif status == "duplicate":
             duplicates.append(q_num)
-            # Alternativas que o aluno marcou (todas acima do limiar)
-            marks = sorted(letter for letter, s in ratios.items() if s >= FLOOR)
             dup_marks[q_num] = marks
-        elif best_score < LOW_CONF_THRESHOLD:
+        elif status == "low":
             low_conf.append(q_num)
-            answers[q_num] = best_letter
+            answers[q_num] = best_letter  # type: ignore[assignment]
         else:
-            answers[q_num] = best_letter
+            answers[q_num] = best_letter  # type: ignore[assignment]
 
     return OMRResult(
         answers=answers,
