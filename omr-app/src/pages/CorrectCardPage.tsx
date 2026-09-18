@@ -15,7 +15,8 @@ import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
 import {
   guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide,
 } from '../utils/capture-guide';
-import { CARD_WIDTH, CARD_HEIGHT, BUBBLE_RADIUS, PORTUGUESE_X, MATHEMATICS_X, questionYFor } from '../utils/card-template';
+import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
+import { overlayRowFor, overlayBubbleFor } from '../utils/overlay-bubbles';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -1307,43 +1308,26 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                       })}
                     </g>
                   ) : (
-                  (() => { const qYs = questionYFor(activeExam.questionsPerSubject); return Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
-                    const q = i + 1;
-                    const y = qYs[i];
-                    const qGlobalPort = q;
-                    const qGlobalMat = q + activeExam.questionsPerSubject;
+                  Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
+                    // Geometria por layout (single usa colunas centrais) — overlay-bubbles.ts
+                    const { y, r, cells } = overlayRowFor(activeExam, i + 1);
                     return (
-                      <g key={q}>
-                        {/* Português */}
-                        {PORTUGUESE_X.map((x, ci) => {
-                          const letter = ['A','B','C','D'][ci];
-                          const key = activeExam.answerKey?.[qGlobalPort];
-                          const marked = manualAnswers[qGlobalPort] === letter;
+                      <g key={i + 1}>
+                        {cells.map(({ q: qg, letter, x }) => {
+                          const key = activeExam.answerKey?.[qg];
+                          const marked = manualAnswers[qg] === letter;
                           const isCorrect = key ? letter === key : false;
                           const isMarked = marked;
                           let stroke = '#333'; let fill = 'none'; let sw = 2;
                           if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
                           else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
                           else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
-                          return <circle key={`p-${q}-${letter}`} cx={x} cy={y} r={BUBBLE_RADIUS} fill={fill} stroke={stroke} strokeWidth={sw} />;
-                        })}
-                        {/* Matemática (dual) */}
-                        {activeExam.layoutMode !== 'single' && MATHEMATICS_X.map((x, ci) => {
-                          const letter = ['A','B','C','D'][ci];
-                          const key = activeExam.answerKey?.[qGlobalMat];
-                          const marked = manualAnswers[qGlobalMat] === letter;
-                          const isCorrect = key ? letter === key : false;
-                          const isMarked = marked;
-                          let stroke = '#333'; let fill = 'none'; let sw = 2;
-                          if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
-                          else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
-                          else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
-                          return <circle key={`m-${q}-${letter}`} cx={x} cy={y} r={BUBBLE_RADIUS} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                          return <circle key={`p-${qg}-${letter}`} cx={x} cy={y} r={r} fill={fill} stroke={stroke} strokeWidth={sw} />;
                         })}
                       </g>
                     );
-                  })})())
-                  }
+                  })
+                  )}
                   {/* marcações duplicadas em laranja */}
                   {(omrResult?.duplicateQuestions ?? []).map(q => {
                     if (overlaySae) {
@@ -1355,14 +1339,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         return <circle key={`dup-${q}-${letter}`} cx={x} cy={y} r={SAE_BUBBLE_RADIUS + 4} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
                       });
                     }
-                    const y = questionYFor(activeExam.questionsPerSubject)[(q - 1) % activeExam.questionsPerSubject];
-                    const isMat = activeExam.layoutMode !== 'single' && q > activeExam.questionsPerSubject;
-                    const xs = isMat ? MATHEMATICS_X : PORTUGUESE_X;
                     const marks = omrResult?.duplicateMarks?.[q] ?? [];
                     return marks.map(letter => {
-                      const ci = ['A','B','C','D'].indexOf(letter);
-                      if (ci < 0) return null;
-                      return <circle key={`dup-${q}-${letter}`} cx={xs[ci]} cy={y} r={BUBBLE_RADIUS + 4} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
+                      const pos = overlayBubbleFor(activeExam, q, letter);
+                      if (!pos) return null;
+                      return <circle key={`dup-${q}-${letter}`} cx={pos.x} cy={pos.y} r={pos.r + 4} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
                     });
                   })}
                 </svg>
