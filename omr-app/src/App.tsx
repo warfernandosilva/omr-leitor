@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppView } from './types';
 import Sidebar from './components/Sidebar';
 import ThemeToggle from './components/ui/ThemeToggle';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { saveNav, loadNav } from './utils/nav-persist';
 import HomePage from './pages/HomePage';
 import NewExamPage from './pages/NewExamPage';
 import GenerateCardPage from './pages/GenerateCardPage';
@@ -33,10 +34,19 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 }
 
 function AppInner() {
-  const [view, setView] = useState<AppView>('home');
-  const [selectedExamId, setSelectedExamId] = useState<string | null>(null);
-  const [selectedResultId, setSelectedResultId] = useState<string | null>(null);
+  // Restaura a tela após reload (ex.: volta da câmera nativa no Android)
+  const [view, setView] = useState<AppView>(() => loadNav()?.view ?? 'home');
+  const [selectedExamId, setSelectedExamId] = useState<string | null>(
+    () => loadNav()?.examId ?? null,
+  );
+  const [selectedResultId, setSelectedResultId] = useState<string | null>(
+    () => loadNav()?.resultId ?? null,
+  );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    saveNav({ view, examId: selectedExamId, resultId: selectedResultId });
+  }, [view, selectedExamId, selectedResultId]);
 
   const navigate = useCallback((v: AppView, examId?: string, resultId?: string) => {
     setView(v);

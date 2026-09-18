@@ -172,6 +172,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // Câmeras do aparelho (p/ botão de troca frontal/traseira)
+  const [videoDevices, setVideoDevices] = useState<string[]>([]);
+  const [deviceIdx, setDeviceIdx] = useState(0);
 
   const activeExam = selectedExamId ? exams.find(e => e.id === selectedExamId) : null;
 
@@ -216,20 +219,45 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
     && detectedIsFamily !== isSaeFamilyExam(activeExam);
 
-  const startCamera = async () => {
+  const startCamera = async (preferredDeviceId?: string | null, allowFileFallback = true) => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       fileInputRef.current?.click();
       return;
     }
     try {
       setError(null);
+      const size = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+      // Dispositivo pedido (troca manual) ou traseira detectada pelo nome
+      let rearId: string | null = preferredDeviceId ?? null;
+      if (!rearId) {
+        try {
+          const devs = await navigator.mediaDevices.enumerateDevices();
+          const videos = devs.filter(d => d.kind === 'videoinput');
+          const rear = videos.find(d => {
+            const l = (d.label || '').toLowerCase();
+            return /back|rear|traseira|environment|tras/.test(l) && !/front/.test(l);
+          });
+          rearId = rear?.deviceId || null;
+          if (videos.length > 0) {
+            setVideoDevices(videos.map(v => v.deviceId).filter(Boolean));
+          }
+        } catch {
+          /* sem permissão p/ nomes — segue p/ facingMode */
+        }
+      }
+      const tryGet = (video: MediaTrackConstraints) =>
+        navigator.mediaDevices.getUserMedia({ video });
       let stream: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-        });
+        stream = rearId
+          ? await tryGet({ deviceId: { exact: rearId }, ...size })
+          : await tryGet({ facingMode: { exact: 'environment' }, ...size });
       } catch {
-        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        try {
+          stream = await tryGet({ facingMode: { ideal: 'environment' }, ...size });
+        } catch {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        }
       }
       streamRef.current = stream;
       setStep('capture');
@@ -242,12 +270,26 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         await v.play().catch(() => undefined);
       }
     } catch (err) {
-      fileInputRef.current?.click();
+      if (allowFileFallback) fileInputRef.current?.click();
       const e = err as DOMException;
-      let msg = 'Câmera direta indisponível — abrindo câmera do sistema.';
+      let msg = allowFileFallback
+        ? 'Câmera direta indisponível — abrindo câmera do sistema.'
+        : 'Não foi possível trocar de câmera.';
       if (e?.name === 'NotAllowedError') msg = 'Permissão negada — use a câmera do sistema ou libere nas configurações.';
       setError(msg);
     }
+  };
+
+  // Alterna entre as câmeras do aparelho (resolve frontal aberta por padrão)
+  const switchCamera = async () => {
+    if (videoDevices.length < 2) return;
+    const next = (deviceIdx + 1) % videoDevices.length;
+    setDeviceIdx(next);
+    stopCamera();
+    resetAuto();
+    setConfirmUrl(null);
+    setSharpRetry(null);
+    await startCamera(videoDevices[next], false);
   };
 
   const captureDataUrl = (): string | null => {
@@ -943,7 +985,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
           <div className="flex gap-3">
             <button
-              onClick={startCamera}
+              onClick={() => startCamera()}
               disabled={!selectedExamId}
               className="btn btn-primary flex-1"
             >
@@ -968,13 +1010,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             className="hidden"
             onChange={handleFileUpload}
           />
           {!window.isSecureContext && (
             <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded-lg p-2">
-              Acesso via IP — ao clicar em “Capturar com Câmera” o sistema abre a câmera nativa do celular automaticamente.
+              Acesso via IP — ao clicar em “Capturar com Câmera” ou “Enviar Imagem” o sistema abre a câmera ou a galeria do celular.
             </p>
           )}
         </div>
@@ -1163,6 +1204,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               {autoMode && torchSupported && (
                 <button onClick={toggleTorch} className={`btn min-h-[48px] ${torchOn ? 'btn-success' : 'btn-secondary'}`}>
                   {torchOn ? '🔦 Ligada' : '🔦'}
+                </button>
+              )}
+              {videoDevices.length > 1 && (
+                <button
+                  onClick={switchCamera}
+                  className="btn btn-secondary min-h-[48px]"
+                  title="Trocar câmera (frontal/traseira)"
+                  aria-label="Trocar câmera"
+                >
+                  🔄
                 </button>
               )}
               <button onClick={() => { stopCamera(); setConfirmUrl(null); setSharpRetry(null); setStep('form'); }} className="btn btn-secondary min-h-[48px]">
