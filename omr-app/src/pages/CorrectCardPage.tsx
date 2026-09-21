@@ -51,6 +51,7 @@ interface BatchItem {
   answers?: Record<number, string>;
   dupQuestions?: number[];
   dupMarks?: Record<number, string[]>;
+  lowConfidence?: number[];
   detail?: string;
   previousNota?: number | null;
 }
@@ -614,6 +615,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       duplicateCount: dupList.length,
       duplicateQuestions: dupList,
       duplicateMarks: dupMarks,
+      lowConfidence: omrResult?.lowConfidence ?? [],
+      qrOk: identified?.kind === 'ok',
       codigoUnico,
       grade,
       timestamp: new Date().toISOString(),
@@ -707,6 +710,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         const dupMarks = result.duplicateMarks ?? {};
         const base = {
           answers, dupQuestions, dupMarks,
+          lowConfidence: result.lowConfidence ?? [],
         };
 
         // 2. Identificação obrigatória pelo QR (§13)
@@ -778,6 +782,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           duplicateCount: dupQuestions.length,
           duplicateQuestions: dupQuestions,
           duplicateMarks: dupMarks,
+          lowConfidence: item.lowConfidence ?? [],
+          qrOk: true,
           grade,
           timestamp: new Date().toISOString(),
           manualOverrides: {},
@@ -821,6 +827,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         duplicateCount: item.dupQuestions?.length ?? 0,
         duplicateQuestions: item.dupQuestions,
         duplicateMarks: item.dupMarks,
+        lowConfidence: item.lowConfidence ?? [],
+        qrOk: true,
         grade: item.grade ?? 0,
         timestamp: new Date().toISOString(),
         manualOverrides: {},
@@ -844,7 +852,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       blankQuestions: [],
       duplicateQuestions: item.dupQuestions,
       duplicateMarks: item.dupMarks,
-      lowConfidence: [],
+      lowConfidence: item.lowConfidence ?? [],
       cardId: item.cardId,
     });
     setManualAnswers({ ...(item.answers ?? {}) });

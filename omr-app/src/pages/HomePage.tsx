@@ -1,5 +1,6 @@
 import { AppView } from '../types';
 import { getExams, getResults } from '../utils/storage';
+import { pendingFromResults } from '../utils/pending';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -10,6 +11,8 @@ export default function HomePage({ onNavigate }: Props) {
   const { user } = useAuth();
   const exams = getExams(user?.id);
   const results = getResults(undefined, user?.id);
+  const pending = pendingFromResults(results);
+  const examName = (id: string) => exams.find((e) => e.id === id)?.name ?? 'Prova';
 
   const features = [
     ...(user?.role === 'admin'
@@ -80,6 +83,60 @@ export default function HomePage({ onNavigate }: Props) {
         <h1 className="text-3xl font-bold text-gray-900 mb-2">Painel de Controle</h1>
         <p className="text-gray-500">Sistema de geração, leitura e correção de cartões-resposta</p>
       </div>
+
+      {pending.length > 0 && (
+        <div className="card mb-6 border-amber-200 bg-amber-50/60">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">
+            ⚠ Pendências de revisão ({pending.length})
+          </h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Cartões com dupla marcação, leitura incerta ou QR ilegível — revise antes de fechar a prova.
+          </p>
+          <div className="space-y-2">
+            {pending.map((item) => (
+              <div key={item.resultId} className="flex flex-wrap items-center gap-2 p-3 bg-white rounded-lg border border-amber-100">
+                <div className="flex-1 min-w-[140px]">
+                  <p className="font-medium text-gray-900 text-sm">
+                    {item.studentName || '(sem identificação)'}
+                  </p>
+                  <p className="text-xs text-gray-500">{examName(item.examId)}</p>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {item.duplicateQuestions.length > 0 && (
+                    <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                      {item.duplicateQuestions.length} duplicada(s)
+                    </span>
+                  )}
+                  {item.lowConfidence.length > 0 && (
+                    <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
+                      {item.lowConfidence.length} incerta(s)
+                    </span>
+                  )}
+                  {item.qrIssue && (
+                    <span className="text-xs font-medium bg-red-100 text-red-700 px-2 py-1 rounded-full">
+                      QR ilegível
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-1">
+                  <button
+                    onClick={() => onNavigate('view-result', item.resultId)}
+                    className="btn btn-sm btn-secondary min-h-[44px]"
+                  >
+                    Ver
+                  </button>
+                  <button
+                    onClick={() => onNavigate('correct-card', item.examId)}
+                    className="btn btn-sm btn-primary min-h-[44px]"
+                  >
+                    Recorrigir
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
         {features.map((f) => (

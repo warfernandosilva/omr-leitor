@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AppView } from '../types';
-import { getResult, getExam } from '../utils/storage';
+import { getResult, getExam, saveResult } from '../utils/storage';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { getResultadosFromDB } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +16,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
 
   const [dbResult, setDbResult] = useState<ReturnType<typeof getResult> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [justReviewed, setJustReviewed] = useState(false);
 
   const local = resultId ? getResult(resultId, userId) : null;
 
@@ -47,6 +48,17 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
 
   const result = local || dbResult;
   const exam = result ? getExam(result.examId, userId) || getExam(result.examId) : null;
+
+  const reviewed = justReviewed || result?.reviewed === true;
+  const pendingDup = result && !reviewed ? (result.duplicateQuestions ?? []) : [];
+  const pendingLow = result && !reviewed ? (result.lowConfidence ?? []) : [];
+  const needsReview = pendingDup.length > 0 || pendingLow.length > 0;
+
+  const handleMarkReviewed = () => {
+    if (!result || !local) return;
+    saveResult({ ...result, reviewed: true }, userId);
+    setJustReviewed(true);
+  };
 
   if (loading) {
     return <div className="card text-center py-12"><p className="text-gray-500">Carregando...</p></div>;
@@ -162,6 +174,31 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
         <p className="text-sm text-gray-400">
           Corrigido em {new Date(result.timestamp).toLocaleString('pt-BR')}
         </p>
+        {(needsReview || reviewed) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {pendingDup.length > 0 && (
+              <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
+                {pendingDup.length} duplicada(s): Q{pendingDup.join(', Q')}
+              </span>
+            )}
+            {pendingLow.length > 0 && (
+              <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
+                {pendingLow.length} leitura(s) incerta(s): Q{pendingLow.join(', Q')}
+              </span>
+            )}
+            {needsReview ? (
+              local && (
+                <button onClick={handleMarkReviewed} className="btn btn-sm btn-primary min-h-[44px]">
+                  ✓ Marcar como revisado
+                </button>
+              )
+            ) : (
+              <span className="text-xs font-medium bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+                ✓ Revisado
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card mb-4">

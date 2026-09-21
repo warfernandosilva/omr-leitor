@@ -79,6 +79,12 @@ export interface StudentResult {
   grade: number;
   timestamp: string;
   manualOverrides: Record<number, string>;
+  /** Questões de leitura incerta no OMR (para a fila de revisão) */
+  lowConfidence?: number[];
+  /** false = QR não lido na foto que gerou este resultado */
+  qrOk?: boolean;
+  /** professor já revisou as pendências deste resultado */
+  reviewed?: boolean;
 }
 
 export type AppView =
