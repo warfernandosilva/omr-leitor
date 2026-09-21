@@ -46,6 +46,7 @@ from omr.template_sae import (
 )
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
+from omr.config import MARGIN
 from omr.grading import grade, GradingResult
 
 app = FastAPI(title="OMR Backend", version="2.0.0")
@@ -77,6 +78,7 @@ class ProcessResponse(BaseModel):
     card_id: str | None = None
     rectified_image: str | None = None  # base64 dataURL da imagem retificada (para overlay perfeito)
     template_used: str | None = None  # "padrao" | "sae" — modelo detectado (fallback cruzado)
+    thresholds_used: dict | None = None  # {floor, margin, source: fixed|adaptive}
     error: str | None = None
 
 
@@ -355,6 +357,7 @@ async def process_omr(
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
     template: str = Form("padrao"),  # padrao | sae | colar (colar: mesma grade do sae, sem QR)
+    adaptive: bool = Form(False),  # limiar adaptativo por foto (experimental, default OFF)
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa uma imagem (foto/scan) do cartão preenchido."""
@@ -405,12 +408,13 @@ async def process_omr(
     result: OMRResult | None
     template_used = template if template in ("padrao", "sae", "colar") else "padrao"
     if template_used in ("sae", "colar"):
-        result = process_sae_image(image, n_questions=questions_per_subject)
+        result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
     else:
         result = process_image(
             image,
             questions_per_subject=questions_per_subject,
             layout_mode=layout_mode,
+            adaptive=adaptive,
         )
 
     # Fallback cruzado: clientes antigos (app de captura no celular, Flutter)
@@ -418,7 +422,7 @@ async def process_omr(
     # de desistir. A resposta indica qual foi usado (template_used).
     # (colar tem a mesma geometria do sae: o fallback "sae" o cobre.)
     if result is None and template_used == "padrao":
-        sae_result = process_sae_image(image, n_questions=questions_per_subject)
+        sae_result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
         if sae_result is not None:
             result = sae_result
             template_used = "sae"
@@ -427,6 +431,7 @@ async def process_omr(
             image,
             questions_per_subject=questions_per_subject,
             layout_mode=layout_mode,
+            adaptive=adaptive,
         )
         if std_result is not None:
             result = std_result
@@ -481,6 +486,11 @@ async def process_omr(
         card_id=result.qr_id,
         rectified_image=rectified_b64,
         template_used=template_used,
+        thresholds_used={
+            "floor": round(result.floor_used, 3),
+            "margin": MARGIN,
+            "source": result.floor_source,
+        },
     )
 
 

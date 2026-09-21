@@ -13,7 +13,8 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .config import BLUR_BLOCK
+from .config import BLUR_BLOCK, FLOOR, MARGIN
+from .adaptive import adaptive_floor
 from .detector_sae import detect_sae_corners, sae_homography
 from .reader import OMRResult, _bubble_score, _decode_qr_from, classify_question
 from .template_sae import (
@@ -46,6 +47,7 @@ def _decode_sae_qr(gray_rectified: np.ndarray) -> str | None:
 def process_sae_image(
     image: np.ndarray,
     n_questions: int | None = None,
+    adaptive: bool = False,
 ) -> OMRResult | None:
     """Pipeline completo OMR-SAE. n_questions = total de questões (1..28)."""
     n = max(1, min(SAE_MAX_QUESTIONS, int(n_questions or 26)))
@@ -94,8 +96,13 @@ def process_sae_image(
     dup_marks: dict[int, list[str]] = {}
     low_conf: list[int] = []
 
+    floor, floor_source = FLOOR, "fixed"
+    if adaptive:
+        flat = [s for qr in all_ratios.values() for s in qr.values()]
+        floor, floor_source = adaptive_floor(flat)
+
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios)
+        status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":
@@ -116,4 +123,6 @@ def process_sae_image(
         rectified=rectified,
         qr_id=qr_id,
         duplicate_marks=dup_marks,
+        floor_used=floor,
+        floor_source=floor_source,
     )

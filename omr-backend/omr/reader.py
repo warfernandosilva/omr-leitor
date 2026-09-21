@@ -36,6 +36,7 @@ class BubbleReading:
 
 
 from .config import FLOOR, LOW_CONF_THRESHOLD, MARGIN
+from .adaptive import adaptive_floor
 
 
 @dataclass
@@ -48,29 +49,37 @@ class OMRResult:
     rectified: np.ndarray | None = None
     qr_id: str | None = None
     duplicate_marks: dict[int, list[str]] | None = None
+    floor_used: float = FLOOR
+    floor_source: str = "fixed"  # "fixed" | "adaptive"
 
 
-def classify_question(ratios: dict[str, float]) -> tuple[str, str | None, list[str]]:
+def classify_question(
+    ratios: dict[str, float],
+    floor: float = FLOOR,
+    margin: float = MARGIN,
+) -> tuple[str, str | None, list[str]]:
     """Classifica uma questão a partir dos scores A–D.
 
     Devolve (status, melhor_letra, marcas):
     - blank: melhor abaixo do piso — nada marcado;
-    - duplicate: DUAS ou mais acima do piso com gap < MARGIN — dupla real;
+    - duplicate: DUAS ou mais acima do piso com gap < margin — dupla real;
     - low: ambíguo (uma no piso e demais abaixo, ou melhor fraco) — conferência manual;
     - ok: vencedor claro.
 
     A exigência da segunda acima do piso evita que duas bolhas VAZIAS
     com score elevado por ruído (foto de celular) virem "duplicada".
+    O limiar de baixa confiança acompanha o piso (mesmo offset do fixo).
     """
+    low_thr = floor + (LOW_CONF_THRESHOLD - FLOOR)
     ordered = sorted(ratios.items(), key=lambda kv: kv[1], reverse=True)
     best_letter, best_score = ordered[0]
     second_score = ordered[1][1] if len(ordered) > 1 else 0.0
-    if best_score < FLOOR:
+    if best_score < floor:
         return "blank", None, []
-    if second_score >= FLOOR and best_score - second_score < MARGIN:
-        marks = sorted(letter for letter, s in ratios.items() if s >= FLOOR)
+    if second_score >= floor and best_score - second_score < margin:
+        marks = sorted(letter for letter, s in ratios.items() if s >= floor)
         return "duplicate", None, marks
-    if best_score < LOW_CONF_THRESHOLD or best_score - second_score < MARGIN:
+    if best_score < low_thr or best_score - second_score < margin:
         return "low", best_letter, []
     return "ok", best_letter, []
 
@@ -246,6 +255,7 @@ def process_image(
     image: np.ndarray,
     questions_per_subject: int | None = None,
     layout_mode: str = LAYOUT_DUAL,
+    adaptive: bool = False,
 ) -> OMRResult | None:
     """Pipeline completo OMR. questions_per_subject define quantas linhas ler."""
     single = layout_mode == LAYOUT_SINGLE
@@ -332,8 +342,15 @@ def process_image(
     dup_marks: dict[int, list[str]] = {}
     low_conf: list[int] = []
 
+    # Limiar adaptativo: divisor calculado dos scores desta foto
+    # (desligado por padrão — comportamento idêntico ao fixo).
+    floor, floor_source = FLOOR, "fixed"
+    if adaptive:
+        flat = [s for qr in all_ratios.values() for s in qr.values()]
+        floor, floor_source = adaptive_floor(flat)
+
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios)
+        status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":
@@ -354,4 +371,6 @@ def process_image(
         rectified=rectified,
         qr_id=qr_id,
         duplicate_marks=dup_marks,
+        floor_used=floor,
+        floor_source=floor_source,
     )

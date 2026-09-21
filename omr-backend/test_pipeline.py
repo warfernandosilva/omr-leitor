@@ -12,7 +12,7 @@ print(f'   Shape: {card.shape}')
 
 print('2. Detectando marcadores...')
 det = detect_markers(card)
-print(f'   Encontrados: {len(det.markers)}/4, faltantes: {det.missing_names}')
+print(f'   Encontrados: {len(det.markers)}/4, faltantes: {det.missing_ids}')
 
 print('3. Validando geometria...')
 valid = validate_geometry(det.markers)
