@@ -10,6 +10,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "test": "vitest run",
+    "pwa:icons": "node scripts/gen-icons.mjs",
     "electron:dev": "cross-env ELECTRON_START_URL=http://localhost:5173 electron .",
     "pre-electron:build": "node -e \"const fs=require('fs'); const p='../omr-backend/dist/main.exe'; if(!fs.existsSync(require('path').resolve(__dirname,p))){console.error('ERRO: '+p+' nao encontrado. Rode: cd omr-backend && build-backend-exe.bat'); process.exit(1)} else console.log('Backend exe ok: '+p)\"",
     "electron:build": "tsc -b && vite build && electron-builder --win --x64"
@@ -27,6 +28,7 @@
     "react-router-dom": "^7.18.2",
     "recharts": "^3.10.1",
     "uuid": "^14.0.1",
+    "vite-plugin-pwa": "1.3.0",
     "xlsx": "^0.18.5"
   },
   "build": {

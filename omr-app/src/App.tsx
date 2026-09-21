@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import ThemeToggle from './components/ui/ThemeToggle';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { saveNav, loadNav } from './utils/nav-persist';
+import { initPwa, applyPwaUpdate, PWA_UPDATE_EVENT } from './pwa';
 import HomePage from './pages/HomePage';
 import NewExamPage from './pages/NewExamPage';
 import GenerateCardPage from './pages/GenerateCardPage';
@@ -43,6 +44,14 @@ function AppInner() {
     () => loadNav()?.resultId ?? null,
   );
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pwaUpdate, setPwaUpdate] = useState(false);
+
+  useEffect(() => {
+    initPwa();
+    const onUpdate = () => setPwaUpdate(true);
+    window.addEventListener(PWA_UPDATE_EVENT, onUpdate);
+    return () => window.removeEventListener(PWA_UPDATE_EVENT, onUpdate);
+  }, []);
 
   useEffect(() => {
     saveNav({ view, examId: selectedExamId, resultId: selectedResultId });
@@ -116,6 +125,23 @@ function AppInner() {
       </main>
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/30 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
+      )}
+      {pwaUpdate && (
+        <div className="fixed bottom-4 left-4 right-4 z-50 max-w-md mx-auto bg-indigo-600 text-white rounded-xl shadow-lg p-4 flex items-center gap-3">
+          <span className="text-sm flex-1">Nova versão do app disponível.</span>
+          <button
+            onClick={() => applyPwaUpdate()}
+            className="bg-white text-indigo-700 text-sm font-bold px-4 py-2 rounded-lg min-h-[44px]"
+          >
+            Atualizar
+          </button>
+          <button
+            onClick={() => setPwaUpdate(false)}
+            className="text-indigo-200 text-sm px-2 py-2 min-h-[44px]"
+          >
+            Depois
+          </button>
+        </div>
       )}
     </div>
   );
