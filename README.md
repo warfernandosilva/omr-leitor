@@ -1,5 +1,7 @@
 # OMR Correção — Cartões-resposta A4 (1448×2048, ArUco DICT_4X4_50)
 
+![CI](https://github.com/warfernandosilva/omr-leitor/actions/workflows/ci.yml/badge.svg)
+
 Sistema de correção de cartões-resposta com marcadores ArUco, QR por aluno e leitura por câmera. Frontend React + Vite, backend FastAPI + OpenCV.
 
 ## Pré-requisitos
