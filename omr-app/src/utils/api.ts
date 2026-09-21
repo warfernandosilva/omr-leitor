@@ -88,7 +88,27 @@ export interface ProcessResult {
   cardId?: string;
   rectifiedImage?: string;
   templateUsed?: 'padrao' | 'sae' | 'colar';
+  thresholdsUsed?: { floor: number; margin: number; source: string };
   error?: string;
+}
+
+// ─── Limiar adaptativo (experimental): preferência persistida ───
+const ADAPTIVE_KEY = 'omr-adaptive';
+
+export function loadAdaptiveFlag(): boolean {
+  try {
+    return localStorage.getItem(ADAPTIVE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveAdaptiveFlag(v: boolean): void {
+  try {
+    localStorage.setItem(ADAPTIVE_KEY, v ? '1' : '0');
+  } catch {
+    // modo privado etc. — segue sem persistir
+  }
 }
 
 export interface GradeResult {
@@ -132,12 +152,14 @@ export async function processImage(
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
   template?: 'padrao' | 'sae' | 'colar',
+  adaptive?: boolean,
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('questions_per_subject', String(questionsPerSubject ?? 22));
   formData.append('layout_mode', layoutMode ?? 'dual');
   formData.append('template', template ?? 'padrao');
+  formData.append('adaptive', adaptive ? 'true' : 'false');
 
   const res = await fetch(`${API_BASE}/api/omr/process`, {
     method: 'POST',
@@ -165,6 +187,11 @@ export async function processImage(
     cardId: data.card_id || undefined,
     rectifiedImage: data.rectified_image || undefined,
     templateUsed: data.template_used === 'sae' || data.template_used === 'colar' ? data.template_used : data.template_used === 'padrao' ? 'padrao' : undefined,
+    thresholdsUsed: data.thresholds_used ? {
+      floor: Number(data.thresholds_used.floor ?? 0.3),
+      margin: Number(data.thresholds_used.margin ?? 0.15),
+      source: String(data.thresholds_used.source ?? 'fixed'),
+    } : undefined,
     error: data.error,
   };
 }

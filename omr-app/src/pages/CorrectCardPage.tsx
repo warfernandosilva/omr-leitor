@@ -6,7 +6,7 @@ import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
   processImage as apiProcessImage, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
-  getExamsFromDB, checkHealth,
+  getExamsFromDB, checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
@@ -150,6 +150,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // Modo contínuo: após salvar, volta direto à câmera (correção em série)
   const [continuous, setContinuous] = useState(false);
   const [sessionCount, setSessionCount] = useState(0);
+  // Limiar adaptativo por foto (experimental, default OFF até evidência)
+  const [adaptive, setAdaptive] = useState(() => loadAdaptiveFlag());
+  const handleAdaptiveToggle = () => {
+    setAdaptive(prev => {
+      const next = !prev;
+      saveAdaptiveFlag(next);
+      return next;
+    });
+  };
   // Visor imersivo: flash do obturador, tempo de busca e portão de nitidez
   const [flashOn, setFlashOn] = useState(false);
   const [searchSecs, setSearchSecs] = useState(0);
@@ -444,7 +453,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
       const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaeExam(activeExam) ? 'sae' : 'padrao';
-      const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado);
+      const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, adaptive);
       setProcessingProgress(100);
 
       setOmrResult(result);
@@ -699,7 +708,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       try {
         // 1. Leitura OMR + QR
-        const result = await apiProcessImage(item.file, qps, layoutMode);
+        const result = await apiProcessImage(item.file, qps, layoutMode, undefined, adaptive);
         if (!result.success || !result.answers) {
           patchItem(item.fileName, { status: 'error', detail: result.error || 'Falha na leitura' });
           continue;
@@ -877,7 +886,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       )}
 
       {step === 'form' && (
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap items-center gap-2 mb-6">
           {(['individual', 'lote'] as const).map(m => (
             <button
               key={m}
@@ -892,6 +901,18 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               {m === 'individual' ? 'Individual' : 'Em lote (várias fotos)'}
             </button>
           ))}
+          <button
+            onClick={handleAdaptiveToggle}
+            disabled={batchRunning}
+            title="Calcula o divisor marcado/vazio a partir da própria foto (experimental)"
+            className={`ml-auto px-4 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${
+              adaptive
+                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {adaptive ? '◉ Limiar adaptativo' : '○ Limiar adaptativo'}
+          </button>
         </div>
       )}
 
@@ -1366,6 +1387,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               mas a prova selecionada usa o modelo{' '}
               <strong>{templateLabel(activeExam?.templateType)}</strong>.
               A leitura foi feita no modelo detectado — confira se a prova está correta antes de salvar.
+            </div>
+          )}
+
+          {omrResult.thresholdsUsed && (
+            <div className="text-xs text-gray-500">
+              Limiar: {omrResult.thresholdsUsed.source === 'adaptive'
+                ? `adaptativo (${omrResult.thresholdsUsed.floor.toFixed(3)}, calculado desta foto)`
+                : `fixo (${omrResult.thresholdsUsed.floor.toFixed(3)})`}
             </div>
           )}
 

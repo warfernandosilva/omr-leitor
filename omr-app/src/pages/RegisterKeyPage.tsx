@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { AppView, isSaeExam } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
-import { putAnswerKeyDB, processImage as apiProcessImage } from '../utils/api';
+import { putAnswerKeyDB, processImage as apiProcessImage, loadAdaptiveFlag } from '../utils/api';
 import { keyFromProcessResult, KeyFlag } from '../utils/key-from-photo';
 import { useAuth } from '../context/AuthContext';
 
@@ -81,6 +81,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
         activeExam.questionsPerSubject,
         activeExam.layoutMode ?? 'dual',
         template,
+        loadAdaptiveFlag(),
       );
       if (!res.success || !res.answers) {
         setReadError(res.error || 'Falha na leitura da foto — tente novamente com melhor iluminação.');
