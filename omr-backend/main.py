@@ -711,8 +711,8 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     if req.layout_mode not in ("dual", "single"):
         raise HTTPException(status_code=400, detail="layout_mode deve ser 'dual' ou 'single'")
     av.layout_mode = req.layout_mode
-    if req.template not in ("padrao", "sae", "colar"):
-        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae' ou 'colar'")
+    if req.template not in ("padrao", "sae", "colar", "saev"):
+        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar' ou 'saev'")
     av.template = req.template
     if req.sae is not None:
         spec = req.sae.to_spec()
