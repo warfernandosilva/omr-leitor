@@ -17,6 +17,7 @@ import {
 } from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
 import { overlayRowFor, overlayBubbleFor } from '../utils/overlay-bubbles';
+import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -229,6 +230,20 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const overlaySae = omrResult?.templateUsed ? detectedIsFamily : isSaeFamilyExam(activeExam);
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
     && detectedIsFamily !== isSaeFamilyExam(activeExam);
+
+  // Recorte do gabarito: mesma decisão de modelo do overlay (detectado
+  // vence) — a visualização mostra só a grade de bolhas, não a folha toda.
+  const cropBox = useMemo(() => {
+    if (!activeExam) return null;
+    return gabaritoCropBox({
+      questionsPerSubject: activeExam.questionsPerSubject,
+      layoutMode: activeExam.layoutMode,
+      totalQuestions: activeExam.totalQuestions,
+      templateType: overlaySae
+        ? (activeExam.templateType === 'colar' ? 'colar' : 'sae')
+        : 'padrao',
+    });
+  }, [activeExam, overlaySae]);
 
   const startCamera = async (preferredDeviceId?: string | null, allowFileFallback = true) => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -1307,13 +1322,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           {/* Overlay gabarito na captura — verde=correto, vermelho=incorreto */}
           {capturedImage && activeExam?.answerKey && (
             <div className="card">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Visualização da correção na imagem</h3>
+              <h3 className="text-sm font-medium text-gray-700 mb-2">Gabarito recortado</h3>
               <p className="text-xs text-gray-500 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada</p>
-              <div style={{ position: 'relative', width: '100%', maxWidth: 420, margin: '0 auto', aspectRatio: `${CARD_WIDTH}/${CARD_HEIGHT}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: cropBox ? `${cropBox.w}/${cropBox.h}` : `${CARD_WIDTH}/${CARD_HEIGHT}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
                 {/* fundo retificado do backend (alinhado 1:1 com template) — fallback para foto crua */}
-                <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
-                {/* overlay SVG na geometria do template 1448x2048 */}
-                <svg viewBox={`0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+                {cropBox ? (
+                  <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', left: `${-cropBox.x / cropBox.w * 100}%`, top: `${-cropBox.y / cropBox.h * 100}%`, width: `${CARD_WIDTH / cropBox.w * 100}%`, height: `${CARD_HEIGHT / cropBox.h * 100}%`, maxWidth: 'none', objectFit: 'fill', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
+                ) : (
+                  <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
+                )}
+                {/* overlay SVG na geometria do template 1448x2048 (recortado p/ o gabarito) */}
+                <svg viewBox={cropBox ? `${cropBox.x} ${cropBox.y} ${cropBox.w} ${cropBox.h}` : `0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
                   {overlaySae ? (
                     <g>
                       {Array.from({ length: activeExam.totalQuestions }, (_, i) => {
