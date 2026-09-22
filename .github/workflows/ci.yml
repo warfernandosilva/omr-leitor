@@ -49,3 +49,5 @@ jobs:
           python test_pipeline.py
           python test_persistence.py
           python test_ops.py
+          python test_fuzz.py
+          python test_contract.py
