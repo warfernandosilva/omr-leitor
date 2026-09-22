@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import cv2
 import numpy as np
+import time as _time
 
 from .config import BLUR_BLOCK, FLOOR, MARGIN
 from .adaptive import adaptive_floor
@@ -91,17 +92,21 @@ def process_saev_image(
     """Pipeline completo OMR-SAEV. questions_per_subject = por disciplina (16..26)."""
     qps = max(1, min(SAEV_MAX_QPS, int(questions_per_subject or 22)))
 
+    _t0 = _time.perf_counter()
     det = detect_saev_corners(image)
+    t_detect = _time.perf_counter() - _t0
     if not det.found:
         return None
 
     M = saev_homography(det.centers)
     if M is None:
         return None
+    _t1 = _time.perf_counter()
     try:
         rectified = cv2.warpPerspective(image, M, (PAGE_W, PAGE_H))
     except cv2.error:
         return None
+    t_warp = _time.perf_counter() - _t1
 
     gray = cv2.cvtColor(rectified, cv2.COLOR_BGR2GRAY) if len(rectified.shape) == 3 else rectified
 
@@ -112,7 +117,10 @@ def process_saev_image(
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     gray = clahe.apply(gray)
 
+    _t2 = _time.perf_counter()
     qr_id = _decode_saev_qr(gray)
+    t_qr = _time.perf_counter() - _t2
+    _t3 = _time.perf_counter()
 
     letters = ["A", "B", "C", "D"]
     all_ratios: dict[int, dict[str, float]] = {}
@@ -154,6 +162,8 @@ def process_saev_image(
         else:
             answers[q_num] = best_letter  # type: ignore[assignment]
 
+    t_score = _time.perf_counter() - _t3
+
     return OMRResult(
         answers=answers,
         blank_questions=blank,
@@ -165,4 +175,8 @@ def process_saev_image(
         duplicate_marks=dup_marks,
         floor_used=floor,
         floor_source=floor_source,
+        t_detect=t_detect,
+        t_warp=t_warp,
+        t_qr=t_qr,
+        t_score=t_score,
     )

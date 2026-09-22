@@ -31,10 +31,27 @@ from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
+from collections import deque
+from datetime import datetime, timezone
+import logging
+import json as _json
 
 from database import DB_LABEL, get_db, init_db
 from models import Aluno, Avaliacao, GabaritoNomeado, User
 import auth
+
+logger = logging.getLogger("omr")
+
+# ─── Observabilidade: buffer circular das últimas correções (sem PII, sem DB) ───
+OPS_BUFFER: deque = deque(maxlen=200)
+
+
+def _ops_record(rec: dict) -> None:
+    OPS_BUFFER.append(rec)
+    try:
+        logger.info("OMR %s", _json.dumps(rec, ensure_ascii=False))
+    except Exception:
+        pass
 
 from omr.template import (
     generate_card, generate_card_png,
@@ -210,6 +227,44 @@ def _next_codigo(db: Session) -> str:
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": "2.0.0", "db": DB_LABEL}
+
+
+@app.get("/api/ops/stats")
+def ops_stats(current_user: User = Depends(auth.get_current_user)):
+    """Métricas das últimas correções (buffer em memória, sem PII).
+
+    Detecta drift operacional: ex. "turma com 40% low" = problema de
+    impressão/luz, não do algoritmo.
+    """
+    recs = list(OPS_BUFFER)
+    n = len(recs)
+    out: dict = {"n_calls": n}
+    if n:
+        ok_calls = [r for r in recs if r.get("success")]
+        out["success_rate"] = round(len(ok_calls) / n, 3)
+        by_model: dict[str, dict] = {}
+        for r in ok_calls:
+            m = by_model.setdefault(r.get("model") or "?", {
+                "n": 0, "dup": 0, "low": 0, "answers": 0,
+                "t_total_ms": 0, "t_detect_ms": 0, "adaptive": 0,
+            })
+            m["n"] += 1
+            m["dup"] += r.get("dup", 0)
+            m["low"] += r.get("low", 0)
+            m["answers"] += r.get("answers", 0)
+            m["t_total_ms"] += r.get("t_total_ms", 0)
+            m["t_detect_ms"] += r.get("t_detect_ms", 0)
+            m["adaptive"] += 1 if r.get("floor_source") == "adaptive" else 0
+        for m in by_model.values():
+            if m["n"]:
+                m["t_total_ms_avg"] = round(m.pop("t_total_ms") / m["n"])
+                m["t_detect_ms_avg"] = round(m.pop("t_detect_ms") / m["n"])
+                m["dup_rate"] = round(m["dup"] / max(1, m["answers"]), 3)
+                m["low_rate"] = round(m["low"] / max(1, m["answers"]), 3)
+        out["by_model"] = by_model
+        out["rejected"] = sum(1 for r in recs if r.get("rejected"))
+        out["last"] = recs[-1]
+    return out
 
 
 @app.get("/api/template/coords")
@@ -513,6 +568,20 @@ async def process_omr(
         total_lido,
     )
     if not sanity.ok:
+        _ops_record({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "model": template_used,
+            "success": False,
+            "rejected": "sanity",
+            "answers": len(result.answers),
+            "blank": len(result.blank_questions),
+            "dup": len(result.duplicate_questions),
+            "low": len(result.low_confidence),
+            "t_detect_ms": round(result.t_detect * 1000),
+            "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+            "floor": round(result.floor_used, 3),
+            "floor_source": result.floor_source,
+        })
         return ProcessResponse(
             success=False,
             error=sanity.message,
@@ -525,6 +594,20 @@ async def process_omr(
                 "source": result.floor_source,
             },
         )
+
+    _ops_record({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "model": template_used,
+        "success": True,
+        "answers": len(result.answers),
+        "blank": len(result.blank_questions),
+        "dup": len(result.duplicate_questions),
+        "low": len(result.low_confidence),
+        "t_detect_ms": round(result.t_detect * 1000),
+        "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+        "floor": round(result.floor_used, 3),
+        "floor_source": result.floor_source,
+    })
 
     return ProcessResponse(
         success=True,

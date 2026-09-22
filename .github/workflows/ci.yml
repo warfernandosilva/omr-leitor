@@ -48,3 +48,4 @@ jobs:
           python test_detection_rate.py
           python test_pipeline.py
           python test_persistence.py
+          python test_ops.py

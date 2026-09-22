@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+import time as _time
 
 from .detector import DetectionResult, ArUcoMarker, detect_markers, validate_geometry, get_homography_points
 from .template import (
@@ -51,6 +52,11 @@ class OMRResult:
     duplicate_marks: dict[int, list[str]] | None = None
     floor_used: float = FLOOR
     floor_source: str = "fixed"  # "fixed" | "adaptive"
+    # Tempos por etapa (segundos) — observabilidade
+    t_detect: float = 0.0
+    t_warp: float = 0.0
+    t_qr: float = 0.0
+    t_score: float = 0.0
 
 
 def classify_question(
@@ -273,7 +279,9 @@ def process_image(
         qps = max(1, min(MAX_QUESTIONS_PER_SUBJECT, int(qps)))
         question_y = question_y_for(qps)
 
+    _t0 = _time.perf_counter()
     det = detect_markers(image)
+    t_detect = _time.perf_counter() - _t0
     if det.missing_ids:
         return None
 
@@ -288,7 +296,9 @@ def process_image(
         M, _ = cv2.findHomography(src, dst, cv2.RANSAC, REPROJ_MAX)
         if M is None:
             return None
+    _t1 = _time.perf_counter()
     rectified = cv2.warpPerspective(image, M, (PAGE_W, PAGE_H))
+    t_warp = _time.perf_counter() - _t1
 
     if len(rectified.shape) == 3:
         gray = cv2.cvtColor(rectified, cv2.COLOR_BGR2GRAY)
@@ -305,7 +315,10 @@ def process_image(
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     gray = clahe.apply(gray)
 
+    _t2 = _time.perf_counter()
     qr_id = _decode_card_qr(gray, image, M)
+    t_qr = _time.perf_counter() - _t2
+    _t3 = _time.perf_counter()
 
     all_ratios: dict[int, dict[str, float]] = {}
     letters = ["A", "B", "C", "D"]
@@ -362,6 +375,8 @@ def process_image(
         else:
             answers[q_num] = best_letter  # type: ignore[assignment]
 
+    t_score = _time.perf_counter() - _t3
+
     return OMRResult(
         answers=answers,
         blank_questions=blank,
@@ -373,4 +388,8 @@ def process_image(
         duplicate_marks=dup_marks,
         floor_used=floor,
         floor_source=floor_source,
+        t_detect=t_detect,
+        t_warp=t_warp,
+        t_qr=t_qr,
+        t_score=t_score,
     )
