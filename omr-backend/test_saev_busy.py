@@ -21,7 +21,7 @@ from omr.reader_saev import process_saev_image
 
 QPS = 22
 N = QPS * 2
-BUDGET = 20.0
+BUDGET = 8.0  # era 57s antes do _pick_four vetorizado; pipeline faz ~0.2s local
 
 
 def check(name: str, cond: bool, detail: str = ""):

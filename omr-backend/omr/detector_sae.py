@@ -131,16 +131,52 @@ def _rect_score(
     return score
 
 
-def _score_combo(centers: np.ndarray, combo: tuple[int, ...], img_area: float,
-                 expected_centers: dict[str, tuple[float, float]]
-                 ) -> tuple[float | None, dict[str, tuple[float, float]] | None]:
-    """Score de um quarteto (None = descarta pelo filtro de área)."""
-    quad = centers[list(combo)]
-    ordered = _order_quad(quad)
-    pts = np.array([ordered[k] for k in CORNERS_ORDER], dtype=np.float32)
-    if float(cv2.contourArea(pts)) < img_area * 0.10:
-        return None, None
-    return _rect_score(ordered, expected_centers), ordered
+def _order_quads(pts: np.ndarray) -> np.ndarray:
+    """Ordena M quadriláteros em TL/TR/BR/BL (versão vetorizada de _order_quad)."""
+    m = pts.shape[0]
+    rank_y = np.argsort(pts[:, :, 1], axis=1)
+    s = pts[np.arange(m)[:, None], rank_y]
+    top2, bot2 = s[:, :2, :], s[:, 2:, :]
+    top2 = top2[np.arange(m)[:, None], np.argsort(top2[:, :, 0], axis=1)]
+    bot2 = bot2[np.arange(m)[:, None], np.argsort(bot2[:, :, 0], axis=1)]
+    return np.stack([top2[:, 0], top2[:, 1], bot2[:, 1], bot2[:, 0]], axis=1)
+
+
+def _quad_areas(ordered: np.ndarray) -> np.ndarray:
+    """Área (shoelace) de M quadriláteros já ordenados."""
+    x, y = ordered[:, :, 0], ordered[:, :, 1]
+    return 0.5 * np.abs(
+        x[:, 0] * y[:, 1] + x[:, 1] * y[:, 2] + x[:, 2] * y[:, 3] + x[:, 3] * y[:, 0]
+        - y[:, 0] * x[:, 1] - y[:, 1] * x[:, 2] - y[:, 2] * x[:, 3] - y[:, 3] * x[:, 0]
+    )
+
+
+def _rect_scores_vec(ordered: np.ndarray, tw: float, th: float) -> np.ndarray:
+    """Versão vetorizada de _rect_score (mesma fórmula e mesmas bordas).
+
+    ordered: (M,4,2) em TL/TR/BR/BL. Devolve (M,) com inf onde houver
+    lado degenerado — igual ao `return inf` do escalar.
+    """
+    tl, tr, br, bl = ordered[:, 0], ordered[:, 1], ordered[:, 2], ordered[:, 3]
+    top = np.linalg.norm(tr - tl, axis=1)
+    bottom = np.linalg.norm(br - bl, axis=1)
+    left = np.linalg.norm(bl - tl, axis=1)
+    right = np.linalg.norm(br - tr, axis=1)
+    width = (top + bottom) / 2.0
+    height = (left + right) / 2.0
+    expected = tw / th if th > 0 else PAGE_W / PAGE_H
+    with np.errstate(divide="ignore", invalid="ignore"):
+        score = (np.maximum(top, bottom) / np.minimum(top, bottom) - 1.0)
+        score = score + (np.maximum(left, right) / np.minimum(left, right) - 1.0)
+        score = score + 2.0 * np.abs(width / height - expected) / expected
+    p = ordered
+    a = p - np.roll(p, 1, axis=1)
+    b = np.roll(p, -1, axis=1) - p
+    cosang = (a * b).sum(-1) / (np.linalg.norm(a, axis=-1) * np.linalg.norm(b, axis=-1) + 1e-9)
+    angs = np.abs(np.degrees(np.arccos(np.clip(cosang, -1.0, 1.0))) - 90.0)
+    score = score + 2.0 * (angs.mean(axis=1)) / 90.0
+    tiny = np.minimum(np.minimum(top, bottom), np.minimum(left, right)) <= 0
+    return np.where(tiny, np.inf, score)
 
 
 def _pick_four(
@@ -159,8 +195,11 @@ def _pick_four(
     - cada âncora mora perto do seu canto da foto: candidatos são
       fatiados por quadrante (cap per_quadrant por área desc) e os
       combos vêm do produto — não de C(n,4) global;
-    - se algum quadrante fica vazio, fallback para o scan global;
-    - teto de tempo time_budget nas duas fases (melhor até ali).
+    - o pré-filtro de área (≥10% da imagem) roda VETORIZADO em numpy:
+      390K combos filtrados em ms; só sobreviventes passam pelo
+      _rect_score, avaliados por área desc;
+    - se algum quadrante fica vazio, fallback para o scan global em
+      chunks, com o mesmo teto de tempo (rede de segurança).
     Em foto limpa o resultado é idêntico ao scan completo (mínimo
     global do mesmo score com o mesmo teto 0.6).
     """
@@ -172,20 +211,27 @@ def _pick_four(
     centers = np.array([[p[:, 0].mean(), p[:, 1].mean()] for p in candidates])
     img_area = float(w * h)
     deadline = time.perf_counter() + max(0.1, time_budget)
+    tw = abs(expected_centers["TR"][0] - expected_centers["TL"][0])
+    th = abs(expected_centers["BL"][1] - expected_centers["TL"][1])
+    state = {"best": None, "best_score": 0.6}  # teto: forma bem próxima de retângulo
 
-    def _scan(combos) -> dict[str, tuple[float, float]] | None:
-        best: dict[str, tuple[float, float]] | None = None
-        best_score = 0.6  # teto: exige forma bem próxima de retângulo
-        for combo in combos:
-            score, ordered = _score_combo(centers, combo, img_area, expected_centers)
-            if score is None:
-                continue
-            if score < best_score:
-                best_score = score
-                best = ordered
-            if time.perf_counter() >= deadline:
-                break
-        return best
+    def _scan_idx(idxs: np.ndarray) -> None:
+        if idxs.shape[0] == 0 or time.perf_counter() >= deadline:
+            return
+        ordered = _order_quads(centers[idxs])
+        big = _quad_areas(ordered) >= img_area * 0.10
+        surv = np.flatnonzero(big)
+        if surv.shape[0] == 0:
+            return
+        scores = _rect_scores_vec(ordered[surv], tw, th)
+        k = int(np.argmin(scores))
+        if scores[k] < state["best_score"]:
+            state["best_score"] = float(scores[k])
+            o = ordered[surv[k]]
+            state["best"] = {"TL": (float(o[0][0]), float(o[0][1])),
+                             "TR": (float(o[1][0]), float(o[1][1])),
+                             "BR": (float(o[2][0]), float(o[2][1])),
+                             "BL": (float(o[3][0]), float(o[3][1]))}
 
     # Fase 1: um candidato por quadrante (cantos da foto)
     corners = np.array([[0.0, 0.0], [float(w), 0.0], [float(w), float(h)], [0.0, float(h)]])
@@ -196,15 +242,20 @@ def _pick_four(
         idx.sort(key=lambda i: areas[i], reverse=True)
         buckets.append(idx[:per_quadrant])
     if all(buckets):
-        hit = _scan(itertools.product(*buckets))
-        if hit is not None:
-            return hit
+        _scan_idx(np.array(list(itertools.product(*buckets)), dtype=np.int64))
+        if state["best"] is not None:
+            return state["best"]
 
-    # Fase 2 (fallback): scan global por área desc, com o mesmo teto.
-    # _scan devolve coordenadas (não índices) — invariantes à ordem.
-    order = sorted(range(len(candidates)), key=lambda i: areas[i], reverse=True)
+    # Fase 2 (fallback): scan global por área desc, em chunks.
+    order = np.argsort(areas)[::-1]
     centers = centers[order]
-    return _scan(itertools.combinations(range(len(centers)), 4))
+    it = itertools.combinations(range(len(centers)), 4)
+    while time.perf_counter() < deadline:
+        chunk = np.array(list(itertools.islice(it, 250000)), dtype=np.int64)
+        if chunk.shape[0] == 0:
+            break
+        _scan_idx(chunk)
+    return state["best"]
 
 
 def validate_sae_geometry(
