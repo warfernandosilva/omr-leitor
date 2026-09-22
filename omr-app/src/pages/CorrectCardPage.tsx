@@ -1456,6 +1456,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
+          {(omrResult.warnings ?? []).length > 0 && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm space-y-1">
+              {(omrResult.warnings ?? []).map((w, i) => (
+                <div key={i}>{w}</div>
+              ))}
+            </div>
+          )}
+
           {(omrResult.lowConfidence ?? []).length > 0 && (            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
               <strong>Atenção:</strong> As questões {(omrResult.lowConfidence ?? []).join(', ')} foram identificadas com baixa confiança.
               Verifique manualmente abaixo.

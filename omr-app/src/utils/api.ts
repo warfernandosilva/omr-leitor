@@ -89,6 +89,8 @@ export interface ProcessResult {
   rectifiedImage?: string;
   templateUsed?: 'padrao' | 'sae' | 'colar' | 'saev';
   thresholdsUsed?: { floor: number; margin: number; source: string };
+  /** sanity pós-leitura (avisos que não bloqueiam) */
+  warnings?: string[];
   error?: string;
 }
 
@@ -207,6 +209,7 @@ export async function processImage(
       margin: Number(data.thresholds_used.margin ?? 0.15),
       source: String(data.thresholds_used.source ?? 'fixed'),
     } : undefined,
+    warnings: Array.isArray(data.warnings) ? data.warnings as string[] : undefined,
     error: data.error,
   };
 }

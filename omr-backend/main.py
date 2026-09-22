@@ -84,6 +84,7 @@ class ProcessResponse(BaseModel):
     rectified_image: str | None = None  # base64 dataURL da imagem retificada (para overlay perfeito)
     template_used: str | None = None  # "padrao" | "sae" — modelo detectado (fallback cruzado)
     thresholds_used: dict | None = None  # {floor, margin, source: fixed|adaptive}
+    warnings: list[str] | None = None  # sanity pós-leitura (não bloqueia)
     error: str | None = None
 
 
@@ -501,6 +502,30 @@ async def process_omr(
     except Exception:
         rectified_b64 = None
 
+    # Sanity pós-leitura: duplicadas fantasmas (modelo/versão errado) bloqueiam;
+    # brancas/baixa confiança viram warnings (cartão em branco é legítimo).
+    from omr.sanity import sanity_check
+    total_lido = len(result.blank_questions) + len(result.duplicate_questions) + len(result.answers)
+    sanity = sanity_check(
+        result.duplicate_questions,
+        result.blank_questions,
+        result.low_confidence,
+        total_lido,
+    )
+    if not sanity.ok:
+        return ProcessResponse(
+            success=False,
+            error=sanity.message,
+            warnings=sanity.warnings or None,
+            rectified_image=rectified_b64,
+            template_used=template_used,
+            thresholds_used={
+                "floor": round(result.floor_used, 3),
+                "margin": MARGIN,
+                "source": result.floor_source,
+            },
+        )
+
     return ProcessResponse(
         success=True,
         answers={str(k): v for k, v in result.answers.items()},
@@ -519,6 +544,7 @@ async def process_omr(
             "margin": MARGIN,
             "source": result.floor_source,
         },
+        warnings=sanity.warnings or None,
     )
 
 
