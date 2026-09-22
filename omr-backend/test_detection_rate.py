@@ -7,16 +7,37 @@ from omr.template import generate_card
 from omr.detector import detect_markers, validate_geometry
 
 
+def _rot_reframe(img, angle_deg: float) -> np.ndarray:
+    """Rotação realista: cartão inteiro visível, reenquadrado no canvas.
+
+    Rotaciona em canvas expandido (nada cortado) e reduz de volta para
+    1448×2048 sobre fundo branco — como uma foto real de cartão torto.
+    """
+    h, w = img.shape[:2]
+    diag = int(np.ceil(np.hypot(w, h)))
+    M = cv2.getRotationMatrix2D((w / 2, h / 2), angle_deg, 1.0)
+    M[0, 2] += (diag - w) / 2
+    M[1, 2] += (diag - h) / 2
+    big = cv2.warpAffine(img, M, (diag, diag), borderValue=(255, 255, 255))
+    scale = min(w / diag, h / diag)
+    small = cv2.resize(big, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    canvas = np.ones_like(img) * 255
+    sh, sw = small.shape[:2]
+    canvas[(h - sh) // 2:(h - sh) // 2 + sh, (w - sw) // 2:(w - sw) // 2 + sw] = small
+    return canvas
+
+
 def degrade(img, name):
     h, w = img.shape[:2]
     if name == 'clean':
         return img
     if name == 'rot+5':
-        M = cv2.getRotationMatrix2D((w / 2, h / 2), 5, 1.0)
-        return cv2.warpAffine(img, M, (w, h), borderValue=(255, 255, 255))
+        # Cartão INTEIRO visível (como foto real): rotaciona em canvas
+        # expandido e reenquadra — rotacionar o canvas cru CORTA o
+        # marcador BL (fisicamente indetectável, cenário irreal).
+        return _rot_reframe(img, 5)
     if name == 'rot-8':
-        M = cv2.getRotationMatrix2D((w / 2, h / 2), -8, 1.0)
-        return cv2.warpAffine(img, M, (w, h), borderValue=(255, 255, 255))
+        return _rot_reframe(img, -8)
     if name == 'small':
         small = cv2.resize(img, None, fx=0.6, fy=0.6, interpolation=cv2.INTER_AREA)
         canvas = np.ones_like(img) * 255
