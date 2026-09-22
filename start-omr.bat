@@ -23,7 +23,16 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":8010" ^| findstr "LISTENING
 REM Verifica python disponível
 where python >nul 2>&1 || (echo [ERRO] python nao encontrado no PATH & pause & exit /b 1)
 
-start "OMR Backend" cmd /k "cd /d "%~dp0omr-backend" && python main.py"
+REM Usa .venv local (cria + instala deps se preciso)
+if not exist "%~dp0omr-backend\.venv\Scripts\python.exe" (
+    echo     Criando .venv do backend...
+    python -m venv "%~dp0omr-backend\.venv" || (echo [ERRO] falha ao criar .venv & pause & exit /b 1)
+)
+echo     Instalando dependencias...
+call "%~dp0omr-backend\.venv\Scripts\activate.bat"
+pip install -r "%~dp0omr-backend\requirements.txt" || (echo [AVISO] falha parcial no pip - tentando continuar...)
+
+start "OMR Backend" cmd /k "cd /d "%~dp0omr-backend" && .venv\Scripts\python main.py"
 
 REM Espera o backend subir
 echo     Aguardando backend (ate 20s)...

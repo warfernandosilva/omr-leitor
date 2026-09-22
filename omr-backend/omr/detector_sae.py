@@ -27,15 +27,21 @@ class SaeDetectionResult:
     missing: list[str]
 
 
-def _square_candidates(gray: np.ndarray) -> list[np.ndarray]:
+def _square_candidates(
+    gray: np.ndarray,
+    min_area_frac: float = 0.0001,
+    max_area_frac: float = 0.02,
+) -> list[np.ndarray]:
     h, w = gray.shape[:2]
     img_area = float(h * w)
     # Quadrado de 40px em 1448×2048 ≈ 0.05% da área; aceita ampla faixa de escala.
-    min_area = img_area * 0.0001
-    max_area = img_area * 0.02
+    min_area = img_area * min_area_frac
+    max_area = img_area * max_area_frac
 
     _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # RETR_LIST (não EXTERNAL): ilhas brancas dentro do papel fechado
+    # (âncoras cercadas de preto) são contornos aninhados e seriam ignoradas.
+    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     out = []
     for cnt in contours:
@@ -75,7 +81,10 @@ def _order_quad(pts: np.ndarray) -> dict[str, tuple[float, float]]:
     }
 
 
-def _rect_score(ordered: dict[str, tuple[float, float]]) -> float:
+def _rect_score(
+    ordered: dict[str, tuple[float, float]],
+    expected_centers: dict[str, tuple[float, float]] = CORNER_CENTERS,
+) -> float:
     """0 = retângulo perfeito com a proporção do template; maior = pior."""
     pts = np.array([ordered[k] for k in CORNERS_ORDER], dtype=np.float64)
     tl, tr, br, bl = pts
@@ -87,8 +96,8 @@ def _rect_score(ordered: dict[str, tuple[float, float]]) -> float:
         return float("inf")
     width = (top + bottom) / 2
     height = (left + right) / 2
-    tw = abs(CORNER_CENTERS["TR"][0] - CORNER_CENTERS["TL"][0])
-    th = abs(CORNER_CENTERS["BL"][1] - CORNER_CENTERS["TL"][1])
+    tw = abs(expected_centers["TR"][0] - expected_centers["TL"][0])
+    th = abs(expected_centers["BL"][1] - expected_centers["TL"][1])
     expected = tw / th if th > 0 else PAGE_W / PAGE_H
     score = (max(top, bottom) / min(top, bottom) - 1.0)
     score += (max(left, right) / min(left, right) - 1.0)
@@ -105,7 +114,8 @@ def _rect_score(ordered: dict[str, tuple[float, float]]) -> float:
 
 
 def _pick_four(
-    candidates: list[np.ndarray], w: int, h: int
+    candidates: list[np.ndarray], w: int, h: int,
+    expected_centers: dict[str, tuple[float, float]] = CORNER_CENTERS,
 ) -> dict[str, tuple[float, float]] | None:
     """Escolhe o quarteto MAIS RETANGULAR com a proporção das âncoras.
 
@@ -127,14 +137,17 @@ def _pick_four(
         pts = np.array([ordered[k] for k in CORNERS_ORDER], dtype=np.float32)
         if float(cv2.contourArea(pts)) < img_area * 0.10:
             continue
-        score = _rect_score(ordered)
+        score = _rect_score(ordered, expected_centers)
         if score < best_score:
             best_score = score
             best = ordered
     return best
 
 
-def validate_sae_geometry(centers: dict[str, tuple[float, float]]) -> bool:
+def validate_sae_geometry(
+    centers: dict[str, tuple[float, float]],
+    expected_centers: dict[str, tuple[float, float]] = CORNER_CENTERS,
+) -> bool:
     """Confere se o quadrilátero é plausível (convexo, proporção A4)."""
     try:
         pts = np.array([centers[k] for k in CORNERS_ORDER], dtype=np.float64)
@@ -158,8 +171,8 @@ def validate_sae_geometry(centers: dict[str, tuple[float, float]]) -> bool:
     height = (left + right) / 2
     aspect = width / height
     # Proporção esperada = a do quad de âncoras no template (não a da página)
-    tw = abs(CORNER_CENTERS["TR"][0] - CORNER_CENTERS["TL"][0])
-    th = abs(CORNER_CENTERS["BL"][1] - CORNER_CENTERS["TL"][1])
+    tw = abs(expected_centers["TR"][0] - expected_centers["TL"][0])
+    th = abs(expected_centers["BL"][1] - expected_centers["TL"][1])
     expected = tw / th if th > 0 else PAGE_W / PAGE_H
     if not (expected * 0.7 <= aspect <= expected * 1.3):
         return False

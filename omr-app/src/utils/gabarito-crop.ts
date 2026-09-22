@@ -8,6 +8,7 @@ import {
   SINGLE_X, SINGLE_BUBBLE_RADIUS, singleQuestionYFor,
 } from './card-template';
 import { SAE_BUBBLE_RADIUS, saeBubbleCenter } from './sae-template';
+import { SAEV_SIDE, saevBubbleCenter, saevBlockRows } from './saev-template';
 
 export const CROP_PAD = 40;
 
@@ -25,7 +26,19 @@ export function gabaritoCropBox(exam: CropInput): CropBox {
   let ys: number[];
   let r: number;
 
-  if (exam.templateType === 'sae' || exam.templateType === 'colar') {
+  if (exam.templateType === 'saev') {
+    const qps = Math.max(1, exam.questionsPerSubject || 0);
+    xs = [];
+    ys = [];
+    for (const [, col, r] of saevBlockRows(qps)) {
+      for (let ci = 0; ci < 4; ci++) {
+        const [x, y] = saevBubbleCenter(col, r, ci, qps);
+        xs.push(x);
+        ys.push(y);
+      }
+    }
+    r = SAEV_SIDE / 2;
+  } else if (exam.templateType === 'sae' || exam.templateType === 'colar') {
     const n = Math.max(1, exam.totalQuestions || 0);
     xs = [];
     ys = [];

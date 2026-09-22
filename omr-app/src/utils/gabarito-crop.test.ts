@@ -68,4 +68,21 @@ describe('gabaritoCropBox', () => {
     });
     expect(colar).toEqual(sae);
   });
+
+  it('saev 22+22: contém primeira e última bolha de LP e MAT', async () => {
+    const { saevBubbleCenter } = await import('./saev-template');
+    const { SAEV_SIDE } = await import('./saev-template');
+    const box = gabaritoCropBox({
+      questionsPerSubject: 22, layoutMode: 'dual', totalQuestions: 44,
+      templateType: 'saev',
+    });
+    inside(box);
+    const [fx, fy] = saevBubbleCenter(0, 0, 0, 22);
+    const [lx, ly] = saevBubbleCenter(3, 10, 3, 22);
+    const h = SAEV_SIDE / 2;
+    expect(box.x).toBeLessThanOrEqual(fx - h);
+    expect(box.y).toBeLessThanOrEqual(fy - h);
+    expect(box.x + box.w).toBeGreaterThanOrEqual(lx + h);
+    expect(box.y + box.h).toBeGreaterThanOrEqual(ly + h);
+  });
 });

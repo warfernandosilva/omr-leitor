@@ -7,10 +7,11 @@
 // Âncoras normalizadas (0..1 do cartão 1448×2048):
 // - Padrão: cantos externos dos ArUcos 104px → quad x 0.059–0.941 / y 0.234–0.941
 // - SAE/Colar: quadrados 40px (margem 64, topo 1140, base 1900) → x 0.044–0.956 / y 0.557–0.928
+// - SAEV: quadrados 75px (centros 110/1338 × 545/1905) → x 0.050–0.950 / y 0.248–0.948
 import { GuideThresholds, DEFAULT_THRESHOLDS } from './frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT } from './card-template';
 
-export type CaptureTemplate = 'padrao' | 'sae' | 'colar';
+export type CaptureTemplate = 'padrao' | 'sae' | 'colar' | 'saev';
 
 export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT; // ≈0.7071 (A4 retrato)
 
@@ -44,6 +45,11 @@ const ANCHOR_BOX: Record<CaptureTemplate, { x0: number; y0: number; x1: number; 
   colar: {
     x0: 64 / CARD_WIDTH, y0: 1140 / CARD_HEIGHT,
     x1: 1384 / CARD_WIDTH, y1: 1900 / CARD_HEIGHT,
+  },
+  // Quadrados 75px: x 72.5..1375.5, y 507.5..1942.5
+  saev: {
+    x0: 72.5 / CARD_WIDTH, y0: 507.5 / CARD_HEIGHT,
+    x1: 1375.5 / CARD_WIDTH, y1: 1942.5 / CARD_HEIGHT,
   },
 };
 
@@ -83,9 +89,11 @@ export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): A
   };
 }
 
-// Limiares do detector por modelo (SAE/Colar: âncoras pequenas, quad menor)
+// Limiares do detector por modelo (SAE/Colar: âncoras pequenas, quad menor;
+// SAEV: âncoras grandes, mesma ordem de grandeza do padrão)
 export function thresholdsFor(template: CaptureTemplate): GuideThresholds {
   if (template === 'padrao') return { ...DEFAULT_THRESHOLDS };
+  if (template === 'saev') return { ...DEFAULT_THRESHOLDS };
   return {
     ...DEFAULT_THRESHOLDS,
     minAreaFrac: 0.00012, // quadrado 40px ≈ 2.8% da folha (vs ArUco 7.2%)
@@ -98,5 +106,6 @@ export function thresholdsFor(template: CaptureTemplate): GuideThresholds {
 export function captureTemplateFor(templateType?: string): CaptureTemplate {
   if (templateType === 'sae') return 'sae';
   if (templateType === 'colar') return 'colar';
+  if (templateType === 'saev') return 'saev';
   return 'padrao';
 }

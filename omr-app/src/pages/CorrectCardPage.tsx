@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, StudentResult, isSaeExam, isSaeFamilyExam, templateLabel } from '../types';
+import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
@@ -16,7 +16,7 @@ import {
   guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide,
 } from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
-import { overlayRowFor, overlayBubbleFor } from '../utils/overlay-bubbles';
+import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor } from '../utils/overlay-bubbles';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 
@@ -191,9 +191,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const activeExam = selectedExamId ? exams.find(e => e.id === selectedExamId) : null;
 
   // ─── Guia de captura adaptado ao gabarito da prova ───
+  // SAEV usa adaptativo sempre (evidência: fotos reais 43-44/44 vs 18/41 no fixo)
+  const useAdaptive = adaptive || isSaevExam(activeExam);
   const captureTemplate = activeExam?.templateType === 'colar'
     ? 'colar'
-    : isSaeExam(activeExam) ? 'sae' : 'padrao';
+    : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : 'padrao';
   const guideThresholds = useMemo(() => thresholdsFor(captureTemplate), [captureTemplate]);
   // Mede o visor para desenhar o maior A4 sem distorção
   const viewRef = useRef<HTMLDivElement>(null);
@@ -225,11 +227,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   // Geometria do overlay: prefere o modelo DETECTADO pelo backend (fallback
   // cruzado) e avisa se divergir do modelo da prova selecionada.
-  // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay.
-  const detectedIsFamily = omrResult?.templateUsed === 'sae' || omrResult?.templateUsed === 'colar';
-  const overlaySae = omrResult?.templateUsed ? detectedIsFamily : isSaeFamilyExam(activeExam);
+  // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay;
+  // SAEV tem família própria (quadrados). Mapeia para o modelo canônico.
+  const canonicalModel = (t?: string): 'sae' | 'saev' | 'padrao' =>
+    t === 'sae' || t === 'colar' ? 'sae' : t === 'saev' ? 'saev' : 'padrao';
+  const overlayModel = omrResult?.templateUsed
+    ? canonicalModel(omrResult.templateUsed)
+    : canonicalModel(activeExam?.templateType);
+  const overlaySae = overlayModel === 'sae';
+  const overlaySaev = overlayModel === 'saev';
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
-    && detectedIsFamily !== isSaeFamilyExam(activeExam);
+    && canonicalModel(omrResult.templateUsed) !== canonicalModel(activeExam.templateType);
 
   // Recorte do gabarito: mesma decisão de modelo do overlay (detectado
   // vence) — a visualização mostra só a grade de bolhas, não a folha toda.
@@ -239,11 +247,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       questionsPerSubject: activeExam.questionsPerSubject,
       layoutMode: activeExam.layoutMode,
       totalQuestions: activeExam.totalQuestions,
-      templateType: overlaySae
+      templateType: overlayModel === 'sae'
         ? (activeExam.templateType === 'colar' ? 'colar' : 'sae')
-        : 'padrao',
+        : overlayModel === 'saev' ? 'saev' : 'padrao',
     });
-  }, [activeExam, overlaySae]);
+  }, [activeExam, overlayModel]);
 
   const startCamera = async (preferredDeviceId?: string | null, allowFileFallback = true) => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -467,8 +475,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
-      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaeExam(activeExam) ? 'sae' : 'padrao';
-      const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, adaptive);
+      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : 'padrao';
+      const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive);
       setProcessingProgress(100);
 
       setOmrResult(result);
@@ -722,8 +730,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       patchItem(item.fileName, { status: 'processing' });
 
       try {
-        // 1. Leitura OMR + QR
-        const result = await apiProcessImage(item.file, qps, layoutMode, undefined, adaptive);
+        // 1. Leitura OMR + QR (usa o modelo da prova; fallback cruzado no backend)
+        const tpl = exam.templateType === 'saev' ? 'saev' : undefined;
+        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev');
         if (!result.success || !result.answers) {
           patchItem(item.fileName, { status: 'error', detail: result.error || 'Falha na leitura' });
           continue;
@@ -1355,6 +1364,27 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         );
                       })}
                     </g>
+                  ) : overlaySaev ? (
+                    <g>
+                      {Array.from({ length: Math.ceil(activeExam.questionsPerSubject / 2) }, (_, i) => {
+                        const { y, side, cells } = overlaySaevRowFor(activeExam.questionsPerSubject, i + 1);
+                        const h = side / 2;
+                        return (
+                          <g key={i + 1}>
+                            {cells.map(({ q: qg, letter, x }) => {
+                              const key = activeExam.answerKey?.[qg];
+                              const isMarked = manualAnswers[qg] === letter;
+                              const isCorrect = key ? letter === key : false;
+                              let stroke = '#333'; let fill = 'none'; let sw = 2;
+                              if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
+                              else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
+                              else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
+                              return <rect key={`saev-${qg}-${letter}`} x={x - h} y={y - h} width={side} height={side} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                            })}
+                          </g>
+                        );
+                      })}
+                    </g>
                   ) : (
                   Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
                     // Geometria por layout (single usa colunas centrais) — overlay-bubbles.ts
@@ -1378,6 +1408,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   )}
                   {/* marcações duplicadas em laranja */}
                   {(omrResult?.duplicateQuestions ?? []).map(q => {
+                    if (overlaySaev) {
+                      const marks = omrResult?.duplicateMarks?.[q] ?? [];
+                      return marks.map(letter => {
+                        const pos = overlaySaevBubbleFor(activeExam.questionsPerSubject, q, letter);
+                        if (!pos) return null;
+                        const h = pos.side / 2 + 4;
+                        return <rect key={`dup-${q}-${letter}`} x={pos.x - h} y={pos.y - h} width={h * 2} height={h * 2} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
+                      });
+                    }
                     if (overlaySae) {
                       const marks = omrResult?.duplicateMarks?.[q] ?? [];
                       return marks.map(letter => {

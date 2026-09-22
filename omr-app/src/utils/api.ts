@@ -87,7 +87,7 @@ export interface ProcessResult {
   allRatios?: Record<number, Record<string, number>>;
   cardId?: string;
   rectifiedImage?: string;
-  templateUsed?: 'padrao' | 'sae' | 'colar';
+  templateUsed?: 'padrao' | 'sae' | 'colar' | 'saev';
   thresholdsUsed?: { floor: number; margin: number; source: string };
   error?: string;
 }
@@ -151,7 +151,7 @@ export async function processImage(
   file: File,
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
-  template?: 'padrao' | 'sae' | 'colar',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev',
   adaptive?: boolean,
 ): Promise<ProcessResult> {
   const formData = new FormData();
@@ -186,7 +186,7 @@ export async function processImage(
     ) : undefined,
     cardId: data.card_id || undefined,
     rectifiedImage: data.rectified_image || undefined,
-    templateUsed: data.template_used === 'sae' || data.template_used === 'colar' ? data.template_used : data.template_used === 'padrao' ? 'padrao' : undefined,
+    templateUsed: data.template_used === 'sae' || data.template_used === 'colar' || data.template_used === 'saev' ? data.template_used : data.template_used === 'padrao' ? 'padrao' : undefined,
     thresholdsUsed: data.thresholds_used ? {
       floor: Number(data.thresholds_used.floor ?? 0.3),
       margin: Number(data.thresholds_used.margin ?? 0.15),
@@ -243,7 +243,7 @@ export async function generateBlankCard(
   subjectLp: string,
   subjectMat: string,
   format: 'PNG' | 'PDF',
-  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar'; sae?: SaeSpec },
+  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar' | 'saev'; sae?: SaeSpec },
 ): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/card/generate`, {
     method: 'POST',
@@ -344,7 +344,7 @@ export async function syncExam(exam: {
   subjectMat: string;
   questionsPerSubject?: number;
   layoutMode?: 'dual' | 'single';
-  templateType?: 'padrao' | 'sae' | 'colar';
+  templateType?: 'padrao' | 'sae' | 'colar' | 'saev';
   saeSpec?: SaeSpec;
 }): Promise<SyncExamResult> {
   const res = await fetch(`${API_BASE}/api/exams/sync`, {
@@ -510,7 +510,7 @@ export interface DBExam {
   subject_mat: string;
   questions_per_subject: number;
   layout_mode: 'dual' | 'single';
-  template: 'padrao' | 'sae' | 'colar';
+  template: 'padrao' | 'sae' | 'colar' | 'saev';
   sae_spec: Record<string, unknown> | null;
   grade_scale: string;
   answer_key: Record<string, string> | null;

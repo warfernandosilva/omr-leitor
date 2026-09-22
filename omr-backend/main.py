@@ -44,8 +44,13 @@ from omr.template_sae import (
     SaeSpec, generate_sae_card_bytes, build_sae_batch_pdf, SAE_COORDS,
     generate_colar_card_bytes, COLAR_COORDS,
 )
+from omr.template_saev import (
+    SaevSpec, generate_saev_card_bytes, build_saev_batch_pdf, SAEV_COORDS,
+    SAEV_MIN_QPS, SAEV_MAX_QPS,
+)
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
+from omr.reader_saev import process_saev_image
 from omr.config import MARGIN
 from omr.grading import grade, GradingResult
 
@@ -129,7 +134,7 @@ class CardRequest(BaseModel):
     format: str = "PNG"  # PNG ou PDF
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae | colar
+    template: str = "padrao"  # padrao | sae | colar | saev
     sae: SaeSpecRequest | None = None
 
 
@@ -154,7 +159,7 @@ class ExamSyncRequest(BaseModel):
     subject_mat: str = "MATEMÁTICA"
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae | colar
+    template: str = "padrao"  # padrao | sae | colar | saev
     sae: SaeSpecRequest | None = None  # cabeçalho editável (só SAE)
     grade_scale: str | None = None
     answer_key: dict | None = None
@@ -219,6 +224,11 @@ def template_sae_coords():
 @app.get("/api/template/colar-coords")
 def template_colar_coords():
     return COLAR_COORDS
+
+
+@app.get("/api/template/saev-coords")
+def template_saev_coords():
+    return SAEV_COORDS
 
 
 # ─── Auth ───
@@ -406,9 +416,11 @@ async def process_omr(
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
 
     result: OMRResult | None
-    template_used = template if template in ("padrao", "sae", "colar") else "padrao"
+    template_used = template if template in ("padrao", "sae", "colar", "saev") else "padrao"
     if template_used in ("sae", "colar"):
         result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
+    elif template_used == "saev":
+        result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive)
     else:
         result = process_image(
             image,
@@ -418,7 +430,7 @@ async def process_omr(
         )
 
     # Fallback cruzado: clientes antigos (app de captura no celular, Flutter)
-    # não enviam `template` — se o modelo pedido falhar, tenta o outro antes
+    # não enviam `template` — se o modelo pedido falhar, tenta os outros antes
     # de desistir. A resposta indica qual foi usado (template_used).
     # (colar tem a mesma geometria do sae: o fallback "sae" o cobre.)
     if result is None and template_used == "padrao":
@@ -426,7 +438,12 @@ async def process_omr(
         if sae_result is not None:
             result = sae_result
             template_used = "sae"
-    elif result is None and template_used in ("sae", "colar"):
+        else:
+            saev_result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive)
+            if saev_result is not None:
+                result = saev_result
+                template_used = "saev"
+    elif template_used in ("sae", "colar", "saev"):
         std_result = process_image(
             image,
             questions_per_subject=questions_per_subject,
@@ -447,14 +464,25 @@ async def process_omr(
                 return ProcessResponse(success=False, error="Falha ao retificar a imagem SAE (foto muito borrada ou escura). Tente com melhor iluminação.")
             except Exception:
                 return ProcessResponse(success=False, error="Âncoras SAE não detectadas ou geometria inválida")
-        # diagnóstico fino para UX (padrão falhou E fallback SAE falhou)
+        if template_used == "saev":
+            try:
+                from omr.detector_saev import detect_saev_corners as _dm_saev
+                det = _dm_saev(image)
+                if not det.found:
+                    return ProcessResponse(success=False, error=f"Quadrados SAEV não encontrados (faltam: {', '.join(det.missing)}). Garanta que os 4 quadrados pretos (2 na altura dos títulos, 2 no rodapé) estão visíveis, foto nítida e sem sombra.")
+                return ProcessResponse(success=False, error="Falha ao retificar a imagem SAEV (foto muito borrada ou escura). Tente com melhor iluminação.")
+            except Exception:
+                return ProcessResponse(success=False, error="Âncoras SAEV não detectadas ou geometria inválida")
+        # diagnóstico fino para UX (padrão falhou E fallbacks falharam)
         try:
             from omr.detector import detect_markers as _dm, validate_geometry as _vg
             from omr.detector_sae import detect_sae_corners as _dm_sae
+            from omr.detector_saev import detect_saev_corners as _dm_saev
             det = _dm(image)
             sae_det = _dm_sae(image)
-            if det.missing_ids and not sae_det.found:
-                return ProcessResponse(success=False, error=f"Nenhum cartão detectado: faltam ArUco {det.missing_ids} e quadrados SAE ({', '.join(sae_det.missing)}). Garanta que os 4 cantos estão visíveis, foto nítida e sem sombra.")
+            saev_det = _dm_saev(image)
+            if det.missing_ids and not sae_det.found and not saev_det.found:
+                return ProcessResponse(success=False, error=f"Nenhum cartão detectado: faltam ArUco {det.missing_ids}, quadrados SAE ({', '.join(sae_det.missing)}) e quadrados SAEV ({', '.join(saev_det.missing)}). Garanta que os 4 cantos estão visíveis, foto nítida e sem sombra.")
             if not _vg(det.markers):
                 return ProcessResponse(success=False, error="Geometria dos marcadores inválida — foto torta ou cartão dobrado. Tente de cima, com o cartão plano.")
             # marcadores ok mas falha no warp/QR — ainda processa? aqui é caso de blur extremo
@@ -567,6 +595,21 @@ def generate_card_endpoint(req: CardRequest, current_user: User = Depends(auth.g
         else:
             data = generate_sae_card_bytes("PNG", spec)
             media, fname = "image/png", "cartao-sae.png"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    if req.template == "saev":
+        qps = max(SAEV_MIN_QPS, min(SAEV_MAX_QPS, int(req.questions_per_subject or 22)))
+        spec = SaevSpec(n_questoes=qps)
+        if fmt == "PDF":
+            data = generate_saev_card_bytes("PDF", spec)
+            media, fname = "application/pdf", "cartao-saev.pdf"
+        else:
+            data = generate_saev_card_bytes("PNG", spec)
+            media, fname = "image/png", "cartao-saev.png"
         return StreamingResponse(
             io.BytesIO(data),
             media_type=media,
@@ -865,6 +908,10 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
             codigo_barras=stored.get("codigo_barras", "6357256532"),
         )
         pages_drawn = build_sae_batch_pdf(registros, spec, out_buf)
+    elif (av.template or "padrao") == "saev":
+        # Gabarito SAEV: grade 16+16 a 26+26, QR do sistema + Nome impresso
+        spec = SaevSpec(n_questoes=max(SAEV_MIN_QPS, min(SAEV_MAX_QPS, int(av.questions_per_subject or 22))))
+        pages_drawn = build_saev_batch_pdf(registros, spec, out_buf)
     else:
         pages_drawn = build_batch_pdf(
             registros, av.subject_lp, av.subject_mat, out_buf,

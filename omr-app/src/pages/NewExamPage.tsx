@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, DEFAULT_SAE_SPEC, SAE_MAX_QUESTIONS } from '../types';
+import { AppView, Exam, DEFAULT_SAE_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS } from '../types';
 import { saveExam, getExams, deleteExam, applyRemoteExams } from '../utils/storage';
 import { MAX_QUESTIONS_PER_SUBJECT, MAX_QUESTIONS_SINGLE } from '../utils/card-template';
 import { syncExam, getExamsFromDB, deleteExamFromDB, checkHealth } from '../utils/api';
@@ -14,7 +14,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const { user } = useAuth();
   const [exams, setExams] = useState(() => getExams(user?.id));
   const [name, setName] = useState('');
-  const [templateType, setTemplateType] = useState<'padrao' | 'sae' | 'colar'>('padrao');
+  const [templateType, setTemplateType] = useState<'padrao' | 'sae' | 'colar' | 'saev'>('padrao');
   const [layoutMode, setLayoutMode] = useState<'dual' | 'single'>('dual');
   const [subjectLP, setSubjectLP] = useState('LÍNGUA PORTUGUESA');
   const [subjectMat, setSubjectMat] = useState('MATEMÁTICA');
@@ -27,8 +27,11 @@ export default function NewExamPage({ onNavigate }: Props) {
 
   const isSae = templateType === 'sae';
   const isColar = templateType === 'colar';
+  const isSaev = templateType === 'saev';
   const isCustom = isSae || isColar;
-  const maxQps = !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
+  // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
+  const maxQps = isSaev ? SAEV_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
+  const minQps = isSaev ? SAEV_MIN_QPS : 1;
   const totalQuestions = isCustom || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
 
   const refreshFromServer = async (silent: boolean) => {
@@ -65,18 +68,22 @@ export default function NewExamPage({ onNavigate }: Props) {
 
   const handleQpsChange = (raw: string) => {
     if (raw === '') { setQuestionsPerSubject(0); return; }
-    const v = Math.max(1, Math.min(maxQps, Math.round(Number(raw))));
+    const v = Math.max(minQps, Math.min(maxQps, Math.round(Number(raw))));
     setQuestionsPerSubject(v);
   };
 
-  const handleTemplateChange = (t: 'padrao' | 'sae' | 'colar') => {
+  const handleTemplateChange = (t: 'padrao' | 'sae' | 'colar' | 'saev') => {
     setTemplateType(t);
-    if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
+    if (t === 'saev') {
+      setLayoutMode('dual');
+      setQuestionsPerSubject((q) => Math.max(SAEV_MIN_QPS, Math.min(SAEV_MAX_QPS, q || 22)));
+    } else if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
       setQuestionsPerSubject(SAE_MAX_QUESTIONS);
     }
   };
 
   const handleModeChange = (mode: 'dual' | 'single') => {
+    if (templateType === 'saev' && mode === 'single') return; // SAEV é sempre dual
     setLayoutMode(mode);
     if (questionsPerSubject > (mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT)) {
       setQuestionsPerSubject(mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT);
@@ -92,7 +99,7 @@ export default function NewExamPage({ onNavigate }: Props) {
       id: editingId || uuidv4(),
       name: name.trim(),
       subjectLP: subjectLP.trim(),
-      subjectMat: isCustom ? subjectLP.trim() : layoutMode === 'single' ? subjectLP.trim() : subjectMat.trim(),
+      subjectMat: isCustom || layoutMode === 'single' ? subjectLP.trim() : subjectMat.trim(),
       questionsPerSubject,
       totalQuestions,
       createdAt: new Date().toISOString(),
@@ -128,7 +135,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const handleEdit = (exam: Exam) => {
     setEditingId(exam.id);
     setName(exam.name);
-    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' ? exam.templateType : 'padrao');
+    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' ? exam.templateType : 'padrao');
     setLayoutMode(exam.layoutMode === 'single' ? 'single' : 'dual');
     setSubjectLP(exam.subjectLP);
     setSubjectMat(exam.subjectMat);
@@ -164,7 +171,7 @@ export default function NewExamPage({ onNavigate }: Props) {
 
           <div>
             <label className="label">Modelo do Cartão *</label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => handleTemplateChange('padrao')}
@@ -176,6 +183,18 @@ export default function NewExamPage({ onNavigate }: Props) {
               >
                 Padrão
                 <span className="block text-xs font-normal text-gray-400">ArUco nos cantos · 1 ou 2 disciplinas</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTemplateChange('saev')}
+                className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                  templateType === 'saev'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Gabarito SAEV
+                <span className="block text-xs font-normal text-gray-400">LP + MAT · 16 a 26 por disciplina</span>
               </button>
               <button
                 type="button"
@@ -204,7 +223,7 @@ export default function NewExamPage({ onNavigate }: Props) {
             </div>
           </div>
 
-          {!isCustom && (
+          {(!isCustom && templateType !== 'saev') && (
           <div>
             <label className="label">Disciplinas *</label>
             <div className="grid grid-cols-2 gap-3">
@@ -265,14 +284,15 @@ export default function NewExamPage({ onNavigate }: Props) {
             <input
               type="number"
               className="input"
-              min={1}
+              min={minQps}
               max={maxQps}
               value={questionsPerSubject || ''}
               onChange={(e) => handleQpsChange(e.target.value)}
             />
             <p className="text-xs text-gray-400 mt-1">
-              1 a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.
-              {!isCustom && layoutMode === 'dual' && ' O padrão do layout é 22 por disciplina.'}
+              {minQps} a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.
+              {!isCustom && layoutMode === 'dual' && templateType !== 'saev' && ' O padrão do layout é 22 por disciplina.'}
+              {templateType === 'saev' && ' Gabarito SAEV: LP + MAT com QR do sistema e nome impresso.'}
               {isSae && ' O cabeçalho do cartão (caderno, série, QR etc.) é editado na tela de geração.'}
               {isColar && ' Somente o gabarito, sem cabeçalho — para colar na avaliação. Correção com identificação manual.'}
             </p>
@@ -336,7 +356,7 @@ export default function NewExamPage({ onNavigate }: Props) {
                   <p className="font-medium text-gray-900 truncate">{exam.name}</p>
                   <p className="text-sm text-gray-500">
                     {exam.templateType && exam.templateType !== 'padrao' && (
-                      <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">{exam.templateType === 'sae' ? 'Avaliação Contínua' : 'Colar em Avaliação'}</span>
+                      <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">{exam.templateType === 'sae' ? 'Avaliação Contínua' : exam.templateType === 'saev' ? 'Gabarito SAEV' : 'Colar em Avaliação'}</span>
                     )}
                     {exam.layoutMode === 'single'
                       ? exam.subjectLP

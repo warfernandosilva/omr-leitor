@@ -9,8 +9,8 @@ export interface Exam {
   gradeScale: '0-10' | '0-100' | 'count';
   answerKey: Record<number, string> | null;
   layoutMode?: 'dual' | 'single';
-  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua) ou 'colar' (Colar em Avaliação, só grade). */
-  templateType?: 'padrao' | 'sae' | 'colar';
+  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua), 'colar' (Colar em Avaliação, só grade) ou 'saev' (Gabarito SAEV, dual 16+16 a 26+26). */
+  templateType?: 'padrao' | 'sae' | 'colar' | 'saev';
   /** Cabeçalho editável do cartão SAE (só quando templateType === 'sae'). */
   saeSpec?: SaeSpec;
 }
@@ -42,8 +42,16 @@ export const DEFAULT_SAE_SPEC: SaeSpec = {
 
 export const SAE_MAX_QUESTIONS = 28;
 
+/** qps por disciplina no Gabarito SAEV (dual). */
+export const SAEV_MIN_QPS = 16;
+export const SAEV_MAX_QPS = 26;
+
 export function isSaeExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'sae';
+}
+
+export function isSaevExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
+  return exam?.templateType === 'saev';
 }
 
 /** SAE e Colar compartilham a mesma geometria de grade/âncoras (leitura e overlay). */
@@ -54,6 +62,7 @@ export function isSaeFamilyExam(exam?: Pick<Exam, 'templateType'> | null): boole
 export function templateLabel(t?: Exam['templateType']): string {
   if (t === 'sae') return 'Avaliação Contínua';
   if (t === 'colar') return 'Colar em Avaliação';
+  if (t === 'saev') return 'Gabarito SAEV';
   return 'Padrão';
 }
 

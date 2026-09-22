@@ -34,17 +34,21 @@ def otsu_1d(values: list[float]) -> float:
     return float(centers[int(np.argmax(between))])
 
 
-def adaptive_floor(scores: list[float]) -> tuple[float, str]:
+def adaptive_floor(
+    scores: list[float], hi: float = ADAPT_MAX
+) -> tuple[float, str]:
     """Devolve (floor, source) com source 'adaptive' ou 'fixed'.
 
     Regras de segurança (fallback ao fixo):
     - poucas amostras;
-    - candidato fora da faixa [ADAPT_MIN, ADAPT_MAX] é clampado, e se
+    - candidato fora da faixa [ADAPT_MIN, hi] é clampado, e se
       quase nada fica acima dele (cartão em branco), usa o fixo.
+    `hi` permite ao chamador alargar o teto (ex.: SAEV com fundo
+    texturizado tem vazias ~0.40 e precisa de divisor ~0.55).
     """
     if len(scores) < MIN_SCORES:
         return FLOOR, "fixed"
-    candidate = min(ADAPT_MAX, max(ADAPT_MIN, otsu_1d(scores)))
+    candidate = min(hi, max(ADAPT_MIN, otsu_1d(scores)))
     above = sum(1 for s in scores if s >= candidate)
     if above / len(scores) < MIN_MARKED_FRAC:
         return FLOOR, "fixed"
