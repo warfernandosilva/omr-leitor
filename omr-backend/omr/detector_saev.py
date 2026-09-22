@@ -17,6 +17,7 @@ from .detector_sae import (
     _order_quad,
     _pick_four,
     _square_candidates,
+    downscale_for_detection,
     validate_sae_geometry,
 )
 from .template_saev import SAEV_CORNER_CENTERS, SAEV_SQUARE, PAGE_W, PAGE_H
@@ -87,6 +88,14 @@ def _refine_centers(
 def detect_saev_corners(image: np.ndarray) -> SaeDetectionResult:
     """Detecta os 4 quadrados SAEV. Retorna centros ordenados TL/TR/BR/BL."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    # Teto de resolução: foto 12MP + upscale 1.5x estourava em dezenas de MP
+    # e o _pick_four O(n^4) pendurava a API por minutos (trava nos 50%).
+    gray, ds = downscale_for_detection(gray)
+
+    def _up(centers: dict[str, tuple[float, float]]) -> dict[str, tuple[float, float]]:
+        if ds == 1.0:
+            return centers
+        return {k: (v[0] / ds, v[1] / ds) for k, v in centers.items()}
 
     try:
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -122,7 +131,7 @@ def detect_saev_corners(image: np.ndarray) -> SaeDetectionResult:
                 else:
                     gray_full = g0
                 chosen = _refine_centers(gray_full, chosen)
-                return SaeDetectionResult(centers=chosen, found=True, missing=[])
+                return SaeDetectionResult(centers=_up(chosen), found=True, missing=[])
 
     # Diagnóstico: quantos quadrantes faltam na melhor tentativa
     best_missing = CORNERS_ORDER

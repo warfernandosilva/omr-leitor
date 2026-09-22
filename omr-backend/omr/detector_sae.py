@@ -10,6 +10,7 @@ Estratégia (sem ArUco):
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import cv2
@@ -18,6 +19,23 @@ import numpy as np
 from .template_sae import CORNER_CENTERS, PAGE_W, PAGE_H
 
 CORNERS_ORDER = ["TL", "TR", "BR", "BL"]
+
+# Teto de resolução p/ busca de âncoras: foto 12MP vira ~27MP no upscale
+# 1.5x e o findContours/combos estouram em minutos. Acima disso, detecta
+# reduzido e remapeia os centros (o refino por momentos corrige sub-pixel).
+DETECT_MAX_SIDE = 2000
+
+
+def downscale_for_detection(gray: np.ndarray, max_side: int = DETECT_MAX_SIDE,
+                            ) -> tuple[np.ndarray, float]:
+    """Reduz p/ teto de lado maior. Devolve (imagem, escala): coord_original = coord / escala."""
+    h, w = gray.shape[:2]
+    longest = max(h, w)
+    if longest <= max_side:
+        return gray, 1.0
+    scale = max_side / float(longest)
+    small = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+    return small, scale
 
 
 @dataclass
@@ -113,35 +131,80 @@ def _rect_score(
     return score
 
 
+def _score_combo(centers: np.ndarray, combo: tuple[int, ...], img_area: float,
+                 expected_centers: dict[str, tuple[float, float]]
+                 ) -> tuple[float | None, dict[str, tuple[float, float]] | None]:
+    """Score de um quarteto (None = descarta pelo filtro de área)."""
+    quad = centers[list(combo)]
+    ordered = _order_quad(quad)
+    pts = np.array([ordered[k] for k in CORNERS_ORDER], dtype=np.float32)
+    if float(cv2.contourArea(pts)) < img_area * 0.10:
+        return None, None
+    return _rect_score(ordered, expected_centers), ordered
+
+
 def _pick_four(
     candidates: list[np.ndarray], w: int, h: int,
     expected_centers: dict[str, tuple[float, float]] = CORNER_CENTERS,
+    time_budget: float = 3.0,
+    per_quadrant: int = 25,
 ) -> dict[str, tuple[float, float]] | None:
     """Escolhe o quarteto MAIS RETANGULAR com a proporção das âncoras.
 
     As âncoras reais formam um retângulo; falsos positivos (padrões do
     QR) entortam o quadrilátero e são rejeitados pelo score.
+
+    Anti-travamento (foto real com dezenas de candidatos => C(n,4)
+    combos em Python puro levava minutos, pendurando a API nos 50%):
+    - cada âncora mora perto do seu canto da foto: candidatos são
+      fatiados por quadrante (cap per_quadrant por área desc) e os
+      combos vêm do produto — não de C(n,4) global;
+    - se algum quadrante fica vazio, fallback para o scan global;
+    - teto de tempo time_budget nas duas fases (melhor até ali).
+    Em foto limpa o resultado é idêntico ao scan completo (mínimo
+    global do mesmo score com o mesmo teto 0.6).
     """
     import itertools
 
     if len(candidates) < 4:
         return None
+    areas = np.array([float(cv2.contourArea(c.astype(np.float32))) for c in candidates])
     centers = np.array([[p[:, 0].mean(), p[:, 1].mean()] for p in candidates])
     img_area = float(w * h)
+    deadline = time.perf_counter() + max(0.1, time_budget)
 
-    best: dict[str, tuple[float, float]] | None = None
-    best_score = 0.6  # teto: exige forma bem próxima de retângulo
-    for combo in itertools.combinations(range(len(centers)), 4):
-        quad = centers[list(combo)]
-        ordered = _order_quad(quad)
-        pts = np.array([ordered[k] for k in CORNERS_ORDER], dtype=np.float32)
-        if float(cv2.contourArea(pts)) < img_area * 0.10:
-            continue
-        score = _rect_score(ordered, expected_centers)
-        if score < best_score:
-            best_score = score
-            best = ordered
-    return best
+    def _scan(combos) -> dict[str, tuple[float, float]] | None:
+        best: dict[str, tuple[float, float]] | None = None
+        best_score = 0.6  # teto: exige forma bem próxima de retângulo
+        for combo in combos:
+            score, ordered = _score_combo(centers, combo, img_area, expected_centers)
+            if score is None:
+                continue
+            if score < best_score:
+                best_score = score
+                best = ordered
+            if time.perf_counter() >= deadline:
+                break
+        return best
+
+    # Fase 1: um candidato por quadrante (cantos da foto)
+    corners = np.array([[0.0, 0.0], [float(w), 0.0], [float(w), float(h)], [0.0, float(h)]])
+    nearest = ((centers[:, None, :] - corners[None, :, :]) ** 2).sum(-1).argmin(1)
+    buckets: list[list[int]] = []
+    for k in range(4):
+        idx = [i for i in range(len(candidates)) if nearest[i] == k]
+        idx.sort(key=lambda i: areas[i], reverse=True)
+        buckets.append(idx[:per_quadrant])
+    if all(buckets):
+        hit = _scan(itertools.product(*buckets))
+        if hit is not None:
+            return hit
+
+    # Fase 2 (fallback): scan global por área desc, com o mesmo teto.
+    # _scan devolve coordenadas (não índices) — invariantes à ordem.
+    order = sorted(range(len(candidates)), key=lambda i: areas[i], reverse=True)
+    centers = centers[order]
+    return _scan(itertools.combinations(range(len(centers)), 4))
 
 
 def validate_sae_geometry(
@@ -182,7 +245,13 @@ def validate_sae_geometry(
 def detect_sae_corners(image: np.ndarray) -> SaeDetectionResult:
     """Detecta os 4 quadrados. Retorna centros ordenados TL/TR/BR/BL."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    gray, ds = downscale_for_detection(gray)
     h, w = gray.shape[:2]
+
+    def _up(centers: dict[str, tuple[float, float]]) -> dict[str, tuple[float, float]]:
+        if ds == 1.0:
+            return centers
+        return {k: (v[0] / ds, v[1] / ds) for k, v in centers.items()}
 
     attempts: list[np.ndarray] = [gray]
     try:
@@ -196,7 +265,7 @@ def detect_sae_corners(image: np.ndarray) -> SaeDetectionResult:
         cands = _square_candidates(g)
         chosen = _pick_four(cands, w, h)
         if chosen and validate_sae_geometry(chosen):
-            return SaeDetectionResult(centers=chosen, found=True, missing=[])
+            return SaeDetectionResult(centers=_up(chosen), found=True, missing=[])
 
     # Diagnóstico: quantos quadrantes faltam na melhor tentativa
     best_missing = CORNERS_ORDER

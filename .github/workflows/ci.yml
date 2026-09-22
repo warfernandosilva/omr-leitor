@@ -40,6 +40,7 @@ jobs:
           cd omr-backend
           python test_dup_regression.py
           python test_adaptive.py
+          python test_saev_busy.py
           python test_e2e.py
           python test_sae_e2e.py
           python test_colar_e2e.py

@@ -531,7 +531,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         setStep('form');
       }
     } catch (err) {
-      setError('Erro ao processar a imagem. Verifique se o backend Python está rodando.');
+      setError(err instanceof Error ? err.message : 'Erro ao processar a imagem. Verifique se o backend Python está rodando.');
       setCapturedImage(null);
       setStep('form');
     }

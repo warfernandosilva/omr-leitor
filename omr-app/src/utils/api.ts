@@ -161,11 +161,26 @@ export async function processImage(
   formData.append('template', template ?? 'padrao');
   formData.append('adaptive', adaptive ? 'true' : 'false');
 
-  const res = await fetch(`${API_BASE}/api/omr/process`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: formData,
-  });
+  // Timeout longo (nunca 50% eterno): se o backend não responder em 2min,
+  // aborta com mensagem amigável em vez de pendurar a correção.
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 120000);
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/omr/process`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: formData,
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('O processamento demorou mais de 2 minutos e foi interrompido. Tente uma foto mais próxima, nítida e com os 4 cantos visíveis.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
 
   const data = await res.json();
 
