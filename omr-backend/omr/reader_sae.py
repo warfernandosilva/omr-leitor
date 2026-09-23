@@ -49,6 +49,7 @@ def process_sae_image(
     image: np.ndarray,
     n_questions: int | None = None,
     adaptive: bool = False,
+    debug: bool = False,
 ) -> OMRResult | None:
     """Pipeline completo OMR-SAE. n_questions = total de questões (1..28)."""
     n = max(1, min(SAE_MAX_QUESTIONS, int(n_questions or 26)))
@@ -88,15 +89,21 @@ def process_sae_image(
     # só o interior (marca de lápis/caneta). Bolhas vazias ≈ 0.05.
     radius = max(6, int(round(SAE_BUBBLE_RADIUS)) - 2)
     all_ratios: dict[int, dict[str, float]] = {}
+    geom: dict[int, list] = {}
 
     for q, b, r in sae_block_rows(n):
         y = SAE_FIRST_ROW_Y + r * SAE_ROW_STEP
         bx = SAE_BLOCKS_X[b]
         q_ratios: dict[str, float] = {}
+        q_geom: list = []
         for i, dx in enumerate(SAE_BUBBLE_DX):
             score = _bubble_score(gray, bx + dx, y, radius=radius)
             q_ratios[letters[i]] = score
+            if debug:
+                q_geom.append((bx + dx, y, SAE_BUBBLE_RADIUS, letters[i]))
         all_ratios[q] = q_ratios
+        if debug:
+            geom[q] = q_geom
 
     answers: dict[int, str] = {}
     blank: list[int] = []
@@ -121,6 +128,11 @@ def process_sae_image(
 
     t_score = _time.perf_counter() - _t3
 
+    debug_points = None
+    if debug:
+        from .debug import build_debug_points
+        debug_points = build_debug_points(geom, all_ratios, answers, blank, duplicates, low_conf)
+
     return OMRResult(
         answers=answers,
         blank_questions=blank,
@@ -136,4 +148,5 @@ def process_sae_image(
         t_warp=t_warp,
         t_qr=t_qr,
         t_score=t_score,
+        debug_points=debug_points,
     )

@@ -93,6 +93,8 @@ export interface ProcessResult {
   warnings?: string[];
   /** frames usados na votação (process-multi) */
   nFrames?: number;
+  /** heatmap de diagnóstico (só com debug=true) */
+  debugImages?: { heatmap?: string };
   error?: string;
 }
 
@@ -179,6 +181,7 @@ function mapProcessData(data: Record<string, unknown>): ProcessResult {
     } : undefined,
     warnings: Array.isArray(data.warnings) ? data.warnings as string[] : undefined,
     nFrames: typeof data.n_frames === 'number' ? data.n_frames as number : undefined,
+    debugImages: (data.debug_images as { heatmap?: string } | undefined) ?? undefined,
     error: data.error as string | undefined,
   };
 }
@@ -205,6 +208,7 @@ export async function processImage(
   layoutMode?: 'dual' | 'single',
   template?: 'padrao' | 'sae' | 'colar' | 'saev',
   adaptive?: boolean,
+  debug?: boolean,
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('file', file);
@@ -212,6 +216,7 @@ export async function processImage(
   formData.append('layout_mode', layoutMode ?? 'dual');
   formData.append('template', template ?? 'padrao');
   formData.append('adaptive', adaptive ? 'true' : 'false');
+  formData.append('debug', debug ? 'true' : 'false');
 
   const res = await fetchWithTimeout(`${API_BASE}/api/omr/process`, {
     method: 'POST',
@@ -230,6 +235,7 @@ export async function processMulti(
   layoutMode?: 'dual' | 'single',
   template?: 'padrao' | 'sae' | 'colar' | 'saev',
   adaptive?: boolean,
+  debug?: boolean,
 ): Promise<ProcessResult> {
   if (files.length === 0) throw new Error('Nenhum frame para processar.');
   const formData = new FormData();
@@ -238,6 +244,7 @@ export async function processMulti(
   formData.append('layout_mode', layoutMode ?? 'dual');
   formData.append('template', template ?? 'padrao');
   formData.append('adaptive', adaptive ? 'true' : 'false');
+  formData.append('debug', debug ? 'true' : 'false');
 
   const res = await fetchWithTimeout(`${API_BASE}/api/omr/process-multi`, {
     method: 'POST',

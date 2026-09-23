@@ -103,6 +103,7 @@ class ProcessResponse(BaseModel):
     thresholds_used: dict | None = None  # {floor, margin, source: fixed|adaptive}
     warnings: list[str] | None = None  # sanity pós-leitura (não bloqueia)
     n_frames: int | None = None  # frames usados na votação (process-multi)
+    debug_images: dict | None = None  # heatmap de diagnóstico (só com debug=true)
     error: str | None = None
 
 
@@ -452,6 +453,18 @@ def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
             return None
 
 
+def _debug_images(result: OMRResult, want: bool) -> dict | None:
+    """Heatmap de diagnóstico (só quando debug=true)."""
+    if not want or result.rectified is None or not result.debug_points:
+        return None
+    try:
+        from omr.debug import render_heatmap
+        heat = render_heatmap(result.rectified, result.debug_points)
+        return {"heatmap": heat} if heat else None
+    except Exception:
+        return None
+
+
 @app.post("/api/omr/process", response_model=ProcessResponse)
 async def process_omr(
     file: UploadFile = File(...),
@@ -459,6 +472,7 @@ async def process_omr(
     layout_mode: str = Form("dual"),
     template: str = Form("padrao"),  # padrao | sae | colar (colar: mesma grade do sae, sem QR)
     adaptive: bool = Form(False),  # limiar adaptativo por foto (experimental, default OFF)
+    debug: bool = Form(False),  # heatmap de diagnóstico (default off = zero custo)
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa uma imagem (foto/scan) do cartão preenchido."""
@@ -482,15 +496,16 @@ async def process_omr(
     result: OMRResult | None
     template_used = template if template in ("padrao", "sae", "colar", "saev") else "padrao"
     if template_used in ("sae", "colar"):
-        result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
+        result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive, debug=debug)
     elif template_used == "saev":
-        result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive)
+        result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
     else:
         result = process_image(
             image,
             questions_per_subject=questions_per_subject,
             layout_mode=layout_mode,
             adaptive=adaptive,
+            debug=debug,
         )
 
     # Fallback cruzado: clientes antigos (app de captura no celular, Flutter)
@@ -498,12 +513,12 @@ async def process_omr(
     # de desistir. A resposta indica qual foi usado (template_used).
     # (colar tem a mesma geometria do sae: o fallback "sae" o cobre.)
     if result is None and template_used == "padrao":
-        sae_result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
+        sae_result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive, debug=debug)
         if sae_result is not None:
             result = sae_result
             template_used = "sae"
         else:
-            saev_result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive)
+            saev_result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
             if saev_result is not None:
                 result = saev_result
                 template_used = "saev"
@@ -513,6 +528,7 @@ async def process_omr(
             questions_per_subject=questions_per_subject,
             layout_mode=layout_mode,
             adaptive=adaptive,
+            debug=debug,
         )
         if std_result is not None:
             result = std_result
@@ -636,6 +652,7 @@ async def process_omr(
             "source": result.floor_source,
         },
         warnings=sanity.warnings or None,
+        debug_images=_debug_images(result, debug),
     )
 
 
@@ -646,6 +663,7 @@ async def process_omr_multi(
     layout_mode: str = Form("dual"),
     template: str = Form("padrao"),
     adaptive: bool = Form(False),
+    debug: bool = Form(False),
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa N frames do mesmo cartão e vota por questão.
@@ -671,12 +689,12 @@ async def process_omr_multi(
         if first_image is None:
             first_image = image
         if template_used in ("sae", "colar"):
-            r = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
+            r = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive, debug=debug)
         elif template_used == "saev":
-            r = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive)
+            r = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
         else:
             r = process_image(image, questions_per_subject=questions_per_subject,
-                              layout_mode=layout_mode, adaptive=adaptive)
+                              layout_mode=layout_mode, adaptive=adaptive, debug=debug)
         if r is not None:
             results.append(r)
 
@@ -756,6 +774,7 @@ async def process_omr_multi(
         thresholds_used={"floor": round(result.floor_used, 3), "margin": MARGIN,
                          "source": result.floor_source},
         warnings=sanity.warnings or None,
+        debug_images=_debug_images(result, debug),
     )
 
 
@@ -1537,3 +1556,4 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8010)
+

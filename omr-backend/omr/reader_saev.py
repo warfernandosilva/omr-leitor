@@ -88,6 +88,7 @@ def process_saev_image(
     image: np.ndarray,
     questions_per_subject: int | None = None,
     adaptive: bool = False,
+    debug: bool = False,
 ) -> OMRResult | None:
     """Pipeline completo OMR-SAEV. questions_per_subject = por disciplina (16..26)."""
     qps = max(1, min(SAEV_MAX_QPS, int(questions_per_subject or 22)))
@@ -124,15 +125,21 @@ def process_saev_image(
 
     letters = ["A", "B", "C", "D"]
     all_ratios: dict[int, dict[str, float]] = {}
+    geom: dict[int, list] = {}
 
     for q, col, _r in saev_block_rows(qps):
         _, cy = saev_bubble_center(col, _r, 0, qps)
         x0 = SAEV_COLS_X[col]
         q_ratios: dict[str, float] = {}
+        q_geom: list = []
         for i in range(4):
             cx = x0 + SAEV_NUM_W + i * SAEV_PITCH + SAEV_PITCH / 2
             q_ratios[letters[i]] = _square_score(gray, cx, cy)
+            if debug:
+                q_geom.append((cx, cy, SAEV_SIDE / 2, letters[i]))
         all_ratios[q] = q_ratios
+        if debug:
+            geom[q] = q_geom
 
     answers: dict[int, str] = {}
     blank: list[int] = []
@@ -159,6 +166,11 @@ def process_saev_image(
 
     t_score = _time.perf_counter() - _t3
 
+    debug_points = None
+    if debug:
+        from .debug import build_debug_points
+        debug_points = build_debug_points(geom, all_ratios, answers, blank, duplicates, low_conf)
+
     return OMRResult(
         answers=answers,
         blank_questions=blank,
@@ -174,4 +186,5 @@ def process_saev_image(
         t_warp=t_warp,
         t_qr=t_qr,
         t_score=t_score,
+        debug_points=debug_points,
     )

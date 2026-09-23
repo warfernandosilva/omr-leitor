@@ -57,6 +57,8 @@ class OMRResult:
     t_warp: float = 0.0
     t_qr: float = 0.0
     t_score: float = 0.0
+    # Pontos p/ heatmap de debug (só quando debug=True)
+    debug_points: list | None = None
 
 
 def classify_question(
@@ -262,6 +264,7 @@ def process_image(
     questions_per_subject: int | None = None,
     layout_mode: str = LAYOUT_DUAL,
     adaptive: bool = False,
+    debug: bool = False,
 ) -> OMRResult | None:
     """Pipeline completo OMR. questions_per_subject define quantas linhas ler."""
     single = layout_mode == LAYOUT_SINGLE
@@ -321,6 +324,7 @@ def process_image(
     _t3 = _time.perf_counter()
 
     all_ratios: dict[int, dict[str, float]] = {}
+    geom: dict[int, list] = {}
     letters = ["A", "B", "C", "D"]
     # Máscara um pouco menor que a bolha: ignora o contorno impresso e mede
     # só o interior (marca de lápis/caneta). Bolhas vazias ≈ 0.05.
@@ -330,24 +334,34 @@ def process_image(
         q_num = q + 1
         y = int(y)
         q_ratios: dict[str, float] = {}
+        q_geom: list = []
 
         for i, x in enumerate(xs):
             score = _bubble_score(gray, int(x), y, radius=inner_radius)
             q_ratios[letters[i]] = score
+            if debug:
+                q_geom.append((int(x), y, radius, letters[i]))
 
         all_ratios[q_num] = q_ratios
+        if debug:
+            geom[q_num] = q_geom
 
     if not single:
         for q, y in enumerate(question_y):
             q_num = q + qps + 1
             y = int(y)
             q_ratios: dict[str, float] = {}
+            q_geom = []
 
             for i, x in enumerate(MAT_X):
                 score = _bubble_score(gray, int(x), y, radius=inner_radius)
                 q_ratios[letters[i]] = score
+                if debug:
+                    q_geom.append((int(x), y, radius, letters[i]))
 
             all_ratios[q_num] = q_ratios
+            if debug:
+                geom[q_num] = q_geom
 
     answers: dict[int, str] = {}
     blank: list[int] = []
@@ -375,6 +389,11 @@ def process_image(
 
     t_score = _time.perf_counter() - _t3
 
+    debug_points = None
+    if debug:
+        from .debug import build_debug_points
+        debug_points = build_debug_points(geom, all_ratios, answers, blank, duplicates, low_conf)
+
     return OMRResult(
         answers=answers,
         blank_questions=blank,
@@ -390,4 +409,5 @@ def process_image(
         t_warp=t_warp,
         t_qr=t_qr,
         t_score=t_score,
+        debug_points=debug_points,
     )

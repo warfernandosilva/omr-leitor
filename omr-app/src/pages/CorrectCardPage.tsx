@@ -160,6 +160,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       return next;
     });
   };
+  // Heatmap de diagnóstico (default OFF — só quando pedido)
+  const [debugMode, setDebugMode] = useState(() => {
+    try { return localStorage.getItem('omr-debug') === '1'; } catch { return false; }
+  });
+  const handleDebugToggle = () => {
+    setDebugMode(prev => {
+      const next = !prev;
+      try { localStorage.setItem('omr-debug', next ? '1' : '0'); } catch { /* privado */ }
+      return next;
+    });
+  };
   // Visor imersivo: flash do obturador, tempo de busca e portão de nitidez
   const [flashOn, setFlashOn] = useState(false);
   const [searchSecs, setSearchSecs] = useState(0);
@@ -488,13 +499,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           const blob = await res.blob();
           return new File([blob], 'frame.jpg', { type: 'image/jpeg' });
         }));
-        result = await processMulti(files, qpsUsado, modoUsado, templateUsado, useAdaptive);
+        result = await processMulti(files, qpsUsado, modoUsado, templateUsado, useAdaptive, debugMode);
       } else {
         // Converter dataUrl para File para enviar à API Python
         const res = await fetch(dataUrl);
         const blob = await res.blob();
         const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
-        result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive);
+        result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive, debugMode);
       }
       setProcessingProgress(100);
 
@@ -955,6 +966,18 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             }`}
           >
             {adaptive ? '◉ Limiar adaptativo' : '○ Limiar adaptativo'}
+          </button>
+          <button
+            onClick={handleDebugToggle}
+            disabled={batchRunning}
+            title="Retorna o heatmap de scores por bolha (diagnóstico)"
+            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${
+              debugMode
+                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {debugMode ? '◉ Diagnóstico' : '○ Diagnóstico'}
           </button>
         </div>
       )}
@@ -1482,6 +1505,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 <div key={i}>{w}</div>
               ))}
             </div>
+          )}
+
+          {omrResult.debugImages?.heatmap && (
+            <details className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
+              <summary className="cursor-pointer font-medium text-gray-700 min-h-[44px]">
+                Diagnóstico: heatmap de scores por bolha
+              </summary>
+              <img src={omrResult.debugImages.heatmap} alt="Heatmap de scores" className="mt-2 rounded-lg mx-auto" />
+              <p className="text-xs text-gray-500 mt-2">Preenchimento = score (verde marcado → vermelho vazio) · contorno = verdict (verde ok, âmbar incerta, laranja duplicada, cinza em branco).</p>
+            </details>
           )}
 
           {(omrResult.lowConfidence ?? []).length > 0 && (            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
