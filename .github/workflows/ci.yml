@@ -50,5 +50,6 @@ jobs:
           python test_persistence.py
           python test_ops.py
           python test_vote.py
+          python test_backup.py
           python test_fuzz.py
           python test_contract.py
