@@ -138,36 +138,28 @@ def _score_marks(res, tag):
 
 
 def test_fotos_b_precisao():
-    # (10) tem a dupla LP9 subexposta (A claro): cobra-se o placar, não a dupla
-    for name, strict_dup in [("novo (2).jpeg", True), ("novo (5).jpeg", True),
-                             ("novo (7).jpeg", True), ("novo (10).jpeg", False)]:
+    # Fotos do cartão ANTIGO (âncoras = quadrados pretos): desde a troca por
+    # ArUco, o leitor rejeita (None) — documenta a quebra + orienta reimprimir.
+    # Quando chegarem fotos do NOVO layout, reativar os asserts de precisão.
+    for name in ["novo (2).jpeg", "novo (5).jpeg", "novo (7).jpeg", "novo (10).jpeg"]:
         img = _photo(name)
         if img is None:
             print(f"SKIP {name}: sem foto"); continue
         res = process_saev_image(img, questions_per_subject=22, adaptive=True)
-        assert res is not None, f"{name}: deteccao falhou"
-        assert res.qr_id, f"{name}: QR nao decodificado"
-        hit, tot, bad = _score_marks(res, name)
-        # (10) tem 3 acertos incertos (vão p/ revisão via low) + Q9 subexposta:
-        # placar 40/44 é o piso honesto medido; (2,5,7) batem 43/44.
-        assert hit >= 40, f"{name}: {hit}/{tot} {bad[:6]}"
-        if strict_dup:
-            assert 9 in res.duplicate_questions, f"{name}: dupla LP9 perdida"
-        assert 28 in res.duplicate_questions or any(
-            q in res.duplicate_questions for q in (28,)), f"{name}: dupla MAT6 perdida"
-        print(f"{name}: {hit}/{tot} floor={res.floor_used:.3f}")
+        assert res is None, f"{name}: cartão antigo ainda lendo (esperado: None/reimprimir)"
+        print(f"{name}: rejeitado como esperado (layout antigo)")
 
 
 def test_fotos_deteccao_e_qr():
-    # Sem ground-truth (R) ou foto difícil (9): só detecção + QR
+    # Idem: fotos antigas devem ser rejeitadas, não lidas.
     for name in ["novo (1).jpeg", "novo (4).jpeg", "novo (9).jpeg",
                  "gabi preenchido (2).jpeg"]:
         img = _photo(name)
         if img is None:
             print(f"SKIP {name}: sem foto"); continue
         res = process_saev_image(img, questions_per_subject=22, adaptive=True)
-        assert res is not None, f"{name}: deteccao falhou"
-        print(f"{name}: detect ok qr={res.qr_id}")
+        assert res is None, f"{name}: cartão antigo ainda lendo (esperado: None/reimprimir)"
+        print(f"{name}: rejeitado como esperado (layout antigo)")
 
 
 def main() -> None:

@@ -18,6 +18,8 @@ export const SAEV_CORNER_CENTERS = {
   BL: [110, 1905] as [number, number],
   BR: [1338, 1905] as [number, number],
 };
+// Âncoras ArUco DICT_4X4_50 (IDs 0-3), 104px como no padrão (espelha template_saev.py)
+export const SAEV_CORNER_SIZE = 104;
 export const SAEV_LETTERS = ['A', 'B', 'C', 'D'] as const;
 
 /** Linhas por subcoluna (2 subcolunas por disciplina). */

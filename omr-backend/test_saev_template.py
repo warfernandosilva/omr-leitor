@@ -24,10 +24,15 @@ def test_tamanho_e_ancoras():
     img = generate_saev_card(SaevSpec(n_questoes=22), student_name="ALUNA EXEMPLO",
                              qr_override="OMR-2026-000001")
     assert img.shape == (PAGE_H, PAGE_W, 3), img.shape
-    # 4 quadrados pretos: centro bem escuro
-    for k, (cx, cy) in SAEV_CORNER_CENTERS.items():
-        r = _dark_ratio(img, cx - 10, cy - 10, cx + 10, cy + 10)
-        assert r > 0.9, f"{k} centro claro: {r}"
+    # 4 ArUco DICT_4X4_50 (IDs 0-3) nos cantos SAEV, 104px como no padrão
+    from omr.detector import detect_markers
+    det = detect_markers(img)
+    assert sorted(det.found_ids) == [0, 1, 2, 3], det.found_ids
+    assert SAEV_SQUARE == 104
+    for k, mid in (("TL", 0), ("TR", 1), ("BR", 2), ("BL", 3)):
+        cx, cy = SAEV_CORNER_CENTERS[k]
+        m = next(m for m in det.markers if m.id == mid)
+        assert abs(m.center[0] - cx) < 3 and abs(m.center[1] - cy) < 3, (k, m.center)
     # QR presente no slot
     qx, qy = SAEV_QR_POS
     r = _dark_ratio(img, qx, qy, qx + SAEV_QR_SIZE, qy + SAEV_QR_SIZE)

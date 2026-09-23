@@ -22,6 +22,15 @@ nenhum `blank`/`duplicate` espúrio novo. Registrar abaixo cada evidência.
 |------|------|----------------------------|---------------------------|----------|
 | 2026-09-21 | WhatsApp 18.21.48 (layout ANTIGO do cartão, 10Q — incompatível com o template atual) | 7/9/27d/4l | floor 0.268, 7/8/28d/4l | INCONCLUSIVA — foto de versão anterior do cartão, não serve de evidência |
 
+## SAEV com ArUco (a partir de 2026-09-23)
+
+As âncoras do SAEV trocaram de quadrados pretos (75px) para **ArUco
+DICT_4X4_50 (IDs 0-3, 104px)** + homografia de 16 cantos + RANSAC.
+**Cartões SAEV impressos antes dessa data deixaram de ler** (o leitor
+rejeita com erro orientando recaptura) — **reimprimir**. Os testes
+`test_saev_marks.py` travam essa rejeição até chegarem fotos do novo
+layout (quando chegarão, reativar os asserts de precisão 43-44/44).
+
 Evidência sintética (válida): `python test_adaptive.py` — paridade fixo x
 adaptativo em cartão degradado, 0 fantasmas, duplicada real detectada,
 regressão `test_dup_regression` verde nos dois modos.

@@ -197,8 +197,17 @@ def validate_geometry(markers: list[ArUcoMarker], img_w: int = PAGE_W, img_h: in
 
 def get_homography_points(
     markers: list[ArUcoMarker],
+    dst_centers: dict[int, tuple[float, float]] | None = None,
+    marker_size: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """16 cantos + RANSAC; fallback para centros se reprojeção alta."""
+    """16 cantos + RANSAC; fallback para centros se reprojeção alta.
+
+    dst_centers/marker_size permitem reusar em outros modelos com ArUco
+    (ex.: SAEV): chaves = IDs 0-3 (TL/TR/BR/BL). Default = padrão.
+    """
+    from .template import ARUCO_CENTERS, ARUCO_SIZE
+    dst_centers = dst_centers or ARUCO_CENTERS
+    half = (marker_size or ARUCO_SIZE) / 2
     by_id = {m.id: m for m in markers}
 
     src_pts: list = []
@@ -208,9 +217,7 @@ def get_homography_points(
     for mid in order:
         c = by_id[mid].corners.astype(np.float64)
         # cantos detectados correspondem ao quadrado do marcador; destino = centro ± HALF
-        from .template import ARUCO_CENTERS, ARUCO_SIZE
-        cx, cy = ARUCO_CENTERS[mid]
-        half = ARUCO_SIZE / 2
+        cx, cy = dst_centers[mid]
         dst_quad = np.array([
             [cx - half, cy - half],
             [cx + half, cy - half],
@@ -256,9 +263,9 @@ def get_homography_points(
         by_id[3].center,
     ], dtype=np.float32)
     dst_c = np.array([
-        ARUCO_CENTERS[0],
-        ARUCO_CENTERS[1],
-        ARUCO_CENTERS[2],
-        ARUCO_CENTERS[3],
+        dst_centers[0],
+        dst_centers[1],
+        dst_centers[2],
+        dst_centers[3],
     ], dtype=np.float32)
     return src_c, dst_c

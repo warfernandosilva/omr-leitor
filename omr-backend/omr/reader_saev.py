@@ -16,7 +16,7 @@ import time as _time
 
 from .config import BLUR_BLOCK, MARGIN
 from .tuning import compute_floor_for
-from .detector_saev import detect_saev_corners, saev_homography
+from .detector_saev import detect_saev_corners, saev_homography, saev_homography_aruco
 from .reader import (
     OMRResult,
     _decode_qr_from,
@@ -99,9 +99,21 @@ def process_saev_image(
     if not det.found:
         return None
 
-    M = saev_homography(det.centers)
-    if M is None:
-        return None
+    # Homografia de 16 cantos + RANSAC (mesma do padrão); fallback: 4 centros
+    from .config import REPROJ_MAX
+    pts = saev_homography_aruco(det.markers or [])
+    if pts is not None:
+        src, dst = pts
+        if len(src) == 4:
+            M = cv2.getPerspectiveTransform(src, dst)
+        else:
+            M, _ = cv2.findHomography(src, dst, cv2.RANSAC, REPROJ_MAX)
+            if M is None:
+                return None
+    else:
+        M = saev_homography(det.centers)
+        if M is None:
+            return None
     _t1 = _time.perf_counter()
     try:
         rectified = cv2.warpPerspective(image, M, (PAGE_W, PAGE_H))

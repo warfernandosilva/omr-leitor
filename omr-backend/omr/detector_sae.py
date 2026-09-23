@@ -11,7 +11,7 @@ Estratégia (sem ArUco):
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -43,6 +43,7 @@ class SaeDetectionResult:
     centers: dict[str, tuple[float, float]]  # canto -> (x, y) na foto
     found: bool
     missing: list[str]
+    markers: list = field(default_factory=list)  # ArUcoMarker (só SAEV-ArUco preenche)
 
 
 def _square_candidates(

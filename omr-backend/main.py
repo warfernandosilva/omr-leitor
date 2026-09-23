@@ -522,7 +522,7 @@ async def process_omr(
             if saev_result is not None:
                 result = saev_result
                 template_used = "saev"
-    elif template_used in ("sae", "colar", "saev"):
+    elif result is None and template_used in ("sae", "colar", "saev"):
         std_result = process_image(
             image,
             questions_per_subject=questions_per_subject,

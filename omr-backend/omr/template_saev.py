@@ -21,16 +21,20 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from .template import PAGE_W, PAGE_H, load_font, _fit_text, make_qr_image
+from .template import ARUCO_DICT, ARUCO_SIZE, _generate_aruco_marker
 
 
-# ─── Âncoras (quadrados pretos sólidos) ───
-SAEV_SQUARE = 75
+# ─── Âncoras (ArUco DICT_4X4_50, IDs 0-3 = TL/TR/BR/BL, 104px como no padrão) ───
+SAEV_SQUARE = ARUCO_SIZE
+SAEV_ARUCO_IDS = {"TL": 0, "TR": 1, "BR": 2, "BL": 3}
 SAEV_CORNER_CENTERS = {
     "TL": (110, 545),
     "TR": (1338, 545),
     "BL": (110, 1905),
     "BR": (1338, 1905),
 }
+# Destinos por ID p/ a homografia (16 cantos + RANSAC, ver detector.get_homography_points)
+SAEV_ARUCO_DST = {mid: SAEV_CORNER_CENTERS[corner] for corner, mid in SAEV_ARUCO_IDS.items()}
 
 # ─── Cabeçalho (calibrado na folha real via novo (4).jpeg) ───
 SAEV_QR_SIZE = 250
@@ -168,10 +172,14 @@ def generate_saev_card(
     if header:
         _draw_saev_header(d, pil, spec, name, qr_data)
 
-    # ─── Âncoras ───
-    for cx, cy in SAEV_CORNER_CENTERS.values():
-        x0, y0 = cx - SAEV_SQUARE // 2, cy - SAEV_SQUARE // 2
-        d.rectangle([x0, y0, x0 + SAEV_SQUARE, y0 + SAEV_SQUARE], fill=black)
+    # ─── Âncoras (ArUco, mesmo dicionário/tamanho do padrão) ───
+    # (no PIL: o retorno da função vem de `pil`, não do numpy `img`)
+    from PIL import Image as _PILImage
+    for corner, mid in SAEV_ARUCO_IDS.items():
+        m = _generate_aruco_marker(ARUCO_DICT, mid, ARUCO_SIZE)
+        marker_pil = _PILImage.fromarray(m).convert("RGB")
+        cx, cy = SAEV_CORNER_CENTERS[corner]
+        pil.paste(marker_pil, (cx - ARUCO_SIZE // 2, cy - ARUCO_SIZE // 2))
 
     # ─── Títulos das disciplinas ───
     font_title = load_font(40)
