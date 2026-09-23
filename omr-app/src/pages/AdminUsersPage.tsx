@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AppView } from '../types';
-import { adminListUsers, adminUpdateUser, adminDeleteUser, AdminUser, getMe } from '../utils/api';
+import { adminListUsers, adminUpdateUser, adminDeleteUser, AdminUser, getMe, adminDownloadBackup, adminRestoreBackup } from '../utils/api';
 
 interface Props {
   onNavigate: (view: AppView) => void;
@@ -11,6 +11,11 @@ export default function AdminUsersPage({ onNavigate }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [meEmail, setMeEmail] = useState<string | null>(null);
+  // Backup do banco
+  const [bkBusy, setBkBusy] = useState(false);
+  const [bkMsg, setBkMsg] = useState<string | null>(null);
+  const [bkConfirm, setBkConfirm] = useState(false);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
 
   const load = async () => {
     setLoading(true);
@@ -72,6 +77,46 @@ export default function AdminUsersPage({ onNavigate }: Props) {
     }
   };
 
+  const handleDownloadBackup = async () => {
+    setBkBusy(true);
+    setBkMsg(null);
+    try {
+      const name = await adminDownloadBackup();
+      setBkMsg(`Backup baixado: ${name}. Guarde em local seguro (contém hashes de senha).`);
+    } catch (err) {
+      setBkMsg(err instanceof Error ? err.message : 'Falha ao gerar backup');
+    } finally {
+      setBkBusy(false);
+    }
+  };
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!bkConfirm) {
+      setBkMsg('Marque a confirmação ("entendo que o restore atualiza registros") antes de enviar.');
+      return;
+    }
+    if (!confirm(`Restaurar o backup "${file.name}"?\n\nRegistros existentes serão ATUALIZADOS (upsert por id). Um backup pré-restore é gravado automaticamente no servidor.`)) return;
+    setBkBusy(true);
+    setBkMsg(null);
+    try {
+      const r = await adminRestoreBackup(file, true);
+      if (r.restored) {
+        const c = r.counts;
+        setBkMsg(`Restore concluído: ${c?.avaliacoes ?? 0} provas, ${c?.alunos ?? 0} alunos, ${c?.gabaritos ?? 0} gabaritos, ${c?.users ?? 0} usuários. Pré-restore: ${r.pre_restore}. Se algum usuário foi alterado, ele precisará relogar.`);
+        setBkConfirm(false);
+      } else {
+        setBkMsg(r.error || 'Restore recusado pelo servidor.');
+      }
+    } catch (err) {
+      setBkMsg(err instanceof Error ? err.message : 'Falha no restore');
+    } finally {
+      setBkBusy(false);
+    }
+  };
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -89,6 +134,44 @@ export default function AdminUsersPage({ onNavigate }: Props) {
           {error}
           {error.includes('403') && <p className="mt-2 text-xs">Você precisa ser administrador para acessar esta página.</p>}
           <button onClick={() => onNavigate('home')} className="btn btn-sm btn-secondary mt-3">Voltar ao início</button>
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="card overflow-x-auto mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-1">Backup do banco</h3>
+          <p className="text-xs text-gray-500 mb-3">
+            Dump portátil (provas, alunos, gabaritos, usuários). O arquivo contém hashes de senha — guarde em local seguro, nunca no Git.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={handleDownloadBackup} disabled={bkBusy} className="btn btn-sm btn-primary min-h-[44px]">
+              {bkBusy ? 'Gerando…' : 'Baixar backup'}
+            </button>
+            <button onClick={() => restoreInputRef.current?.click()} disabled={bkBusy} className="btn btn-sm btn-secondary min-h-[44px]">
+              Enviar restore…
+            </button>
+            <label className="flex items-center gap-2 text-xs text-gray-600 ml-1">
+              <input
+                type="checkbox"
+                checked={bkConfirm}
+                onChange={e => setBkConfirm(e.target.checked)}
+                className="w-4 h-4"
+              />
+              Entendo que o restore atualiza registros existentes
+            </label>
+          </div>
+          <input
+            ref={restoreInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={handleRestoreFile}
+          />
+          {bkMsg && (
+            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+              {bkMsg}
+            </div>
+          )}
         </div>
       )}
 

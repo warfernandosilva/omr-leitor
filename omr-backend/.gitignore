@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 data/
+backups/
 .env
 output/
 *.db

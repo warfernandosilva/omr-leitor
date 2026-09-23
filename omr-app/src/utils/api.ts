@@ -775,3 +775,47 @@ export async function adminDeleteUser(userId: number): Promise<void> {
     throw new Error(detail);
   }
 }
+
+// ─── Admin — backup do banco ───
+
+export interface RestoreCounts {
+  users: number;
+  avaliacoes: number;
+  alunos: number;
+  gabaritos: number;
+}
+
+/** Baixa o dump JSON do banco (abre o diálogo de download). */
+export async function adminDownloadBackup(): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/admin/backup`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Falha ao gerar backup (${res.status})`);
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="?([^";]+)"?/);
+  const name = m ? m[1] : 'backup-omr.json';
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 5000);
+  return name;
+}
+
+/** Restaura um dump (exige confirmação explícita). */
+export async function adminRestoreBackup(
+  file: File, confirm: boolean,
+): Promise<{ restored: boolean; counts?: RestoreCounts; pre_restore?: string; error?: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('confirm', confirm ? 'true' : 'false');
+  const res = await fetch(`${API_BASE}/api/admin/restore`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+  if (!res.ok) throw new Error(`Falha no restore (${res.status})`);
+  return res.json();
+}

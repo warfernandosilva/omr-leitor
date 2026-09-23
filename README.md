@@ -56,6 +56,14 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
 - `DATABASE_URL` em `omr-backend/.env` → Postgres (`postgresql+psycopg://postgres:senha@localhost:5432/omr`). Se vazio, cai em `omr-backend/data/omr.db` SQLite (veja `database.py:19`, `DB_LABEL` em `GET /api/health`).
 - Para multi-PC compartilhem o mesmo Postgres; com SQLite cada PC é isolado — use `Export XLSX`.
 
+## Backup do banco
+- **Manual:** tela Admin (usuário admin) → **Baixar backup** (dump JSON portátil) / **Enviar restore** (exige confirmação; grava pré-restore automático; rotas `GET /api/admin/backup`, `POST /api/admin/restore`).
+- **Automático diário:** `omr-backend\backup_diario.bat` gera `backups\omr-AAAA-MM-DD.json` (rotação 30 dias; pasta ignorada pelo Git). Agende no Agendador de Tarefas do Windows:
+  1. Agendador de Tarefas → Criar Tarefa Básica → nome "OMR Backup diário" → Diariamente (ex.: 23:00);
+  2. Ação: Iniciar um programa → caminho completo de `omr-backend\backup_diario.bat` (ex.: `C:\...\omr-leitor\omr-backend\backup_diario.bat`);
+  3. Ou via terminal (admin, ajustando o caminho): `schtasks /create /tn "OMR Backup diario" /tr "C:\caminho\para\omr-leitor\omr-backend\backup_diario.bat" /sc daily /st 23:00`.
+- O dump contém hashes de senha — guarde em local seguro, nunca no Git.
+
 ## Troubleshooting
 - **Tela branca no .exe** — faltava `vite.config.ts:base './'` (já corrigido); refaça `electron:build`.
 - **Backend não empacotado** — rode `build-backend-exe.bat` antes de `electron:build`.

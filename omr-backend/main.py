@@ -33,6 +33,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 import logging
 import json as _json
 
@@ -349,6 +350,69 @@ def _require_admin(current_user: User = Depends(auth.get_current_user)) -> User:
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
     return current_user
+
+
+@app.get("/api/admin/backup")
+def admin_backup(admin: User = Depends(_require_admin)):
+    """Gera o dump portátil na hora e devolve para download.
+
+    O arquivo contém hashes de senha — nunca commitar, nunca expor.
+    """
+    from backup import backup_to_file
+    from datetime import datetime
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M")
+    path, counts = backup_to_file(Path("backups") / f"backup-omr-{stamp}.json")
+    from fastapi.responses import FileResponse
+    return FileResponse(
+        path,
+        media_type="application/json",
+        filename=path.name,
+        headers={"X-Backup-Counts": json_dumps(counts)},
+    )
+
+
+def json_dumps(obj: dict) -> str:
+    import json as _json
+    return _json.dumps(obj, ensure_ascii=False)
+
+
+@app.post("/api/admin/restore")
+async def admin_restore(
+    file: UploadFile = File(...),
+    confirm: bool = Form(False),
+    admin: User = Depends(_require_admin),
+):
+    """Restaura um dump (upsert por id). Exige confirm=true.
+
+    Antes de restaurar, grava backup pré-restore automático em backups/.
+    """
+    if not confirm:
+        return {"restored": False,
+                "error": "Confirmação exigida: reenvie com confirm=true. O restore atualiza registros existentes."}
+    contents = await file.read()
+    if not contents or len(contents) > 50 * 1024 * 1024:
+        return {"restored": False, "error": "Arquivo vazio ou maior que 50MB."}
+    try:
+        import json as _json
+        data = _json.loads(contents.decode("utf-8"))
+    except Exception:
+        return {"restored": False, "error": "Arquivo inválido (não é um JSON de backup)."}
+    if not isinstance(data, dict) or "avaliacoes" not in data:
+        return {"restored": False, "error": "JSON não parece um backup OMR (sem tabela 'avaliacoes')."}
+    try:
+        from backup import backup_to_file, restore_all
+        from datetime import datetime
+        pre, _ = backup_to_file(
+            Path("backups") / f"pre-restore-{datetime.now().strftime('%Y-%m-%d-%H%M')}.json")
+    except Exception as e:
+        return {"restored": False, "error": f"Falha no backup pré-restore ({type(e).__name__}) — nada foi alterado."}
+    try:
+        counts = restore_all(data)
+    except ValueError as e:
+        return {"restored": False, "error": str(e)}
+    except Exception as e:
+        return {"restored": False, "error": f"Falha no restore ({type(e).__name__}) — rollback aplicado."}
+    return {"restored": True, "counts": counts, "pre_restore": pre.name}
 
 
 @app.get("/api/admin/users")

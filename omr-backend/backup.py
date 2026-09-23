@@ -173,3 +173,32 @@ def restore_all(data: dict) -> dict:
 
 def restore_from_file(path: str | Path) -> dict:
     return restore_all(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def daily_backup(keep: int = 30) -> tuple[Path, dict]:
+    """Backup diário com rotação: backups/omr-AAAA-MM-DD.json, mantém `keep`."""
+    from datetime import date
+    stamp = date.today().isoformat()
+    path, counts = backup_to_file(Path("backups") / f"omr-{stamp}.json")
+    kept = sorted(Path("backups").glob("omr-*.json"))
+    for old in kept[:max(0, len(kept) - keep)]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return path, counts
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="Backup portátil do banco OMR")
+    ap.add_argument("--daily", action="store_true", help="backup diário com rotação (backups/omr-AAAA-MM-DD.json)")
+    ap.add_argument("--file", default="", help="caminho do dump (default: backups/omr-<data>.json)")
+    ap.add_argument("--keep", type=int, default=30, help="dumps diários a manter")
+    args = ap.parse_args()
+    if args.daily:
+        p, counts = daily_backup(keep=args.keep)
+    else:
+        from datetime import datetime
+        p, counts = backup_to_file(args.file or f"backups/omr-{datetime.now().strftime('%Y-%m-%d-%H%M')}.json")
+    print(f"backup: {p} {counts}")
