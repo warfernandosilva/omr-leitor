@@ -91,6 +91,8 @@ export interface ProcessResult {
   thresholdsUsed?: { floor: number; margin: number; source: string };
   /** sanity pós-leitura (avisos que não bloqueiam) */
   warnings?: string[];
+  /** frames usados na votação (process-multi) */
+  nFrames?: number;
   error?: string;
 }
 
@@ -149,6 +151,54 @@ export async function checkHealth(): Promise<boolean> {
 
 import type { SaeSpec } from '../types';
 
+/** Mapeia a resposta do backend (snake_case → camelCase). Comum a process e process-multi. */
+function mapProcessData(data: Record<string, unknown>): ProcessResult {
+  return {
+    success: data.success as boolean,
+    answers: data.answers ? Object.fromEntries(
+      Object.entries(data.answers as Record<string, string>).map(([k, v]) => [Number(k), v])
+    ) : undefined,
+    blankQuestions: data.blank_questions as number[] | undefined,
+    duplicateQuestions: data.duplicate_questions as number[] | undefined,
+    duplicateMarks: data.duplicate_marks ? Object.fromEntries(
+      Object.entries(data.duplicate_marks as Record<string, string[]>).map(([k, v]) => [Number(k), v])
+    ) : undefined,
+    lowConfidence: data.low_confidence as number[] | undefined,
+    allRatios: data.all_ratios ? Object.fromEntries(
+      Object.entries(data.all_ratios as Record<string, unknown>).map(([k, v]) => [Number(k), v as Record<string, number>])
+    ) : undefined,
+    cardId: (data.card_id as string) || undefined,
+    rectifiedImage: (data.rectified_image as string) || undefined,
+    templateUsed: data.template_used === 'sae' || data.template_used === 'colar' || data.template_used === 'saev'
+      ? data.template_used as 'sae' | 'colar' | 'saev'
+      : data.template_used === 'padrao' ? 'padrao' : undefined,
+    thresholdsUsed: data.thresholds_used ? {
+      floor: Number((data.thresholds_used as Record<string, unknown>).floor ?? 0.3),
+      margin: Number((data.thresholds_used as Record<string, unknown>).margin ?? 0.15),
+      source: String((data.thresholds_used as Record<string, unknown>).source ?? 'fixed'),
+    } : undefined,
+    warnings: Array.isArray(data.warnings) ? data.warnings as string[] : undefined,
+    nFrames: typeof data.n_frames === 'number' ? data.n_frames as number : undefined,
+    error: data.error as string | undefined,
+  };
+}
+
+/** Timeout longo com AbortController — comum a process e process-multi. */
+async function fetchWithTimeout(url: string, init: RequestInit, ms = 120000): Promise<Response> {
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('O processamento demorou mais de 2 minutos e foi interrompido. Tente uma foto mais próxima, nítida e com os 4 cantos visíveis.');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export async function processImage(
   file: File,
   questionsPerSubject?: number,
@@ -163,55 +213,40 @@ export async function processImage(
   formData.append('template', template ?? 'padrao');
   formData.append('adaptive', adaptive ? 'true' : 'false');
 
-  // Timeout longo (nunca 50% eterno): se o backend não responder em 2min,
-  // aborta com mensagem amigável em vez de pendurar a correção.
-  const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), 120000);
-  let res: Response;
-  try {
-    res = await fetch(`${API_BASE}/api/omr/process`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: formData,
-      signal: ctrl.signal,
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('O processamento demorou mais de 2 minutos e foi interrompido. Tente uma foto mais próxima, nítida e com os 4 cantos visíveis.');
-    }
-    throw err;
-  } finally {
-    window.clearTimeout(timer);
-  }
+  const res = await fetchWithTimeout(`${API_BASE}/api/omr/process`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
 
   const data = await res.json();
+  return mapProcessData(data as Record<string, unknown>);
+}
 
-  // Mapear snake_case → camelCase
-  return {
-    success: data.success,
-    answers: data.answers ? Object.fromEntries(
-      Object.entries(data.answers).map(([k, v]) => [Number(k), v as string])
-    ) : undefined,
-    blankQuestions: data.blank_questions,
-    duplicateQuestions: data.duplicate_questions,
-    duplicateMarks: data.duplicate_marks ? Object.fromEntries(
-      Object.entries(data.duplicate_marks as Record<string, string[]>).map(([k, v]) => [Number(k), v])
-    ) : undefined,
-    lowConfidence: data.low_confidence,
-    allRatios: data.all_ratios ? Object.fromEntries(
-      Object.entries(data.all_ratios as Record<string, unknown>).map(([k, v]) => [Number(k), v as Record<string, number>])
-    ) : undefined,
-    cardId: data.card_id || undefined,
-    rectifiedImage: data.rectified_image || undefined,
-    templateUsed: data.template_used === 'sae' || data.template_used === 'colar' || data.template_used === 'saev' ? data.template_used : data.template_used === 'padrao' ? 'padrao' : undefined,
-    thresholdsUsed: data.thresholds_used ? {
-      floor: Number(data.thresholds_used.floor ?? 0.3),
-      margin: Number(data.thresholds_used.margin ?? 0.15),
-      source: String(data.thresholds_used.source ?? 'fixed'),
-    } : undefined,
-    warnings: Array.isArray(data.warnings) ? data.warnings as string[] : undefined,
-    error: data.error,
-  };
+/** Votação multi-frame: N frames do mesmo cartão (1..4) → 1 resultado. */
+export async function processMulti(
+  files: File[],
+  questionsPerSubject?: number,
+  layoutMode?: 'dual' | 'single',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev',
+  adaptive?: boolean,
+): Promise<ProcessResult> {
+  if (files.length === 0) throw new Error('Nenhum frame para processar.');
+  const formData = new FormData();
+  for (const f of files.slice(0, 4)) formData.append('files', f);
+  formData.append('questions_per_subject', String(questionsPerSubject ?? 22));
+  formData.append('layout_mode', layoutMode ?? 'dual');
+  formData.append('template', template ?? 'padrao');
+  formData.append('adaptive', adaptive ? 'true' : 'false');
+
+  const res = await fetchWithTimeout(`${API_BASE}/api/omr/process-multi`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: formData,
+  });
+
+  const data = await res.json();
+  return mapProcessData(data as Record<string, unknown>);
 }
 
 export async function gradeAnswers(

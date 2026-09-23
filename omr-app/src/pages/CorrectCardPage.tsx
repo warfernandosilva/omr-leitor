@@ -4,7 +4,7 @@ import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, templateLabel } fr
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
-  processImage as apiProcessImage, ProcessResult,
+  processImage as apiProcessImage, processMulti, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
   getExamsFromDB, checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
@@ -355,6 +355,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     const dataUrl = captureDataUrl();
     if (!dataUrl) return;
     setCapturedImage(dataUrl);
+    burstFramesRef.current = [];
     stopCamera();
     processOMR(dataUrl);
   };
@@ -380,28 +381,33 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // Travou o enquadramento → multi-shot com portão de nitidez:
   // captura até 3 frames e confirma o mais nítido; se todos saírem
   // tremidos, descarta e continua tentando (sem travar o fluxo).
+  // Os frames ficam guardados p/ a votação multi-frame (A4).
+  const burstFramesRef = useRef<string[]>([]);
   const handleAutoLocked = async () => {
     if (confirmUrl) return;
-    let best: string | null = null;
-    let bestScore = -1;
+    const shots: { url: string; score: number }[] = [];
     for (let i = 0; i < 3; i++) {
       const shot = grabFrameSilent();
       if (shot) {
         const s = await scoreSharpness(shot);
-        if (s > bestScore) { bestScore = s; best = shot; }
+        shots.push({ url: shot, score: s });
         if (s >= DEFAULT_THRESHOLDS.minSharpness * 2) break;
       }
       if (i < 2) await sleep(150);
     }
-    if (best && (bestScore >= DEFAULT_THRESHOLDS.minSharpness || sharpFailsRef.current >= 2)) {
+    const best = shots.length ? shots.reduce((a, b) => (b.score > a.score ? b : a)) : null;
+    if (best && (best.score >= DEFAULT_THRESHOLDS.minSharpness || sharpFailsRef.current >= 2)) {
       sharpFailsRef.current = 0;
       setSharpRetry(null);
-      setConfirmUrl(best);
+      // mais nítido primeiro: empate da votação e QR/retificada vêm dele
+      burstFramesRef.current = shots.sort((a, b) => b.score - a.score).map(s => s.url);
+      setConfirmUrl(best.url);
       setFlashOn(true);
       window.clearTimeout(flashTimerRef.current);
       flashTimerRef.current = window.setTimeout(() => setFlashOn(false), 220);
     } else {
       sharpFailsRef.current += 1;
+      burstFramesRef.current = [];
       setSharpRetry('Imagem tremida — segure firme, tentando de novo…');
       resetAuto();
     }
@@ -432,7 +438,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setCapturedImage(confirmUrl);
     setConfirmUrl(null);
     stopCamera();
-    processOMR(confirmUrl);
+    const frames = burstFramesRef.current;
+    burstFramesRef.current = [];
+    processOMR(confirmUrl, frames);
   };
 
   const retryAutoCapture = () => {
@@ -461,22 +469,33 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     reader.readAsDataURL(file);
   };
 
-  const processOMR = async (dataUrl: string) => {
+  const processOMR = async (dataUrl: string, frames: string[] = []) => {
     setStep('processing');
     setError(null);
     setProcessingProgress(0);
 
     try {
-      // Converter dataUrl para File para enviar à API Python
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
-
       setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
       const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : 'padrao';
-      const result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive);
+
+      let result: ProcessResult;
+      if (frames.length > 1) {
+        // Votação multi-frame: N frames da rajada → 1 resultado (divergência vira low_conf)
+        const files = await Promise.all(frames.map(async (url) => {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          return new File([blob], 'frame.jpg', { type: 'image/jpeg' });
+        }));
+        result = await processMulti(files, qpsUsado, modoUsado, templateUsado, useAdaptive);
+      } else {
+        // Converter dataUrl para File para enviar à API Python
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
+        result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive);
+      }
       setProcessingProgress(100);
 
       setOmrResult(result);
@@ -1453,6 +1472,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               Limiar: {omrResult.thresholdsUsed.source === 'adaptive'
                 ? `adaptativo (${omrResult.thresholdsUsed.floor.toFixed(3)}, calculado desta foto)`
                 : `fixo (${omrResult.thresholdsUsed.floor.toFixed(3)})`}
+              {omrResult.nFrames && omrResult.nFrames > 1 && ` · ${omrResult.nFrames} frames votados`}
             </div>
           )}
 

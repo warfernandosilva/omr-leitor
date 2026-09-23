@@ -102,6 +102,7 @@ class ProcessResponse(BaseModel):
     template_used: str | None = None  # "padrao" | "sae" — modelo detectado (fallback cruzado)
     thresholds_used: dict | None = None  # {floor, margin, source: fixed|adaptive}
     warnings: list[str] | None = None  # sanity pós-leitura (não bloqueia)
+    n_frames: int | None = None  # frames usados na votação (process-multi)
     error: str | None = None
 
 
@@ -417,6 +418,40 @@ def admin_delete_user(user_id: int, admin: User = Depends(_require_admin), db: S
     return {"deleted": True, "id": user_id}
 
 
+def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
+    """Decodifica bytes de imagem com correção de orientação EXIF (celular)
+    + fallback HEIC/WEBP via Pillow. Usado por /api/omr/process e process-multi."""
+    try:
+        nparr = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Se falhou e Pillow disponível, tenta com EXIF transpose (iPhone HEIC/WEBP rotacionado)
+        if image is None:
+            raise ValueError("cv2 imdecode falhou")
+        # Corrige rotação EXIF se Pillow detectar
+        try:
+            from PIL import Image, ImageOps
+            import io as _io
+            pil = Image.open(_io.BytesIO(contents))
+            pil = ImageOps.exif_transpose(pil)
+            if pil is not None and pil.size != (image.shape[1], image.shape[0]):
+                # EXIF indicou rotação — reconverte
+                pil = pil.convert("RGB")
+                image = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        except Exception:
+            pass
+        return image
+    except (cv2.error, ValueError):
+        # fallback Pillow puro
+        try:
+            from PIL import Image, ImageOps
+            import io as _io
+            pil = Image.open(_io.BytesIO(contents))
+            pil = ImageOps.exif_transpose(pil).convert("RGB")
+            return cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+        except Exception:
+            return None
+
+
 @app.post("/api/omr/process", response_model=ProcessResponse)
 async def process_omr(
     file: UploadFile = File(...),
@@ -439,34 +474,7 @@ async def process_omr(
         return ProcessResponse(success=False, error=f"Formato não suportado: {ctype}. Use JPG ou PNG.")
 
     # Correção de orientação EXIF (celular) + fallback HEIC/WEBP via Pillow
-    try:
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        # Se falhou e Pillow disponível, tenta com EXIF transpose (iPhone HEIC/WEBP rotacionado)
-        if image is None:
-            raise ValueError("cv2 imdecode falhou")
-        # Corrige rotação EXIF se Pillow detectar
-        try:
-            from PIL import Image, ImageOps
-            import io as _io
-            pil = Image.open(_io.BytesIO(contents))
-            pil = ImageOps.exif_transpose(pil)
-            if pil is not None and pil.size != (image.shape[1], image.shape[0]):
-                # EXIF indicou rotação — reconverte
-                pil = pil.convert("RGB")
-                image = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        except Exception:
-            pass
-    except (cv2.error, ValueError):
-        # fallback Pillow puro
-        try:
-            from PIL import Image, ImageOps
-            import io as _io
-            pil = Image.open(_io.BytesIO(contents))
-            pil = ImageOps.exif_transpose(pil).convert("RGB")
-            image = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
-        except Exception as e:
-            return ProcessResponse(success=False, error=f"Falha ao decodificar imagem ({type(e).__name__}): arquivo corrompido ou HEIC não suportado. Use JPG/PNG.")
+    image = _decode_image_bytes(contents)
 
     if image is None:
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
@@ -627,6 +635,126 @@ async def process_omr(
             "margin": MARGIN,
             "source": result.floor_source,
         },
+        warnings=sanity.warnings or None,
+    )
+
+
+@app.post("/api/omr/process-multi", response_model=ProcessResponse)
+async def process_omr_multi(
+    files: list[UploadFile] = File(...),
+    questions_per_subject: int = Form(22),
+    layout_mode: str = Form("dual"),
+    template: str = Form("padrao"),
+    adaptive: bool = Form(False),
+    current_user: User = Depends(auth.get_current_user),
+):
+    """Processa N frames do mesmo cartão e vota por questão.
+
+    Divergência entre frames vira low_confidence (conferência manual) —
+    foto tremida/luz variando lê diferente por frame. 1 frame válido se
+    comporta exatamente como /api/omr/process.
+    """
+    if not files or len(files) > 4:
+        return ProcessResponse(success=False, error="Envie de 1 a 4 frames do mesmo cartão.")
+
+    results: list[OMRResult] = []
+    template_used = template if template in ("padrao", "sae", "colar", "saev") else "padrao"
+    first_image: np.ndarray | None = None
+
+    for f in files:
+        contents = await f.read()
+        if not contents or len(contents) < 100 or len(contents) > 10 * 1024 * 1024:
+            continue
+        image = _decode_image_bytes(contents)
+        if image is None:
+            continue
+        if first_image is None:
+            first_image = image
+        if template_used in ("sae", "colar"):
+            r = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive)
+        elif template_used == "saev":
+            r = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive)
+        else:
+            r = process_image(image, questions_per_subject=questions_per_subject,
+                              layout_mode=layout_mode, adaptive=adaptive)
+        if r is not None:
+            results.append(r)
+
+    if not results:
+        # mesmos diagnósticos do endpoint single (usa a 1ª imagem decodificada)
+        if first_image is None:
+            return ProcessResponse(success=False, error="Nenhum frame decodificável. Capture novamente.")
+        try:
+            from omr.detector import detect_markers as _dm, validate_geometry as _vg
+            det = _dm(first_image)
+            if det.missing_ids:
+                return ProcessResponse(success=False, error=f"Cartão não detectado nos frames (faltam ArUco {det.missing_ids}). Garanta que os 4 cantos estão visíveis, foto nítida e sem sombra.")
+            if not _vg(det.markers):
+                return ProcessResponse(success=False, error="Geometria dos marcadores inválida — foto torta ou cartão dobrado. Tente de cima, com o cartão plano.")
+            return ProcessResponse(success=False, error="Falha ao retificar (foto muito borrada ou escura). Tente com melhor iluminação.")
+        except Exception:
+            return ProcessResponse(success=False, error="Marcadores não detectados ou geometria inválida")
+
+    from omr.vote import vote_frames
+    result = vote_frames(results)
+    if result is None:  # inalcançável (results não-vazio), defesa
+        return ProcessResponse(success=False, error="Falha na votação dos frames")
+
+    rectified_b64 = None
+    try:
+        if result.rectified is not None:
+            import base64
+            _, buf = cv2.imencode('.jpg', result.rectified, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            b64 = base64.b64encode(buf.tobytes()).decode('ascii')
+            rectified_b64 = f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        rectified_b64 = None
+
+    from omr.sanity import sanity_check
+    total_lido = len(result.blank_questions) + len(result.duplicate_questions) + len(result.answers)
+    sanity = sanity_check(result.duplicate_questions, result.blank_questions,
+                          result.low_confidence, total_lido)
+    if not sanity.ok:
+        _ops_record({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "model": template_used, "success": False, "rejected": "sanity",
+            "frames": len(results),
+            "answers": len(result.answers), "blank": len(result.blank_questions),
+            "dup": len(result.duplicate_questions), "low": len(result.low_confidence),
+            "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+            "floor": round(result.floor_used, 3), "floor_source": result.floor_source,
+        })
+        return ProcessResponse(
+            success=False, error=sanity.message, warnings=sanity.warnings or None,
+            rectified_image=rectified_b64, template_used=template_used,
+            n_frames=len(results),
+            thresholds_used={"floor": round(result.floor_used, 3), "margin": MARGIN,
+                             "source": result.floor_source},
+        )
+
+    _ops_record({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "model": template_used, "success": True, "frames": len(results),
+        "answers": len(result.answers), "blank": len(result.blank_questions),
+        "dup": len(result.duplicate_questions), "low": len(result.low_confidence),
+        "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+        "floor": round(result.floor_used, 3), "floor_source": result.floor_source,
+    })
+
+    return ProcessResponse(
+        success=True,
+        answers={str(k): v for k, v in result.answers.items()},
+        blank_questions=result.blank_questions,
+        duplicate_questions=result.duplicate_questions,
+        duplicate_marks={str(q): marks for q, marks in (result.duplicate_marks or {}).items()},
+        low_confidence=result.low_confidence,
+        all_ratios={str(k): v for k, v in result.all_ratios.items()},
+        card_id=result.qr_id,
+        rectified_image=rectified_b64,
+        template_used=template_used,
+        n_frames=len(results),
+        thresholds_used={"floor": round(result.floor_used, 3), "margin": MARGIN,
+                         "source": result.floor_source},
         warnings=sanity.warnings or None,
     )
 
