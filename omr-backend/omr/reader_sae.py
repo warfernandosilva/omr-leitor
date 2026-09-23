@@ -14,8 +14,8 @@ import cv2
 import numpy as np
 import time as _time
 
-from .config import BLUR_BLOCK, FLOOR, MARGIN
-from .adaptive import adaptive_floor
+from .config import BLUR_BLOCK, MARGIN
+from .tuning import compute_floor_for
 from .detector_sae import detect_sae_corners, sae_homography
 from .reader import OMRResult, _bubble_score, _decode_qr_from, classify_question
 from .template_sae import (
@@ -104,10 +104,7 @@ def process_sae_image(
     dup_marks: dict[int, list[str]] = {}
     low_conf: list[int] = []
 
-    floor, floor_source = FLOOR, "fixed"
-    if adaptive:
-        flat = [s for qr in all_ratios.values() for s in qr.values()]
-        floor, floor_source = adaptive_floor(flat)
+    floor, floor_source = compute_floor_for("sae", all_ratios, adaptive)
 
     for q_num, ratios in all_ratios.items():
         status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)

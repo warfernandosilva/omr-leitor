@@ -37,7 +37,7 @@ class BubbleReading:
 
 
 from .config import FLOOR, LOW_CONF_THRESHOLD, MARGIN
-from .adaptive import adaptive_floor
+from .tuning import compute_floor_for
 
 
 @dataclass
@@ -357,10 +357,8 @@ def process_image(
 
     # Limiar adaptativo: divisor calculado dos scores desta foto
     # (desligado por padrão — comportamento idêntico ao fixo).
-    floor, floor_source = FLOOR, "fixed"
-    if adaptive:
-        flat = [s for qr in all_ratios.values() for s in qr.values()]
-        floor, floor_source = adaptive_floor(flat)
+    # Parâmetros vêm da tabela por modelo (omr/tuning.py).
+    floor, floor_source = compute_floor_for("padrao", all_ratios, adaptive)
 
     for q_num, ratios in all_ratios.items():
         status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)

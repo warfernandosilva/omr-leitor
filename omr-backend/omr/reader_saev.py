@@ -14,8 +14,8 @@ import cv2
 import numpy as np
 import time as _time
 
-from .config import BLUR_BLOCK, FLOOR, MARGIN
-from .adaptive import adaptive_floor
+from .config import BLUR_BLOCK, MARGIN
+from .tuning import compute_floor_for
 from .detector_saev import detect_saev_corners, saev_homography
 from .reader import (
     OMRResult,
@@ -140,14 +140,9 @@ def process_saev_image(
     dup_marks: dict[int, list[str]] = {}
     low_conf: list[int] = []
 
-    floor, floor_source = FLOOR, "fixed"
-    if adaptive:
-        # Otsu sobre os MELHORES por questão (44 valores): separa o modo
-        # "vazia" (~0.35-0.45 em foto real texturizada) do modo "marcada".
-        # Teto 0.55: fundos frios/sombreados pedem divisor acima do 0.45
-        # padrão; o fallback do adaptive protege cartão em branco.
-        bests = [max(qr.values()) for qr in all_ratios.values()]
-        floor, floor_source = adaptive_floor(bests, hi=0.55)
+    # Divisor via tabela por modelo (score_set='bests', hi=0.55,
+    # force_adaptive — ver omr/tuning.py).
+    floor, floor_source = compute_floor_for("saev", all_ratios, adaptive)
 
     for q_num, ratios in all_ratios.items():
         status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
