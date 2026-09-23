@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from .adaptive import adaptive_floor
 from .config import FLOOR
+from .thresholds import compute_floor
 
 
 @dataclass(frozen=True)
@@ -50,4 +51,6 @@ def compute_floor_for(
         scores = [max(qr.values()) for qr in all_ratios.values() if qr]
     else:
         scores = [s for qr in all_ratios.values() for s in qr.values()]
+    if t.floor_method == "gap":
+        return compute_floor(scores, method="gap", hi=t.hi)
     return adaptive_floor(scores, hi=t.hi)

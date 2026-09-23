@@ -25,3 +25,11 @@ nenhum `blank`/`duplicate` espúrio novo. Registrar abaixo cada evidência.
 Evidência sintética (válida): `python test_adaptive.py` — paridade fixo x
 adaptativo em cartão degradado, 0 fantasmas, duplicada real detectada,
 regressão `test_dup_regression` verde nos dois modos.
+
+## A/B Otsu x first-large-gap (ideia OMRChecker, sem mudar default)
+
+`python compare_floors.py` calcula os dois divisores sobre todas as fotos
+desta pasta (`omr/thresholds.py`, `test_thresholds.py`). Em 2026-09-23
+(19 fotos): média Otsu 0.332 × gap 0.349 — gap tende levemente acima.
+Nenhum virou default; a tabela `omr/tuning.py` (`floor_method`) é onde o
+vencedor entraria após veredito pela regra acima.
