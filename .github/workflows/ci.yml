@@ -52,6 +52,7 @@ jobs:
           python test_vote.py
           python test_backup.py
           python test_backup_routes.py
+          python test_delete_exam.py
           python test_tuning.py
           python test_thresholds.py
           python test_debug.py
