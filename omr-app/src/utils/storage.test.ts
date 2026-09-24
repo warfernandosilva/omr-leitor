@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { mergeRemoteExams } from './storage';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { mergeRemoteExams, saveResult, getResults, deleteResult } from './storage';
 import type { DBExam } from './api';
-import type { Exam } from '../types';
+import type { Exam, StudentResult } from '../types';
 
 function dbExam(patch: Partial<DBExam> = {}): DBExam {
   return {
@@ -78,5 +78,60 @@ describe('mergeRemoteExams (servidor vence)', () => {
     expect(merged[0].templateType).toBe('colar');
     expect(merged[0].totalQuestions).toBe(26);
     expect(merged[0].saeSpec).toBeUndefined();
+  });
+
+  it('incorpora prova SAEV avulsa do QR (auto-download no salvamento)', () => {
+    // Formato de GET /api/exams/{id}: DBExam + campos extras (total_alunos) que devem ser ignorados
+    const single = { ...dbExam({ external_id: 'QR-EXAM', template: 'saev' }), total_alunos: 35 };
+    const { merged, stats } = mergeRemoteExams([localExam({ id: 'LOCAL' })], [single as DBExam]);
+    expect(stats).toEqual({ added: 1, updated: 0 });
+    const got = merged.find(e => e.id === 'QR-EXAM');
+    expect(got?.templateType).toBe('saev');
+    expect(got?.totalQuestions).toBe(44);
+  });
+});
+
+const UID = 'test-ciclo-uid';
+
+function student(patch: Partial<StudentResult> = {}): StudentResult {
+  return {
+    id: 'uuid-1', examId: 'E1', studentName: 'ALUNO QR', answers: { 1: 'A' },
+    correctCount: 1, incorrectCount: 0, blankCount: 0,
+    duplicateCount: 0, duplicateQuestions: [], duplicateMarks: {},
+    lowConfidence: [], qrOk: true, codigoUnico: 'OMR-2026-000001',
+    grade: 10, timestamp: new Date().toISOString(), manualOverrides: {},
+    ...patch,
+  };
+}
+
+describe('ciclo local resultado (salvar → listar → excluir)', () => {
+  afterEach(() => {
+    localStorage.removeItem('omr-app-data');
+    localStorage.removeItem(`omr-app-data-${UID}`);
+  });
+
+  it('salvo aparece no listar do mesmo usuário', () => {
+    saveResult(student(), UID);
+    const list = getResults(undefined, UID);
+    expect(list).toHaveLength(1);
+    expect(list[0].codigoUnico).toBe('OMR-2026-000001');
+  });
+
+  it('excluído não volta no listar seguinte', () => {
+    saveResult(student(), UID);
+    deleteResult('uuid-1', UID);
+    expect(getResults(undefined, UID)).toHaveLength(0);
+  });
+
+  it('armazenamento cheio vira erro legível (nunca some em silêncio)', () => {
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+    try {
+      expect(() => saveResult(student(), UID)).toThrow(/cheio/);
+      expect(() => deleteResult('uuid-1', UID)).toThrow(/cheio/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -37,12 +37,20 @@ export default function ResultsPage({ onNavigate }: Props) {
   const [results, setResults] = useState(() => getResults(undefined, userId));
   const [exams, setExams] = useState(() => getExams(userId));
   const [dbResults, setDbResults] = useState<DBResultado[]>([]);
+  const [dbError, setDbError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterExamId, setFilterExamId] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'grade'>('date');
 
+  const reloadDbResults = () => {
+    setDbError(null);
+    getResultadosFromDB().then(setDbResults).catch((err) => {
+      setDbError(err instanceof Error ? err.message : 'Falha ao carregar resultados do servidor.');
+    });
+  };
+
   useEffect(() => {
-    getResultadosFromDB().then(setDbResults).catch(() => {});
+    reloadDbResults();
   }, []);
 
   const dbAsLocal = dbResults.map(dbToLocal);
@@ -74,10 +82,23 @@ export default function ResultsPage({ onNavigate }: Props) {
     const r = allResults.find(x => x.id === id) as unknown as { codigoUnico?: string } | undefined;
     const codigo = r?.codigoUnico;
     if (codigo) {
-      try { await deleteResultadoDB(codigo); } catch { /* segue para local */ }
+      // Exclusão honesta: se o servidor recusar/falhar, mantém o item e avisa
+      // (nunca remover só no visual para "ressuscitar" no recarregar).
+      try {
+        await deleteResultadoDB(codigo);
+      } catch (err) {
+        alert(`Não foi possível excluir no servidor (${err instanceof Error ? err.message : 'erro'}). O item foi mantido. Verifique a conexão/login e tente de novo.`);
+        reloadDbResults();
+        return;
+      }
       setDbResults(prev => prev.filter(d => d.codigo_unico !== codigo));
     }
-    deleteResult(id, userId);
+    try {
+      deleteResult(id, userId);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Falha ao excluir neste aparelho.');
+      return;
+    }
     setResults(getResults(undefined, userId));
     setExams(getExams(userId));
   };
@@ -108,6 +129,13 @@ export default function ResultsPage({ onNavigate }: Props) {
           </button>
         </>}
       />
+
+      {dbError && (
+        <div className="card mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm flex flex-wrap items-center gap-2">
+          <span>Resultados do servidor indisponíveis ({dbError}) — mostrando só os salvos neste aparelho.</span>
+          <button onClick={reloadDbResults} className="btn btn-sm btn-secondary">Tentar de novo</button>
+        </div>
+      )}
 
       <div className="card mb-4">
         <div className="flex flex-col sm:flex-row gap-3">

@@ -583,6 +583,13 @@ export async function getExamsFromDB(): Promise<DBExam[]> {
   return res.json();
 }
 
+/** Busca UMA avaliação pelo external_id (para trazer a prova do QR quando ela não está neste aparelho). */
+export async function getExamFromDB(externalId: string): Promise<DBExam> {
+  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Falha ao buscar avaliação (${res.status})`);
+  return res.json();
+}
+
 export async function deleteExamFromDB(externalId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) {

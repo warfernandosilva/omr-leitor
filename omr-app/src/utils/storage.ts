@@ -57,7 +57,14 @@ function loadData(userId?: string | number): AppData {
 }
 
 function saveData(data: AppData, userId?: string | number): void {
-  localStorage.setItem(getStorageKey(userId), JSON.stringify(data));
+  try {
+    localStorage.setItem(getStorageKey(userId), JSON.stringify(data));
+  } catch (err) {
+    if (err instanceof DOMException && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      throw new Error('Armazenamento local cheio: libere espaço (apague fotos/vídeos do aparelho ou resultados antigos) e tente salvar novamente.');
+    }
+    throw new Error('Falha ao gravar no armazenamento local deste aparelho.');
+  }
 }
 
 export function getExams(userId?: string | number): Exam[] {

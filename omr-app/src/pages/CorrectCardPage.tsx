@@ -6,7 +6,7 @@ import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
   processImage as apiProcessImage, processMulti, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
-  getExamsFromDB, checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
+  getExamsFromDB, getExamFromDB, checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
@@ -524,6 +524,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               if (mesmaProva) {
                 if (lk.avaliacao.external_id !== selectedExamId) {
                   setSelectedExamId(lk.avaliacao.external_id);
+                  // A prova do QR pode não existir neste aparelho (criada no PC):
+                  // baixa do servidor e incorpora à lista local para o salvamento funcionar.
+                  try {
+                    const dbExam = await getExamFromDB(lk.avaliacao.external_id);
+                    applyRemoteExams([dbExam], userId);
+                    setExams(getExams(userId));
+                  } catch {
+                    // segue sem a prova local — o guard do salvamento avisará
+                  }
                   const qpsIdent = lk.avaliacao.questions_per_subject ?? 22;
                   if (qpsIdent !== qpsUsado) {
                     alert(
@@ -580,7 +589,18 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   const handleSaveResult = async () => {
-    if (!activeExam || !studentName.trim()) return;
+    // Guards com mensagem — jamais retornar silencioso (salvamento "sumido")
+    if (!activeExam) {
+      setError(
+        'Prova não encontrada neste aparelho. Volte à seleção, toque em "⟳ Atualizar do servidor" '
+        + 'e corrija novamente — o resultado desta leitura foi descartado para não salvar na prova errada.'
+      );
+      return;
+    }
+    if (!studentName.trim()) {
+      setError('Informe o nome do aluno para salvar o resultado.');
+      return;
+    }
     if (!activeExam.answerKey) {
       alert('Esta prova ainda não tem gabarito cadastrado. Vá em "Cadastrar gabarito" e informe as respostas corretas antes de corrigir.');
       return;
@@ -685,7 +705,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       manualOverrides: {},
     };
 
-    saveResult(result, userId);
+    try {
+      saveResult(result, userId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao salvar o resultado neste aparelho.');
+      return;
+    }
     setSessionCount(c => c + 1);
     if (continuous) {
       // Modo contínuo: volta direto à câmera com a mesma prova
@@ -749,7 +774,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const runBatch = async () => {
     const exam = activeExam;
-    if (!exam || !exam.answerKey || batchItems.length === 0) return;
+    if (!exam) {
+      setError('Prova não encontrada neste aparelho. Toque em "⟳ Atualizar do servidor" e tente o lote novamente.');
+      return;
+    }
+    if (!exam.answerKey || batchItems.length === 0) return;
     const qps = exam.questionsPerSubject;
     const layoutMode = exam.layoutMode ?? 'dual';
     setBatchRunning(true);

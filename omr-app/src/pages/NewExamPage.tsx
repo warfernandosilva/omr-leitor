@@ -119,17 +119,31 @@ export default function NewExamPage({ onNavigate }: Props) {
     }, 1000);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm('Tem certeza que deseja excluir esta prova e todos os resultados associados?')) {
-      deleteExam(id, user?.id);
-      deleteExamFromDB(id).catch(() => {});
-      setExams(getExams(user?.id));
-      setEditingId(null);
-      setName('');
-      setTemplateType('padrao');
-      setSubjectLP('LÍNGUA PORTUGUESA');
-      setSubjectMat('MATEMÁTICA');
+  const handleDelete = async (id: string) => {
+    if (!confirm('Tem certeza que deseja excluir esta prova e todos os resultados associados?')) return;
+    // Servidor primeiro: se falhar, não apaga o local (evita a prova "ressuscitar" no próximo sync).
+    try {
+      await deleteExamFromDB(id);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/404/.test(msg)) {
+        alert(`Não foi possível excluir a prova no servidor: ${msg}. Nada foi apagado.`);
+        return;
+      }
+      // 404 = prova só-local: segue apagando localmente.
     }
+    try {
+      deleteExam(id, user?.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Falha ao excluir neste aparelho.');
+      return;
+    }
+    setExams(getExams(user?.id));
+    setEditingId(null);
+    setName('');
+    setTemplateType('padrao');
+    setSubjectLP('LÍNGUA PORTUGUESA');
+    setSubjectMat('MATEMÁTICA');
   };
 
   const handleEdit = (exam: Exam) => {
