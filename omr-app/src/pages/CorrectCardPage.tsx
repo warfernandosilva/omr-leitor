@@ -4,9 +4,14 @@ import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, templateLabel } fr
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
+  deleteExam as deleteLocalExam,
+  getDeletedExamIds, markExamDeleted, unmarkExamDeleted,
+} from '../utils/storage';
+import {
   processImage as apiProcessImage, processMulti, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
-  getExamsFromDB, getExamFromDB, checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
+  getExamsFromDB, getExamFromDB, getDeletedExamsFromDB, deleteExamFromDB,
+  checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
@@ -123,6 +128,26 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     }
     setSyncing(true);
     try {
+      // Lápides: empurra exclusões pendentes e remove cópias locais de provas
+      // apagadas em outro aparelho (sem re-empurrar — anti-ressurreição).
+      for (const goneId of getDeletedExamIds(userId)) {
+        try {
+          await deleteExamFromDB(goneId);
+          unmarkExamDeleted(goneId, userId);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/404/.test(msg)) unmarkExamDeleted(goneId, userId);
+        }
+      }
+      try {
+        const gone = await getDeletedExamsFromDB();
+        for (const t of gone) {
+          markExamDeleted(t.external_id, userId);
+          deleteLocalExam(t.external_id, userId);
+        }
+      } catch {
+        // segue sem as lápides desta vez
+      }
       const remote = await getExamsFromDB();
       const stats = applyRemoteExams(remote, userId);
       setExams(getExams(userId));

@@ -140,3 +140,21 @@ class GabaritoNomeado(Base, TimestampMixin):
                 "matricula": self.aluno.matricula,
             },
         }
+
+
+class DeletedExam(Base):
+    """Lápide de avaliação excluída (anti-ressurreição multi-aparelho).
+
+    Quando uma prova é apagada num aparelho, os outros ainda a têm no
+    localStorage e tentariam recriá-la no servidor via /api/exams/sync.
+    A lápide marca o external_id como morto: o sync recusa recriar (410)
+    e os aparelhos removem a cópia local. Lápides expiram após 30 dias
+    (limpeza no GET /api/exams/deleted).
+    """
+
+    __tablename__ = "deleted_exams"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)

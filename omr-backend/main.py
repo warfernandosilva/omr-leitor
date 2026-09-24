@@ -38,7 +38,7 @@ import logging
 import json as _json
 
 from database import DB_LABEL, get_db, init_db
-from models import Aluno, Avaliacao, GabaritoNomeado, User
+from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
 import auth
 
 logger = logging.getLogger("omr")
@@ -1016,6 +1016,11 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     """Cria ou atualiza a Avaliação correspondente à prova do frontend."""
     av = db.scalar(select(Avaliacao).where(Avaliacao.external_id == req.external_id))
     if av is None:
+        if _is_tombstoned(db, req.external_id):
+            raise HTTPException(
+                status_code=410,
+                detail="Avaliação foi excluída em outro aparelho (lápide ativa) — remova a cópia local em vez de sincronizar.",
+            )
         av = Avaliacao(external_id=req.external_id, titulo=req.titulo, owner_id=current_user.id)
         db.add(av)
     else:
@@ -1324,6 +1329,23 @@ def list_exams(limit: int = 100, offset: int = 0, db: Session = Depends(get_db),
     ]
 
 
+@app.get("/api/exams/deleted")
+def list_deleted_exams(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    """Lista lápides visíveis ao usuário (para os aparelhos removerem cópias locais).
+
+    Limpa lápides com mais de TOMBSTONE_DAYS dias — após isso um sync com o
+    mesmo external_id voltaria a criar a prova (comportamento seguro: ids são UUIDs).
+    """
+    from datetime import timedelta
+    cutoff = datetime.now() - timedelta(days=TOMBSTONE_DAYS)
+    db.execute(delete(DeletedExam).where(DeletedExam.deleted_at < cutoff))
+    db.commit()
+    q = select(DeletedExam).order_by(DeletedExam.deleted_at.desc())
+    if current_user.role != "admin":
+        q = q.where((DeletedExam.owner_id == current_user.id) | (DeletedExam.owner_id.is_(None)))
+    return [{"external_id": t.external_id, "deleted_at": t.deleted_at.isoformat()} for t in db.scalars(q).all()]
+
+
 @app.get("/api/exams/{external_id}")
 def get_exam(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     av = _get_avaliacao(db, external_id)
@@ -1346,6 +1368,20 @@ def get_exam(external_id: str, db: Session = Depends(get_db), current_user: User
     }
 
 
+TOMBSTONE_DAYS = 30
+
+
+def _record_tombstone(db: Session, external_id: str, owner_id: int | None) -> None:
+    """Registra a lápide (idempotente) — impede ressurreição via sync."""
+    t = db.scalar(select(DeletedExam).where(DeletedExam.external_id == external_id))
+    if t is None:
+        db.add(DeletedExam(external_id=external_id, owner_id=owner_id))
+
+
+def _is_tombstoned(db: Session, external_id: str) -> bool:
+    return db.scalar(select(DeletedExam).where(DeletedExam.external_id == external_id)) is not None
+
+
 @app.delete("/api/exams/{external_id}")
 def delete_exam(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """Apaga a avaliação e tudo vinculado (alunos, gabaritos, resultados)."""
@@ -1353,10 +1389,12 @@ def delete_exam(external_id: str, db: Session = Depends(get_db), current_user: U
     if av is None:
         raise HTTPException(status_code=404, detail="Avaliação não encontrada")
     auth.require_owner_or_admin(av, current_user)
+    owner_id = av.owner_id
     # cascade via FK + manual para garantir
     db.execute(delete(GabaritoNomeado).where(GabaritoNomeado.avaliacao_id == av.id))
     db.execute(delete(Aluno).where(Aluno.avaliacao_id == av.id))
     db.delete(av)
+    _record_tombstone(db, external_id, owner_id)
     db.commit()
     return {"deleted": True, "external_id": external_id, "titulo": av.titulo}
 

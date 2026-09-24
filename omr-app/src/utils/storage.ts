@@ -168,6 +168,53 @@ export function deleteExam(id: string, userId?: string | number): void {
   saveData(data, userId);
 }
 
+// ─── Lápides locais de provas excluídas (anti-ressurreição) ───
+// Quando uma prova é apagada, seu id entra neste conjunto: o refresh
+// empurra a lápide ao servidor (DELETE) e jamais re-sincroniza esse id.
+// Conjunto limitado aos 500 mais recentes (ids são UUIDs; 30 dias de
+// retenção no servidor bastam para propagar a exclusão).
+
+const DELETED_KEY = 'omr-deleted-exams';
+const DELETED_CAP = 500;
+
+function getDeletedKey(userId?: string | number): string {
+  return userId != null ? `${DELETED_KEY}-${String(userId)}` : DELETED_KEY;
+}
+
+export function getDeletedExamIds(userId?: string | number): string[] {
+  try {
+    const raw = localStorage.getItem(getDeletedKey(userId));
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter(x => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+export function markExamDeleted(id: string, userId?: string | number): void {
+  const ids = getDeletedExamIds(userId).filter(x => x !== id);
+  ids.unshift(id);
+  try {
+    localStorage.setItem(getDeletedKey(userId), JSON.stringify(ids.slice(0, DELETED_CAP)));
+  } catch {
+    // armazenamento indisponível — a lápide do servidor continua valendo
+  }
+}
+
+export function unmarkExamDeleted(id: string, userId?: string | number): void {
+  const ids = getDeletedExamIds(userId).filter(x => x !== id);
+  try {
+    localStorage.setItem(getDeletedKey(userId), JSON.stringify(ids));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function isExamDeleted(id: string, userId?: string | number): boolean {
+  return getDeletedExamIds(userId).includes(id);
+}
+
 export function getResults(examId?: string, userId?: string | number): StudentResult[] {
   const results = loadData(userId).results;
   if (examId) return results.filter(r => r.examId === examId);

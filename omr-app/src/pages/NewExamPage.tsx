@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, DEFAULT_SAE_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS } from '../types';
-import { saveExam, getExams, deleteExam, applyRemoteExams } from '../utils/storage';
+import {
+  saveExam, getExams, deleteExam, applyRemoteExams,
+  getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
+} from '../utils/storage';
 import { MAX_QUESTIONS_PER_SUBJECT, MAX_QUESTIONS_SINGLE } from '../utils/card-template';
-import { syncExam, getExamsFromDB, deleteExamFromDB, checkHealth } from '../utils/api';
+import { syncExam, getExamsFromDB, getDeletedExamsFromDB, isGoneError, deleteExamFromDB, checkHealth } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -42,14 +45,47 @@ export default function NewExamPage({ onNavigate }: Props) {
     }
     setSyncing(true);
     try {
+      const uid = user?.id;
+      // 0. Empurra lápides locais (exclusões feitas offline/antes): DELETE idempotente.
+      for (const goneId of getDeletedExamIds(uid)) {
+        try {
+          await deleteExamFromDB(goneId);
+          unmarkExamDeleted(goneId, uid);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/404/.test(msg)) unmarkExamDeleted(goneId, uid); // já sumiu do servidor
+          // outro erro: mantém a lápide local para a próxima tentativa
+        }
+      }
+      // 1. Puxa lápides do servidor → apaga cópias locais SEM re-empurrar (fim da ressurreição).
+      try {
+        const gone = await getDeletedExamsFromDB();
+        for (const t of gone) {
+          markExamDeleted(t.external_id, uid);
+          deleteExam(t.external_id, uid); // só-local: prova morta em todos os aparelhos
+        }
+      } catch {
+        // segue sem as lápides desta vez
+      }
+      // 2. Merge servidor → local (fonte oficial).
       const dbExams = await getExamsFromDB();
-      const stats = applyRemoteExams(dbExams, user?.id);
-      const local = getExams(user?.id);
+      const stats = applyRemoteExams(dbExams, uid);
+      // 3. Empurra locais novos — nunca lapidados; 410 (lapidada lá) → apaga local.
+      const local = getExams(uid);
       const dbIds = new Set(dbExams.map(d => d.external_id));
       for (const ex of local) {
-        if (!dbIds.has(ex.id)) syncExam(ex).catch(() => {});
+        if (dbIds.has(ex.id) || isExamDeleted(ex.id, uid)) continue;
+        try {
+          await syncExam(ex);
+        } catch (err) {
+          if (isGoneError(err)) {
+            markExamDeleted(ex.id, uid);
+            deleteExam(ex.id, uid);
+          }
+          // demais erros: tenta de novo no próximo refresh
+        }
       }
-      setExams(getExams(user?.id));
+      setExams(getExams(uid));
       const total = stats.added + stats.updated;
       setSyncMsg(total > 0
         ? `Provas atualizadas do servidor (+${stats.added} novas, ${stats.updated} atualizadas).`
@@ -132,6 +168,7 @@ export default function NewExamPage({ onNavigate }: Props) {
       }
       // 404 = prova só-local: segue apagando localmente.
     }
+    markExamDeleted(id, user?.id); // lápide: os outros aparelhos removem a cópia sem recriar
     try {
       deleteExam(id, user?.id);
     } catch (err) {

@@ -427,6 +427,24 @@ export async function syncExam(exam: {
   return res.json();
 }
 
+export interface DeletedExamInfo {
+  external_id: string;
+  deleted_at: string;
+}
+
+/** Lápides de provas excluídas (para os aparelhos removerem cópias locais sem ressuscitar). */
+export async function getDeletedExamsFromDB(): Promise<DeletedExamInfo[]> {
+  const res = await fetch(`${API_BASE}/api/exams/deleted`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`Falha ao listar exclusões (${res.status})`);
+  return res.json();
+}
+
+/** Erro 410 do sync = prova lapidada em outro aparelho (não recriar). */
+export function isGoneError(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err ?? '');
+  return /\(410\)|410 Gone|lapide|excluída em outro aparelho/i.test(m);
+}
+
 export async function importStudentsAPI(
   examExternalId: string,
   alunos: { nome: string; matricula?: string | null }[],

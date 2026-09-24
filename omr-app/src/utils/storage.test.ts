@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { mergeRemoteExams, saveResult, getResults, deleteResult } from './storage';
+import {
+  mergeRemoteExams, saveResult, getResults, deleteResult,
+  getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
+} from './storage';
 import type { DBExam } from './api';
 import type { Exam, StudentResult } from '../types';
 
@@ -133,5 +136,30 @@ describe('ciclo local resultado (salvar → listar → excluir)', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe('lápides locais (anti-ressurreição)', () => {
+  afterEach(() => {
+    localStorage.removeItem('omr-deleted-exams');
+    localStorage.removeItem(`omr-deleted-exams-${UID}`);
+  });
+
+  it('marca, consulta e desmarca', () => {
+    expect(isExamDeleted('E1', UID)).toBe(false);
+    markExamDeleted('E1', UID);
+    expect(isExamDeleted('E1', UID)).toBe(true);
+    expect(getDeletedExamIds(UID)).toEqual(['E1']);
+    unmarkExamDeleted('E1', UID);
+    expect(isExamDeleted('E1', UID)).toBe(false);
+  });
+
+  it('idempotente e isolada por usuário', () => {
+    markExamDeleted('E1', UID);
+    markExamDeleted('E1', UID);
+    markExamDeleted('E2', UID);
+    expect(getDeletedExamIds(UID)).toEqual(['E2', 'E1']);
+    expect(getDeletedExamIds('outro')).toEqual([]);
+    expect(isExamDeleted('E1')).toBe(false);
   });
 });

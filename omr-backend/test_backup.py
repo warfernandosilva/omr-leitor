@@ -12,7 +12,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from database import init_db, SessionLocal
-from models import Aluno, Avaliacao, GabaritoNomeado, User
+from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
 
 init_db()
 db = SessionLocal()
@@ -25,13 +25,15 @@ al = Aluno(avaliacao_id=av.id, nome="Aluno BK", matricula="101")
 db.add(al); db.flush()
 g = GabaritoNomeado(avaliacao_id=av.id, aluno_id=al.id, codigo_unico="OMR-2026-000001",
                     qr_code_payload="OMR-2026-000001", status="gerado")
-db.add(g); db.commit()
+db.add(g)
+t = DeletedExam(external_id="exam-morta", owner_id=u.id)
+db.add(t); db.commit()
 db.close()
 
 from backup import export_all, backup_to_file, restore_all, restore_from_file
 
 data = export_all()
-assert data["counts"] == {"users": 1, "avaliacoes": 1, "alunos": 1, "gabaritos": 1}, data["counts"]
+assert data["counts"] == {"users": 1, "avaliacoes": 1, "alunos": 1, "gabaritos": 1, "tombstones": 1}, data["counts"]
 print("   OK  export: contagens corretas", data["counts"])
 
 # roundtrip via arquivo: grava, limpa o banco, restaura
@@ -41,7 +43,7 @@ assert raw["avaliacoes"][0]["answer_key"] == {"1": "A", "2": "B"}
 print("   OK  arquivo: JSON fiel (answer_key preservada)")
 
 n = restore_all(raw)
-assert n == {"users": 1, "avaliacoes": 1, "alunos": 1, "gabaritos": 1}, n
+assert n == {"users": 1, "avaliacoes": 1, "alunos": 1, "gabaritos": 1, "tombstones": 1}, n
 print("   OK  restore: upsert sem duplicar", n)
 
 # upsert de novo (idempotente)

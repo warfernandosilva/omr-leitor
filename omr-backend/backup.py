@@ -13,7 +13,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from database import SessionLocal
-from models import Aluno, Avaliacao, GabaritoNomeado, User
+from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
 
 BACKUP_VERSION = 1
 
@@ -65,17 +65,25 @@ def export_all() -> dict:
                 "data_correcao": _dt(g.data_correcao),
                 "created_at": _dt(g.created_at), "updated_at": _dt(g.updated_at),
             })
+        tombstones = []
+        for t in db.scalars(select(DeletedExam)).all():
+            tombstones.append({
+                "id": t.id, "external_id": t.external_id, "owner_id": t.owner_id,
+                "deleted_at": _dt(t.deleted_at),
+            })
         return {
             "backup_version": BACKUP_VERSION,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "counts": {
                 "users": len(users), "avaliacoes": len(avaliacoes),
                 "alunos": len(alunos), "gabaritos": len(gabaritos),
+                "tombstones": len(tombstones),
             },
             "users": users,
             "avaliacoes": avaliacoes,
             "alunos": alunos,
             "gabaritos": gabaritos,
+            "tombstones": tombstones,
         }
     finally:
         db.close()
@@ -99,7 +107,7 @@ def restore_all(data: dict) -> dict:
     if int(data.get("backup_version", 0)) > BACKUP_VERSION:
         raise ValueError("Backup de versão mais nova que o sistema")
     db = SessionLocal()
-    n = {"users": 0, "avaliacoes": 0, "alunos": 0, "gabaritos": 0}
+    n = {"users": 0, "avaliacoes": 0, "alunos": 0, "gabaritos": 0, "tombstones": 0}
     try:
         for u in data.get("users", []):
             obj = db.get(User, u["id"])
@@ -162,6 +170,18 @@ def restore_all(data: dict) -> dict:
             obj.nota = g.get("nota")
             obj.observacoes = g.get("observacoes")
             n["gabaritos"] += 1
+        db.flush()
+        for t in data.get("tombstones", []):
+            obj = db.scalar(select(DeletedExam).where(DeletedExam.external_id == t["external_id"]))
+            if obj is None:
+                try:
+                    obj = DeletedExam(external_id=t["external_id"], owner_id=t.get("owner_id"))
+                    db.add(obj)
+                    db.flush()
+                except Exception:
+                    db.rollback()
+                    continue
+            n["tombstones"] += 1
         db.commit()
         return n
     except Exception:
