@@ -55,6 +55,7 @@ class Avaliacao(Base, TimestampMixin):
     layout_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="dual")  # dual | single
     template: Mapped[str] = mapped_column(String(10), nullable=False, default="padrao")  # padrao | sae
     sae_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # cabeçalho editável do cartão SAE
+    herby_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # evento/serie/caderno/turma/magic_base do Herby
     grade_scale: Mapped[str] = mapped_column(String(10), nullable=False, default="0-10")
     answer_key: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
@@ -100,6 +101,10 @@ class GabaritoNomeado(Base, TimestampMixin):
     # ID impresso + payload do QR Code (sempre iguais)
     codigo_unico: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     qr_code_payload: Mapped[str] = mapped_column(String(120))
+    # Herby: conteúdo integral do QR do cabeçalho (magic link; só armazenado)
+    magic_link: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Herby: estado da foto (Successful/QrNotRead/AnswerFieldsCut/PageCut)
+    photo_status: Mapped[str | None] = mapped_column(String(30), nullable=True)
     numero_pagina: Mapped[int] = mapped_column(Integer, default=0)
 
     status: Mapped[str] = mapped_column(String(30), nullable=False, default=STATUS_GERADO)
@@ -124,6 +129,8 @@ class GabaritoNomeado(Base, TimestampMixin):
             "id": self.id,
             "codigo_unico": self.codigo_unico,
             "qr_code_payload": self.qr_code_payload,
+            "magic_link": self.magic_link,
+            "photo_status": self.photo_status,
             "numero_pagina": self.numero_pagina,
             "status": self.status,
             "respostas": self.respostas,

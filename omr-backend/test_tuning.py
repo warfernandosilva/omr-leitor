@@ -14,9 +14,11 @@ def check(name, cond, extra=""):
         fails.append(name)
 
 
-check("4 modelos na tabela", set(MODEL_TUNING) == {"padrao", "sae", "colar", "saev"})
+check("5 modelos na tabela", set(MODEL_TUNING) == {"padrao", "sae", "colar", "saev", "herby"})
 saev = get_tuning("saev")
 check("saev: bests + hi=0.55 + force", saev.score_set == "bests" and saev.hi == 0.55 and saev.force_adaptive)
+herby = get_tuning("herby")
+check("herby: ponto de partida SAEV", herby.score_set == "bests" and herby.hi == 0.55 and herby.force_adaptive)
 check("padrao/sae/colar: flat + hi=0.45 sem force",
       all(get_tuning(m).score_set == "flat" and get_tuning(m).hi == 0.45
           and not get_tuning(m).force_adaptive for m in ("padrao", "sae", "colar")))

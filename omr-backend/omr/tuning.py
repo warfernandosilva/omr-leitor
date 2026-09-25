@@ -33,6 +33,9 @@ MODEL_TUNING: dict[str, ModelTuning] = {
     "sae": ModelTuning(),
     "colar": ModelTuning(),
     "saev": ModelTuning(score_set="bests", hi=0.55, force_adaptive=True),
+    # Herby: ponto de partida = SAEV (quadrados) até calibração com folhas
+    # preenchidas reais (hoje só há a virgem 2026_MAT__POR_5ano_1.jpg).
+    "herby": ModelTuning(score_set="bests", hi=0.55, force_adaptive=True),
 }
 
 

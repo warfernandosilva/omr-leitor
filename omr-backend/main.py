@@ -76,6 +76,7 @@ from omr.template_herby import (
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
 from omr.reader_saev import process_saev_image
+from omr.reader_herby import process_herby_image
 from omr.config import MARGIN
 from omr.grading import grade, GradingResult
 
@@ -138,6 +139,9 @@ class ProcessResponse(BaseModel):
     warnings: list[str] | None = None  # sanity pós-leitura (não bloqueia)
     n_frames: int | None = None  # frames usados na votação (process-multi)
     debug_images: dict | None = None  # heatmap de diagnóstico (só com debug=true)
+    # Herby: estado da foto + respostas em string (" " = branco, "*" = duplicada)
+    photo_status: str | None = None  # Successful | QrNotRead | AnswerFieldsCut | PageCut
+    answer_string: str | None = None
     error: str | None = None
 
 
@@ -205,6 +209,16 @@ class BatchCardRequest(BaseModel):
 
 # ─── Persistência ───
 
+class HerbySpecRequest(BaseModel):
+    """Campos editáveis do cartão Herby (espelha omr/template_herby.py:HerbySpec)."""
+    evento: str = ""
+    serie: str = ""
+    caderno: str = ""
+    turma: str = ""
+    magic_base: str = ""
+    n_questoes: int = 22
+
+
 class ExamSyncRequest(BaseModel):
     external_id: str
     titulo: str
@@ -213,8 +227,9 @@ class ExamSyncRequest(BaseModel):
     subject_mat: str = "MATEMÁTICA"
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae | colar | saev
+    template: str = "padrao"  # padrao | sae | colar | saev | herby
     sae: SaeSpecRequest | None = None  # cabeçalho editável (só SAE)
+    herby: HerbySpecRequest | None = None  # cabeçalho editável (só Herby)
     grade_scale: str | None = None
     answer_key: dict | None = None
 
@@ -236,6 +251,7 @@ class ResultadoRequest(BaseModel):
     brancos: int | None = None
     nota: float | None = None
     observacoes: str | None = None
+    photo_status: str | None = None  # Herby: estado da foto (Successful/QrNotRead/...)
 
 
 def _next_codigo(db: Session) -> str:
@@ -435,6 +451,26 @@ def _debug_images(result: OMRResult, want: bool) -> dict | None:
         return None
 
 
+def _answer_string(result: OMRResult, total: int) -> str:
+    """String de respostas estilo Herby: letra, ' ' = branco, '*' = duplicada."""
+    out = []
+    dups = set(result.duplicate_questions or [])
+    for q in range(1, max(1, total) + 1):
+        if q in dups:
+            out.append("*")
+        else:
+            out.append(result.answers.get(q, " "))
+    return "".join(out)
+
+
+def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
+    if template_used in ("saev", "herby"):
+        return 2 * qps
+    if template_used in ("sae", "colar"):
+        return qps
+    return qps if layout_mode == "single" else 2 * qps
+
+
 @app.post("/api/omr/process", response_model=ProcessResponse)
 async def process_omr(
     file: UploadFile = File(...),
@@ -443,6 +479,7 @@ async def process_omr(
     template: str = Form("padrao"),  # padrao | sae | colar (colar: mesma grade do sae, sem QR)
     adaptive: bool = Form(False),  # limiar adaptativo por foto (experimental, default OFF)
     debug: bool = Form(False),  # heatmap de diagnóstico (default off = zero custo)
+    client_duration_ms: int | None = Form(None),  # Herby: tempo client-side por foto (diagnóstico)
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa uma imagem (foto/scan) do cartão preenchido."""
@@ -464,11 +501,13 @@ async def process_omr(
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
 
     result: OMRResult | None
-    template_used = template if template in ("padrao", "sae", "colar", "saev") else "padrao"
+    template_used = template if template in ("padrao", "sae", "colar", "saev", "herby") else "padrao"
     if template_used in ("sae", "colar"):
         result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive, debug=debug)
     elif template_used == "saev":
         result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
+    elif template_used == "herby":
+        result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
     else:
         result = process_image(
             image,
@@ -492,7 +531,12 @@ async def process_omr(
             if saev_result is not None:
                 result = saev_result
                 template_used = "saev"
-    elif result is None and template_used in ("sae", "colar", "saev"):
+            else:
+                herby_result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
+                if herby_result is not None:
+                    result = herby_result
+                    template_used = "herby"
+    elif result is None and template_used in ("sae", "colar", "saev", "herby"):
         std_result = process_image(
             image,
             questions_per_subject=questions_per_subject,
@@ -523,6 +567,16 @@ async def process_omr(
                 return ProcessResponse(success=False, error="Falha ao retificar a imagem SAEV (foto muito borrada ou escura). Tente com melhor iluminação.")
             except Exception:
                 return ProcessResponse(success=False, error="Âncoras SAEV não detectadas ou geometria inválida")
+        if template_used == "herby":
+            try:
+                from omr.detector_herby import detect_herby_anchors as _dm_herby
+                det = _dm_herby(image)
+                if not det.found:
+                    faltam = ", ".join({"qr_head": "QR do cabeçalho", "qr_foot": "QR do rodapé", "page": "borda da página"}.get(m, m) for m in det.missing)
+                    return ProcessResponse(success=False, error=f"Âncoras Herby não encontradas (faltam: {faltam}). Garanta a folha inteira visível, QRs nítidos e sem sombra.")
+                return ProcessResponse(success=False, error="Falha ao retificar a imagem Herby (foto muito borrada ou escura). Tente com melhor iluminação.")
+            except Exception:
+                return ProcessResponse(success=False, error="Âncoras Herby não detectadas ou geometria inválida")
         # diagnóstico fino para UX (padrão falhou E fallbacks falharam)
         try:
             from omr.detector import detect_markers as _dm, validate_geometry as _vg
@@ -599,6 +653,7 @@ async def process_omr(
         "low": len(result.low_confidence),
         "t_detect_ms": round(result.t_detect * 1000),
         "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+        "client_duration_ms": client_duration_ms,
         "floor": round(result.floor_used, 3),
         "floor_source": result.floor_source,
     })
@@ -623,6 +678,8 @@ async def process_omr(
         },
         warnings=sanity.warnings or None,
         debug_images=_debug_images(result, debug),
+        photo_status="Successful" if result.qr_id else "QrNotRead",
+        answer_string=_answer_string(result, _photo_total(template_used, questions_per_subject, layout_mode)),
     )
 
 
@@ -634,6 +691,7 @@ async def process_omr_multi(
     template: str = Form("padrao"),
     adaptive: bool = Form(False),
     debug: bool = Form(False),
+    client_duration_ms: int | None = Form(None),  # Herby: tempo client-side (diagnóstico)
     current_user: User = Depends(auth.get_current_user),
 ):
     """Processa N frames do mesmo cartão e vota por questão.
@@ -646,7 +704,7 @@ async def process_omr_multi(
         return ProcessResponse(success=False, error="Envie de 1 a 4 frames do mesmo cartão.")
 
     results: list[OMRResult] = []
-    template_used = template if template in ("padrao", "sae", "colar", "saev") else "padrao"
+    template_used = template if template in ("padrao", "sae", "colar", "saev", "herby") else "padrao"
     first_image: np.ndarray | None = None
 
     for f in files:
@@ -662,6 +720,8 @@ async def process_omr_multi(
             r = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive, debug=debug)
         elif template_used == "saev":
             r = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
+        elif template_used == "herby":
+            r = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
         else:
             r = process_image(image, questions_per_subject=questions_per_subject,
                               layout_mode=layout_mode, adaptive=adaptive, debug=debug)
@@ -726,6 +786,7 @@ async def process_omr_multi(
         "answers": len(result.answers), "blank": len(result.blank_questions),
         "dup": len(result.duplicate_questions), "low": len(result.low_confidence),
         "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+        "client_duration_ms": client_duration_ms,
         "floor": round(result.floor_used, 3), "floor_source": result.floor_source,
     })
 
@@ -745,6 +806,8 @@ async def process_omr_multi(
                          "source": result.floor_source},
         warnings=sanity.warnings or None,
         debug_images=_debug_images(result, debug),
+        photo_status="Successful" if result.qr_id else "QrNotRead",
+        answer_string=_answer_string(result, _photo_total(template_used, questions_per_subject, layout_mode)),
     )
 
 
@@ -942,8 +1005,8 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     if req.layout_mode not in ("dual", "single"):
         raise HTTPException(status_code=400, detail="layout_mode deve ser 'dual' ou 'single'")
     av.layout_mode = req.layout_mode
-    if req.template not in ("padrao", "sae", "colar", "saev"):
-        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar' ou 'saev'")
+    if req.template not in ("padrao", "sae", "colar", "saev", "herby"):
+        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar', 'saev' ou 'herby'")
     av.template = req.template
     if req.sae is not None:
         spec = req.sae.to_spec()
@@ -956,6 +1019,14 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
         }
     elif req.template != "sae":
         av.sae_spec = None
+    if req.herby is not None:
+        av.herby_spec = {
+            "evento": req.herby.evento, "serie": req.herby.serie,
+            "caderno": req.herby.caderno, "turma": req.herby.turma,
+            "magic_base": req.herby.magic_base,
+        }
+    elif req.template != "herby":
+        av.herby_spec = None
     if req.grade_scale is not None:
         av.grade_scale = req.grade_scale
     if req.answer_key is not None:
@@ -972,6 +1043,7 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
         "layout_mode": av.layout_mode,
         "template": av.template,
         "sae_spec": av.sae_spec,
+        "herby_spec": getattr(av, "herby_spec", None),
         "grade_scale": av.grade_scale,
         "answer_key": av.answer_key,
     }
@@ -1042,6 +1114,10 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
     }
 
     novos = 0
+    # Herby: magic link do cabeçalho segue a base cadastrada na prova
+    herby_base = ""
+    if (av.template or "padrao") == "herby":
+        herby_base = (dict(getattr(av, "herby_spec", None) or {}).get("magic_base") or "").strip()
     for idx, aluno in enumerate(alunos, start=1):
         g = existentes.get(aluno.id)
         if g is None:
@@ -1053,10 +1129,16 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
                 qr_code_payload=codigo,
                 numero_pagina=idx,
             )
+            if herby_base:
+                from omr.template_herby import herby_magic_link
+                g.magic_link = herby_magic_link(codigo, herby_base)
             db.add(g)
             db.flush()
             novos += 1
         g.numero_pagina = idx
+        if herby_base and not g.magic_link:
+            from omr.template_herby import herby_magic_link
+            g.magic_link = herby_magic_link(g.codigo_unico, herby_base)
 
     db.commit()
 
@@ -1498,10 +1580,12 @@ def delete_aluno(aluno_id: int, db: Session = Depends(get_db), current_user: Use
 def lookup_codigo(codigo: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """
     Resolve QR Code → GabaritoNomeado → Aluno (§12-13).
-    Nunca busca por nome: somente pelo codigo_unico.
+    Aceita ID puro ou magic link (Herby: URL -> ID). Nunca busca por nome.
     """
+    from omr.template_herby import normalize_herby_qr
+    chave = normalize_herby_qr(codigo) or codigo.strip()
     g = db.scalar(
-        select(GabaritoNomeado).where(GabaritoNomeado.codigo_unico == codigo.strip())
+        select(GabaritoNomeado).where(GabaritoNomeado.codigo_unico == chave)
     )
     if g is None:
         return JSONResponse(status_code=404, content={"found": False, "reason": "not_found"})
@@ -1510,6 +1594,8 @@ def lookup_codigo(codigo: str, db: Session = Depends(get_db), current_user: User
     return {
         "found": True,
         "codigo_unico": g.codigo_unico,
+        "magic_link": getattr(g, "magic_link", None),
+        "photo_status": getattr(g, "photo_status", None),
         "status": g.status,
         "numero_pagina": g.numero_pagina,
         "aluno": {"id": g.aluno.id, "nome": g.aluno.nome, "matricula": g.aluno.matricula},
@@ -1530,8 +1616,11 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
     Persiste o resultado da correção no GabaritoNomeado (§24).
 
     Se já existe resultado e overwrite=False → 409 (frontend pede confirmação).
+    Aceita magic link no codigo (normalizado para o codigo_unico).
     """
-    g = db.scalar(select(GabaritoNomeado).where(GabaritoNomeado.codigo_unico == codigo.strip()))
+    from omr.template_herby import normalize_herby_qr
+    chave = normalize_herby_qr(codigo) or codigo.strip()
+    g = db.scalar(select(GabaritoNomeado).where(GabaritoNomeado.codigo_unico == chave))
     if g is None:
         # Contrato: lookup usa {found:false}; mutações usam HTTPException {detail}
         raise HTTPException(status_code=404, detail="Gabarito não encontrado")
@@ -1560,6 +1649,8 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
     g.brancos = req.brancos
     g.nota = req.nota
     g.observacoes = req.observacoes
+    if req.photo_status:
+        g.photo_status = req.photo_status
     g.status = GabaritoNomeado.STATUS_CORRIGIDO
     if g.data_leitura is None:
         g.data_leitura = agora
