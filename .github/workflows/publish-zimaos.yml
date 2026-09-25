@@ -1,0 +1,55 @@
+name: Publish ZimaOS images
+
+# Builda frontend + backend e publica no GHCR.
+# Imagens:
+#   ghcr.io/warfernandosilva/omr-leitor-frontend:latest
+#   ghcr.io/warfernandosilva/omr-leitor-backend:latest
+# Depois do 1º push: GitHub > Packages > cada imagem > Change visibility > Public,
+# senão o ZimaOS não puxa sem login.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "omr-app/**"
+      - "omr-backend/**"
+      - "docker-compose.yml"
+      - ".github/workflows/publish-zimaos.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./omr-backend
+          push: true
+          tags: ghcr.io/warfernandosilva/omr-leitor-backend:latest
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./omr-app
+          push: true
+          build-args: |
+            VITE_API_URL=
+          tags: ghcr.io/warfernandosilva/omr-leitor-frontend:latest

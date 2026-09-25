@@ -1,0 +1,53 @@
+# OMR Leitor — YAML pronto para colar em ZimaOS > App Store > Custom Install.
+# Acesso: http://192.168.1.219:8080 (frontend serve a SPA e faz proxy /api/ -> backend)
+# Banco: Postgres zerado (init_db cria as tabelas sozinho via create_all)
+#
+# Na tela do Custom Install, preencha as variáveis:
+#   POSTGRES_PASSWORD = (senha gerada — ver chat)
+#   JWT_SECRET        = (segredo gerado — ver chat)
+# Depois: Install > Start > abrir http://192.168.1.219:8080
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omr
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    image: ghcr.io/warfernandosilva/omr-leitor-backend:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD}@db:5432/omr
+      JWT_SECRET: ${JWT_SECRET}
+      OMR_ENV: production
+      CORS_ORIGINS: http://192.168.1.219:8080,http://localhost:5173,http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - omr-data:/app/omr-backend/data
+      - omr-backups:/app/omr-backend/backups
+
+  frontend:
+    image: ghcr.io/warfernandosilva/omr-leitor-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  omr-data:
+  omr-backups:

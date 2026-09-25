@@ -1,0 +1,64 @@
+# OMR Leitor — stack para ZimaOS (rede local)
+# Acesso: http://192.168.1.219:8080 (frontend serve a SPA e faz proxy /api/ -> backend)
+# Banco: Postgres zerado (init_db cria as tabelas sozinho via create_all)
+#
+# Como usar (build via SSH no ZimaOS):
+# 1. Rode .\deploy-zimaos.ps1 (envia o código e sobe a stack), ou siga o passo a passo no chat
+# 2. Abrir http://192.168.1.219:8080
+# (Via App Store > Custom Install, preencha POSTGRES_PASSWORD e JWT_SECRET do .env)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omr
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    image: omr-backend:latest
+    build: ./omr-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@db:5432/omr
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET no .env}
+      OMR_ENV: production
+      CORS_ORIGINS: http://192.168.1.219:8080,http://localhost:5173,http://localhost:3000
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - omr-data:/app/omr-backend/data
+      - omr-backups:/app/omr-backend/backups
+    # Sem ports expostas: o acesso é via frontend (nginx proxy /api/).
+    # Para debug temporário, descomente:
+    # ports:
+    #   - "8010:8010"
+
+  frontend:
+    image: omr-frontend:latest
+    build:
+      context: ./omr-app
+      # '' = mesma origem (nginx faz proxy /api/ -> backend:8010).
+      # Ver omr-app/src/utils/api.ts — sem isso a LAN tentaria <host>:8010 direto.
+      args:
+        VITE_API_URL: ""
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  omr-data:
+  omr-backups:
