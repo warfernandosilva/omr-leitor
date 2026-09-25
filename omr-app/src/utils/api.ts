@@ -2,8 +2,11 @@
 
 const API_BASE = (() => {
   // Permite forçar via .env: VITE_API_URL=https://xxxx.ngrok-free.app
+  // VITE_API_URL="" (string vazia) = mesma origem, usa o proxy /api
+  // (nginx no ZimaOS ou proxy do Vite em dev). Só cai no fallback
+  // por hostname quando a variável nem foi definida no build.
   const envUrl = (import.meta as unknown as { env?: { VITE_API_URL?: string } })?.env?.VITE_API_URL;
-  if (envUrl) return envUrl.replace(/\/$/, '');
+  if (envUrl !== undefined) return envUrl.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
     const h = window.location.hostname;
     // ngrok / tunneling: usa o mesmo host https via proxy do Vite (/api -> localhost:8010).
