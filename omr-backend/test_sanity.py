@@ -46,7 +46,26 @@ from omr.reader import process_image
 foto = "calibration/WhatsApp Image 2026-09-18 at 18.21.48.jpeg"
 img = cv2.imread(foto)
 if img is None:
-    print(f"   AVISO: foto de calibração ilegível ({foto}) — integração pulada")
+    # Sem a foto real (ex.: CI limpo): fixture SINTÉTICA equivalente —
+    # cartão com 27 duplas marcadas (fantasma de layout antigo) deve REJEITAR.
+    from omr.template import generate_card, MAT_X
+    ghost = generate_card()
+    for q in range(22):
+        cv2.circle(ghost, (int(PORT_X[0]), int(QUESTION_Y[q])), 17, (0, 0, 0), -1)
+        cv2.circle(ghost, (int(PORT_X[1]), int(QUESTION_Y[q])), 17, (0, 0, 0), -1)
+    for q in range(5):
+        cv2.circle(ghost, (int(MAT_X[0]), int(QUESTION_Y[q])), 17, (0, 0, 0), -1)
+        cv2.circle(ghost, (int(MAT_X[1]), int(QUESTION_Y[q])), 17, (0, 0, 0), -1)
+    r = process_image(ghost, questions_per_subject=22, layout_mode="dual")
+    if r is None:
+        check("fantasma sintético 27 duplas: bloqueado antes (pipeline None)", True)
+    else:
+        s5 = sanity_check(
+            r.duplicate_questions, r.blank_questions, r.low_confidence,
+            len(r.blank_questions) + len(r.duplicate_questions) + len(r.answers),
+        )
+        check("fantasma sintético 27 duplas: REJEITADO pelo sanity (não salva lixo)", not s5.ok,
+              f"dups={len(r.duplicate_questions)}")
 else:
     r = process_image(img, questions_per_subject=22, layout_mode="dual")
     if r is None:

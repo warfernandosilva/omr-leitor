@@ -53,7 +53,8 @@ Em `package.json:build.win.target` troque `nsis` por `portable` e `npm run elect
 Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev spawna `python main.py`.
 
 ## Banco de dados
-- `DATABASE_URL` em `omr-backend/.env` → Postgres (`postgresql+psycopg://postgres:senha@localhost:5432/omr`). Se vazio, cai em `omr-backend/data/omr.db` SQLite (veja `database.py:19`, `DB_LABEL` em `GET /api/health`).
+- Local/dev: `DATABASE_URL` em `omr-backend/.env` → Postgres (`postgresql+psycopg://postgres:senha@localhost:5432/omr`). Se vazio, cai em `omr-backend/data/omr.db` SQLite (veja `database.py:19`, `DB_LABEL` em `GET /api/health`).
+- Docker/ZimaOS: o `.env` fica na **raiz** (lido pelo compose: `POSTGRES_PASSWORD`, `JWT_SECRET`, `CORS_ORIGINS`, `FRONTEND_PORT`) — ver `.env.example`.
 - Para multi-PC compartilhem o mesmo Postgres; com SQLite cada PC é isolado — use `Export XLSX`.
 
 ## Backup do banco
@@ -64,10 +65,18 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
   3. Ou via terminal (admin, ajustando o caminho): `schtasks /create /tn "OMR Backup diario" /tr "C:\caminho\para\omr-leitor\omr-backend\backup_diario.bat" /sc daily /st 23:00`.
 - O dump contém hashes de senha — guarde em local seguro, nunca no Git.
 
+## Deploy ZimaOS (Docker)
+- Stack: `docker-compose.yml` (build local) ou `docker-compose.zimaos-store.yml` (imagens GHCR, para colar no Custom Install). Acesso: `http://<ip-do-zima>:8080` (`FRONTEND_PORT`); o nginx faz proxy `/api/` → backend:8010.
+- Variáveis (Custom Install ou `.env` raiz — gere valores fortes, nunca reuse): `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ chars), `CORS_ORIGINS` (opcional), `FRONTEND_PORT` (opcional, default 8080).
+- Publicação: `publish-zimaos.yml` só publica no GHCR **após o CI passar**; depois do 1º push, torne as imagens públicas (GitHub → Packages → Change visibility), senão o ZimaOS não puxa sem login.
+- Deploy: `.\deploy-zimaos.ps1` (não envia `.env` — crie no servidor). Backup: volumes `pgdata/omr-data/omr-backups`; `docker compose down` **sem `-v`** para não apagar o banco.
+- Troubleshooting Docker: porta 8080 em uso → `FRONTEND_PORT=8081`; 502 no início → backend ainda subindo (aguarda Postgres sozinho, ~60s).
+
 ## Troubleshooting
 - **Tela branca no .exe** — faltava `vite.config.ts:base './'` (já corrigido); refaça `electron:build`.
 - **Backend não empacotado** — rode `build-backend-exe.bat` antes de `electron:build`.
-- **Celular não loga em 192.168.x.x** — libere firewall: `netsh advfirewall firewall add rule ... localport=8010/5173`, mesma Wi-Fi, e `CORS_ORIGIN_REGEX` em `main.py:50` já libera `192.168.*`.
+- **Celular não loga em 192.168.x.x** — libere firewall: `netsh advfirewall firewall add rule ... localport=8010/5173`, mesma Wi-Fi, e `CORS_ORIGIN_REGEX` em `main.py:81` (+ `CORS_ORIGINS`) já libera `192.168.*`.
+- **Prova excluída que volta (multi-aparelho)** — resolvido com lápides: o aparelho que exclui registra no servidor (`GET /api/exams/deleted`, retenção 30 dias) e os demais removem a cópia local no refresh sem recriar. Se voltar, atualize o app (PWA) nos dois aparelhos e toque **⟳ Atualizar do servidor**.
 - **Câmera ao vivo no celular (captura automática)** — o Chrome exige HTTPS: use `ngrok http 5173` no PC e abra a URL https no celular (o proxy `/api→8010` já funciona com host ngrok). Sem HTTPS, cai no fallback de upload (sem auto-captura). Na tela de correção: aponte para o cartão, aguarde travar (vibra+bip), confira a prévia e toque em Enviar.
 - **Login via ngrok falha ("failed to fetch")** — checklist: 1) `ngrok http 5173` (não 8010); 2) backend `:8010` rodando (`/api/health` ok no PC); 3) URL https **do dia** + 'Visit Site' clicado; 4) use o botão **Testar conexão** na tela de login — ele diz se a API está alcançável. O app já envia `ngrok-skip-browser-warning` para liberar a API do aviso do ngrok.
 - **Gabarito do PC não aparece no celular** — o servidor é a fonte oficial: cadastre o gabarito com backend rodando (a tela confirma "✔ Salvo no servidor"); no celular, abra **Corrigir Cartão** (puxa sozinho) ou toque **⟳ Atualizar do servidor**; use a **mesma conta** nos dois aparelhos (`/api/exams` filtra por dono).
@@ -78,5 +87,8 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
 ```
 omr-app/        # React + Vite + Tailwind, páginas Home/NewExam/Generate/Roster/Manage/RegisterKey/Correct/Results/Dashboard
 omr-backend/omr/ # template.py (1448×2048), detector.py (ArUco), reader.py (CLAHE+blur 35), grading.py
+omr-backend/routers/ # rotas por domínio (admin: backup/restore + usuários)
+omr-backend/backup.py # dump/restore JSON portátil (+ lápides anti-ressurreição)
+docker-compose*.yml / deploy-zimaos.ps1 / .github/workflows/  # deploy ZimaOS via GHCR
 start-omr.bat / iniciar.bat / iniciar-desktop.bat / build-desktop.bat
 ```

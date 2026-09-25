@@ -17,11 +17,14 @@ if hasattr(sys.stdout, "reconfigure"):
 from fastapi.testclient import TestClient
 import main as main_module
 
-# Campos obrigatórios do contrato (cada um é mapeado no app/utils/api.ts)
+# Campos obrigatórios do contrato (cada um é mapeado no app/utils/api.ts).
+# n_frames/debug_images são opcionais por resposta (só com multi-frame/debug),
+# mas a CHAVE deve existir — ausência quebra o mapeamento do app.
 REQUIRED = {
     "success", "answers", "blank_questions", "duplicate_questions",
     "duplicate_marks", "low_confidence", "all_ratios", "card_id",
     "rectified_image", "template_used", "thresholds_used", "warnings", "error",
+    "n_frames", "debug_images",
 }
 
 c = TestClient(main_module.app)
