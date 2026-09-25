@@ -69,6 +69,10 @@ from omr.template_saev import (
     SaevSpec, generate_saev_card_bytes, build_saev_batch_pdf, SAEV_COORDS,
     SAEV_MIN_QPS, SAEV_MAX_QPS,
 )
+from omr.template_herby import (
+    HerbySpec, build_herby_batch_pdf, HERBY_COORDS,
+    HERBY_MIN_QPS, HERBY_MAX_QPS,
+)
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
 from omr.reader_saev import process_saev_image
@@ -317,6 +321,11 @@ def template_colar_coords():
 @app.get("/api/template/saev-coords")
 def template_saev_coords():
     return SAEV_COORDS
+
+
+@app.get("/api/template/herby-coords")
+def template_herby_coords():
+    return HERBY_COORDS
 
 
 # ─── Auth ───
@@ -1134,6 +1143,19 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
         # Gabarito SAEV: grade 16+16 a 26+26, QR do sistema + Nome impresso
         spec = SaevSpec(n_questoes=max(SAEV_MIN_QPS, min(SAEV_MAX_QPS, int(av.questions_per_subject or 22))))
         pages_drawn = build_saev_batch_pdf(registros, spec, out_buf)
+    elif (av.template or "padrao") == "herby":
+        # Gabarito Herby: grade 1+1 a 26+26, QR magic link + QR ID + Nome impresso
+        # (coluna herby_spec chega na Fase 3; getattr mantém compat até lá)
+        stored = dict(getattr(av, "herby_spec", None) or {})
+        spec = HerbySpec(
+            n_questoes=max(HERBY_MIN_QPS, min(HERBY_MAX_QPS, int(av.questions_per_subject or 22))),
+            evento=stored.get("evento", ""),
+            serie=stored.get("serie", ""),
+            caderno=stored.get("caderno", ""),
+            turma=stored.get("turma", av.turma or ""),
+            magic_base=stored.get("magic_base", ""),
+        )
+        pages_drawn = build_herby_batch_pdf(registros, spec, out_buf)
     else:
         pages_drawn = build_batch_pdf(
             registros, av.subject_lp, av.subject_mat, out_buf,
