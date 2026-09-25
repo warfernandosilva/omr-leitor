@@ -124,7 +124,14 @@ ID_TEXT_POS = (95, 1782)  # abaixo da última linha de bolhas, à esquerda do di
 
 def _generate_aruco_marker(dict_type: int, marker_id: int, size: int) -> np.ndarray:
     dictionary = cv2.aruco.getPredefinedDictionary(dict_type)
-    return cv2.aruco.generateImageMarker(dictionary, marker_id, size)
+    # OpenCV >= 4.9 removeu generateImageMarker do módulo; tenta API nova e legada
+    gen = getattr(cv2.aruco, "generateImageMarker", None)
+    if gen is not None:
+        return gen(dictionary, marker_id, size)
+    generate = getattr(dictionary, "generateImageMarker", None)
+    if generate is not None:
+        return generate(marker_id, size)
+    raise RuntimeError("Esta versão do OpenCV não oferece generateImageMarker (aruco)")
 
 
 def make_qr_image(data: str, size: int = QR_SIZE) -> Image.Image:

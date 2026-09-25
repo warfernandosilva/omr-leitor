@@ -1,14 +1,17 @@
-fastapi>=0.100.0
-uvicorn>=0.23.0
-opencv-python>=5.0.0
-numpy>=1.24.0
-Pillow>=10.0.0
-python-multipart>=0.0.6
-qrcode>=7.4
-reportlab>=4.0
-sqlalchemy>=2.0
-psycopg[binary]>=3.1
-python-jose[cryptography]>=3.3
-bcrypt>=4.1
-python-dotenv>=1.0
-pyzbar>=0.1.9; python_version < "3.13"  # última release é 0.1.9; reader.py usa fallback OpenCV se ausente
+# Dependências diretas PINADAS nas versões validadas pelo CI + uso real.
+# Motivo: instalação flutuante (>=) já quebrou uma vez (pyzbar 0.10 não existe).
+# Para atualizar: pip install -U <pacote>, rode a suíte toda, e atualize o pino aqui.
+fastapi==0.141.1
+uvicorn==0.52.4
+opencv-python==5.0.0.93
+numpy==2.5.2
+Pillow==12.3.0
+python-multipart==0.0.32
+qrcode==8.2
+reportlab==5.0.1
+SQLAlchemy==2.0.52
+psycopg[binary]==3.3.4
+python-jose[cryptography]==3.5.0
+bcrypt==4.0.1
+python-dotenv==1.2.3
+pyzbar==0.1.9; python_version < "3.13"  # última release é 0.1.9; reader.py usa fallback OpenCV se ausente

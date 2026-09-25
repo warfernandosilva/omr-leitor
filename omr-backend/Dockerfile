@@ -7,11 +7,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# opencv-python precisa de libGL; pyzbar precisa de libzbar
+# opencv-python precisa de libGL; pyzbar precisa de libzbar;
+# fontes DejaVu: load_font() usa arial no Windows e DejaVu no Linux/Docker
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     libzbar0 \
+    fonts-dejavu-core \
     curl \
   && rm -rf /var/lib/apt/lists/*
 
