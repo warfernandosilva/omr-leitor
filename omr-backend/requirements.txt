@@ -11,4 +11,4 @@ psycopg[binary]>=3.1
 python-jose[cryptography]>=3.3
 bcrypt>=4.1
 python-dotenv>=1.0
-pyzbar>=0.10; python_version < "3.13"  # sem wheel p/ 3.13+; reader.py usa fallback OpenCV
+pyzbar>=0.1.9; python_version < "3.13"  # última release é 0.1.9; reader.py usa fallback OpenCV se ausente
