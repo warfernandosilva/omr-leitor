@@ -17,6 +17,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      omr-net:
+        aliases: [db]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d omr"]
       interval: 10s
@@ -39,6 +42,8 @@ services:
     volumes:
       - omr-data:/app/omr-backend/data
       - omr-backups:/app/omr-backend/backups
+    networks:
+      - omr-net
     # Sem ports expostas: o acesso é via frontend (nginx proxy /api/).
     # Para debug temporário, descomente:
     # ports:
@@ -57,8 +62,14 @@ services:
       - "8080:80"
     depends_on:
       - backend
+    networks:
+      - omr-net
 
 volumes:
   pgdata:
   omr-data:
   omr-backups:
+
+networks:
+  omr-net:
+    driver: bridge

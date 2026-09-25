@@ -17,6 +17,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      omr-net:
+        aliases: [db]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d omr"]
       interval: 10s
@@ -38,6 +41,8 @@ services:
     volumes:
       - omr-data:/app/omr-backend/data
       - omr-backups:/app/omr-backend/backups
+    networks:
+      - omr-net
 
   frontend:
     image: ghcr.io/warfernandosilva/omr-leitor-frontend:latest
@@ -46,8 +51,17 @@ services:
       - "8080:80"
     depends_on:
       - backend
+    networks:
+      - omr-net
 
 volumes:
   pgdata:
   omr-data:
   omr-backups:
+
+# Rede explícita: o Custom Install do ZimaOS isola os containers por padrão
+# (sem ela, o backend não resolve o host 'db'). Todas as partes falam por
+# nome de serviço dentro desta rede bridge.
+networks:
+  omr-net:
+    driver: bridge
