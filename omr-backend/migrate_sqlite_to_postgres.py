@@ -4,7 +4,7 @@ from pathlib import Path
 from sqlalchemy import text
 from database import engine as pg_engine  # já é Postgres por causa do .env
 
-sqlite_path = Path("data/omr.db")
+sqlite_path = Path(__file__).resolve().parent / "data" / "omr.db"
 if not sqlite_path.exists():
     print("SQLite não encontrado, nada para migrar.")
     exit(0)
@@ -65,7 +65,7 @@ with pg_engine.connect() as c:
 
 # Backup do SQLite
 import shutil
-bak = Path("data/omr.db.sqlite.bak")
+bak = Path(__file__).resolve().parent / "data" / "omr.db.sqlite.bak"
 if not bak.exists():
     shutil.copy(str(sqlite_path), str(bak))
     print(f"Backup SQLite em {bak}")

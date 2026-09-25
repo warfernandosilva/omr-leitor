@@ -4,8 +4,13 @@ echo ========================================
 echo   OMR - Correcao de Cartoes-Resposta
 echo ========================================
 echo.
-
-set "PATH=C:\Users\Intel\AppData\Local\Temp\opencode\node\node-v20.11.0-win-x64;%PATH%"
+where node >nul 2>&1
+if errorlevel 1 (
+  echo [ERRO] Node.js nao encontrado no PATH.
+  echo Instale o Node 20+ em https://nodejs.org e rode de novo.
+  pause
+  exit /b 1
+)
 
 echo Iniciando servidor de desenvolvimento...
 echo Acesse: http://localhost:5173

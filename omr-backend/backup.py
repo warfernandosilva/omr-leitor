@@ -17,6 +17,10 @@ from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
 
 BACKUP_VERSION = 1
 
+# Dir absoluta (não depende do CWD: Agendador/Docker/systemd mudam o cwd)
+BASE_DIR = Path(__file__).resolve().parent
+BACKUP_DIR = BASE_DIR / "backups"
+
 
 def _dt(v: datetime | None) -> str | None:
     return v.isoformat() if v else None
@@ -198,9 +202,10 @@ def restore_from_file(path: str | Path) -> dict:
 def daily_backup(keep: int = 30) -> tuple[Path, dict]:
     """Backup diário com rotação: backups/omr-AAAA-MM-DD.json, mantém `keep`."""
     from datetime import date
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = date.today().isoformat()
-    path, counts = backup_to_file(Path("backups") / f"omr-{stamp}.json")
-    kept = sorted(Path("backups").glob("omr-*.json"))
+    path, counts = backup_to_file(BACKUP_DIR / f"omr-{stamp}.json")
+    kept = sorted(BACKUP_DIR.glob("omr-*.json"))
     for old in kept[:max(0, len(kept) - keep)]:
         try:
             old.unlink()
@@ -220,5 +225,6 @@ if __name__ == "__main__":
         p, counts = daily_backup(keep=args.keep)
     else:
         from datetime import datetime
-        p, counts = backup_to_file(args.file or f"backups/omr-{datetime.now().strftime('%Y-%m-%d-%H%M')}.json")
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        p, counts = backup_to_file(args.file or str(BACKUP_DIR / f"omr-{datetime.now().strftime('%Y-%m-%d-%H%M')}.json"))
     print(f"backup: {p} {counts}")

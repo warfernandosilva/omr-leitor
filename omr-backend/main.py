@@ -372,10 +372,10 @@ def admin_backup(admin: User = Depends(_require_admin)):
 
     O arquivo contém hashes de senha — nunca commitar, nunca expor.
     """
-    from backup import backup_to_file
+    from backup import backup_to_file, BACKUP_DIR
     from datetime import datetime
-    stamp = datetime.now().strftime("%Y-%m-%d-%H%M")
-    path, counts = backup_to_file(Path("backups") / f"backup-omr-{stamp}.json")
+    stamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    path, counts = backup_to_file(BACKUP_DIR / f"backup-omr-{stamp}.json")
     from fastapi.responses import FileResponse
     return FileResponse(
         path,
@@ -414,10 +414,10 @@ async def admin_restore(
     if not isinstance(data, dict) or "avaliacoes" not in data:
         return {"restored": False, "error": "JSON não parece um backup OMR (sem tabela 'avaliacoes')."}
     try:
-        from backup import backup_to_file, restore_all
+        from backup import backup_to_file, restore_all, BACKUP_DIR
         from datetime import datetime
         pre, _ = backup_to_file(
-            Path("backups") / f"pre-restore-{datetime.now().strftime('%Y-%m-%d-%H%M')}.json")
+            BACKUP_DIR / f"pre-restore-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.json")
     except Exception as e:
         return {"restored": False, "error": f"Falha no backup pré-restore ({type(e).__name__}) — nada foi alterado."}
     try:

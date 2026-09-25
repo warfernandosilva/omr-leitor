@@ -8,13 +8,11 @@ name: Publish ZimaOS images
 # senão o ZimaOS não puxa sem login.
 
 on:
-  push:
+  # Só publica se o CI passou (nunca imagem quebrada no ZimaOS).
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - "omr-app/**"
-      - "omr-backend/**"
-      - "docker-compose.yml"
-      - ".github/workflows/publish-zimaos.yml"
   workflow_dispatch:
 
 permissions:
@@ -23,6 +21,7 @@ permissions:
 
 jobs:
   backend:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -38,6 +37,7 @@ jobs:
           tags: ghcr.io/warfernandosilva/omr-leitor-backend:latest
 
   frontend:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -10,7 +10,7 @@ import {
 import {
   processImage as apiProcessImage, processMulti, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
-  getExamsFromDB, getExamFromDB, getDeletedExamsFromDB, deleteExamFromDB,
+  getExamsFromDB, getExamFromDB, getDeletedExamsFromDB, deleteExamFromDB, getApiBase,
   checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
@@ -690,7 +690,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           }
         } else {
           const msg = err instanceof Error ? err.message : String(err);
-          setError(`Falha ao gravar no banco: ${msg}. Verifique se o celular está em http://192.168.18.139:5173 (mesma Wi-Fi) e logado.`);
+          setError(`Falha ao gravar no banco: ${msg}. Verifique a conexão com ${getApiBase()} (mesma Wi-Fi no celular) e se está logado.`);
         }
       }
     } else if (studentName.trim() && activeExam) {
