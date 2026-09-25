@@ -20,7 +20,6 @@ Persistência (banco SQLite):
 from __future__ import annotations
 
 import io
-from datetime import datetime
 
 import cv2
 import numpy as np
@@ -32,17 +31,20 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import logging
 import json as _json
 import time as _time
 
-from database import DB_LABEL, get_db, init_db
+from database import DB_LABEL, SessionLocal, get_db, init_db
 from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
 import auth
 
 logger = logging.getLogger("omr")
+
+# Lápides anti-ressurreição: quantos dias uma prova excluída fica bloqueada no sync
+TOMBSTONE_DAYS = 30
 
 # ─── Observabilidade: buffer circular das últimas correções (sem PII, sem DB) ───
 OPS_BUFFER: deque = deque(maxlen=200)
@@ -102,6 +104,19 @@ for _db_attempt in range(30):
         _time.sleep(2)
 if _db_last_err is not None:
     raise _db_last_err
+
+# Purga lápides expiradas no boot (GET /api/exams/deleted é só leitura).
+try:
+    _purge_db = SessionLocal()
+    try:
+        _purge_db.execute(
+            delete(DeletedExam).where(DeletedExam.deleted_at < datetime.now() - timedelta(days=TOMBSTONE_DAYS))
+        )
+        _purge_db.commit()
+    finally:
+        _purge_db.close()
+except Exception as exc:  # noqa: BLE001 - purga é best-effort na subida
+    logger.warning("purga de lápides no boot falhou: %s", exc)
 
 
 class ProcessResponse(BaseModel):
@@ -1347,13 +1362,10 @@ def list_exams(limit: int = 100, offset: int = 0, db: Session = Depends(get_db),
 def list_deleted_exams(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """Lista lápides visíveis ao usuário (para os aparelhos removerem cópias locais).
 
-    Limpa lápides com mais de TOMBSTONE_DAYS dias — após isso um sync com o
-    mesmo external_id voltaria a criar a prova (comportamento seguro: ids são UUIDs).
+    Somente leitura: a purga das expiradas (>TOMBSTONE_DAYS) acontece no boot.
+    Após expirar, um sync com o mesmo external_id voltaria a criar a prova
+    (seguro: ids são UUIDs).
     """
-    from datetime import timedelta
-    cutoff = datetime.now() - timedelta(days=TOMBSTONE_DAYS)
-    db.execute(delete(DeletedExam).where(DeletedExam.deleted_at < cutoff))
-    db.commit()
     q = select(DeletedExam).order_by(DeletedExam.deleted_at.desc())
     if current_user.role != "admin":
         q = q.where((DeletedExam.owner_id == current_user.id) | (DeletedExam.owner_id.is_(None)))
@@ -1380,9 +1392,6 @@ def get_exam(external_id: str, db: Session = Depends(get_db), current_user: User
         "answer_key": av.answer_key,
         "total_alunos": total_alunos,
     }
-
-
-TOMBSTONE_DAYS = 30
 
 
 def _record_tombstone(db: Session, external_id: str, owner_id: int | None) -> None:

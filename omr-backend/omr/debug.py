@@ -63,7 +63,8 @@ def render_heatmap(rectified_bgr: np.ndarray, points: list[dict], max_side: int 
     try:
         h, w = rectified_bgr.shape[:2]
         scale = min(1.0, max_side / max(h, w))
-        img = rectified_bgr if scale >= 1.0 else cv2.resize(
+        # .copy(): sem isso o circle() desenharia IN-PLACE na retificada do resultado
+        img = rectified_bgr.copy() if scale >= 1.0 else cv2.resize(
             rectified_bgr, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
         for p in points:
             x, y = int(p["x"] * scale), int(p["y"] * scale)

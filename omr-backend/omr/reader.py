@@ -253,7 +253,8 @@ def _decode_card_qr(
                     return data
                 big_native = cv2.resize(native, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
                 return _decode_qr_from(big_native)
-        except cv2.error:
+        except (cv2.error, np.linalg.LinAlgError):
+            # matriz singular (foto degenerada) → sem QR, sem 500
             return None
 
     return None

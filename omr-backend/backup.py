@@ -199,19 +199,53 @@ def restore_from_file(path: str | Path) -> dict:
     return restore_all(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
+def _backup_lock():
+    """Lock anti-concorrência (2 agendadores / boot duplo). Devolve o Path ou None.
+
+    Lock obsoleto (>1h, ex.: PC desligou no meio) é considerado órfão e roubado.
+    """
+    import os
+    import time
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    lock = BACKUP_DIR / "backup.lock"
+    try:
+        os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        return lock
+    except FileExistsError:
+        pass
+    try:
+        age = time.time() - lock.stat().st_mtime
+    except OSError:
+        age = 0
+    if age < 3600:
+        return None  # outro backup em andamento
+    lock.unlink(missing_ok=True)
+    try:
+        os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        return lock
+    except FileExistsError:
+        return None
+
+
 def daily_backup(keep: int = 30) -> tuple[Path, dict]:
     """Backup diário com rotação: backups/omr-AAAA-MM-DD.json, mantém `keep`."""
     from datetime import date
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    stamp = date.today().isoformat()
-    path, counts = backup_to_file(BACKUP_DIR / f"omr-{stamp}.json")
-    kept = sorted(BACKUP_DIR.glob("omr-*.json"))
-    for old in kept[:max(0, len(kept) - keep)]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-    return path, counts
+    lock = _backup_lock()
+    if lock is None:
+        raise RuntimeError("outro backup em andamento (backup.lock) — pulando")
+    try:
+        stamp = date.today().isoformat()
+        path, counts = backup_to_file(BACKUP_DIR / f"omr-{stamp}.json")
+        kept = sorted(BACKUP_DIR.glob("omr-*.json"))
+        for old in kept[:max(0, len(kept) - keep)]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        return path, counts
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

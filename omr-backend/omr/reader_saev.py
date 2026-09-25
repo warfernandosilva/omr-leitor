@@ -27,7 +27,7 @@ from .template_saev import (
     PAGE_W, PAGE_H,
     SAEV_COLS_X, SAEV_NUM_W, SAEV_PITCH, SAEV_SIDE,
     SAEV_QR_POS, SAEV_QR_SIZE,
-    SAEV_MAX_QPS,
+    SAEV_MIN_QPS, SAEV_MAX_QPS,
     saev_block_rows, saev_bubble_center,
 )
 
@@ -91,7 +91,8 @@ def process_saev_image(
     debug: bool = False,
 ) -> OMRResult | None:
     """Pipeline completo OMR-SAEV. questions_per_subject = por disciplina (16..26)."""
-    qps = max(1, min(SAEV_MAX_QPS, int(questions_per_subject or 22)))
+    # Mesmo clamp do template (clamped_qps): qps<16 geraria grade incompatível com o cartão real
+    qps = max(SAEV_MIN_QPS, min(SAEV_MAX_QPS, int(questions_per_subject or 22)))
 
     _t0 = _time.perf_counter()
     det = detect_saev_corners(image)
