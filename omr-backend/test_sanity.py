@@ -14,6 +14,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from omr.sanity import sanity_check, DUP_MAX_FRAC
+from omr.template import generate_card, QUESTION_Y, PORT_X, MAT_X, BUBBLE_RADIUS
 
 
 def check(name: str, cond: bool, detail: str = ""):
@@ -79,7 +80,6 @@ else:
               f"dups={len(r.duplicate_questions)} frac={len(r.duplicate_questions)/44:.0%}")
 
 # ─── 3. Leituras legítimas não bloqueiam ───
-from omr.template import generate_card, QUESTION_Y, PORT_X, BUBBLE_RADIUS
 from omr.template_saev import SaevSpec, generate_saev_card, saev_block_rows, saev_bubble_center, SAEV_SIDE
 from omr.reader_saev import process_saev_image
 

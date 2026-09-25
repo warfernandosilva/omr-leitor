@@ -14,6 +14,7 @@ import cv2
 
 from omr.reader import process_image
 from omr.reader_saev import process_saev_image
+from omr.reader_herby import process_herby_image
 from omr.thresholds import compute_floor
 
 ap = argparse.ArgumentParser()
@@ -33,14 +34,18 @@ def eval_ratios(all_ratios, hi, tag):
 print(f"{'foto':60s} {'otsu':>7s} {'gap':>7s}")
 tot = {"otsu": 0.0, "gap": 0.0}
 n = 0
-for foto in sorted(glob.glob(os.path.join('calibration', '*.jpeg'))):
+for foto in sorted(glob.glob(os.path.join('calibration', '*.jp*g'))):
     img = cv2.imread(foto)
     if img is None:
         continue
     name = os.path.basename(foto)
     try:
-        if 'saev' in name.lower() or 'gabi' in name.lower() or 'novo' in name.lower() or 'img ' in name.lower():
+        name_lower = name.lower()
+        if 'saev' in name_lower or 'gabi' in name_lower or 'novo' in name_lower or 'img ' in name_lower:
             r = process_saev_image(img, questions_per_subject=args.qps, adaptive=True)
+            hi = 0.55
+        elif 'herby' in name_lower or '408' in name_lower or '20260925_16' in name_lower:
+            r = process_herby_image(img, questions_per_subject=args.qps, adaptive=True)
             hi = 0.55
         else:
             r = process_image(img, questions_per_subject=args.qps, layout_mode='dual', adaptive=True)

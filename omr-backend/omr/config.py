@@ -1,7 +1,7 @@
 """Constantes OMR compartilhadas — única fonte de verdade para thresholds."""
 FLOOR = 0.30
-MARGIN = 0.15
-LOW_CONF_THRESHOLD = FLOOR + 0.10
+MARGIN = 0.22
+LOW_CONF_THRESHOLD = 0.35
 BLUR_THRESHOLD = 35.0  # aviso; bloqueio só abaixo de BLUR_BLOCK
 BLUR_BLOCK = 15.0  # extremamente borrada — pipeline retorna None
 # Cascata de detecção ArUco (taxa de detecção é a métrica principal)
