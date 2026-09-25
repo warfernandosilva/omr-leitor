@@ -63,3 +63,28 @@ export function computeSubjectStats(
   if (single) result.mat.grade = 0;
   return result;
 }
+
+/**
+ * Totais da prova com a política ÚNICA de contagem (usada na correção,
+ * no salvamento e no resumo — não duplicar a regra em páginas):
+ * - sem resposta + duplicada não resolvida = ERRO;
+ * - sem resposta comum = branco;
+ * - resposta ≠ gabarito (ou sem gabarito) = erro.
+ */
+export function scoreAnswers(
+  exam: Pick<Exam, 'answerKey' | 'totalQuestions'>,
+  answers: Record<number, string>,
+  duplicateQuestions: number[] = [],
+): { correct: number; incorrect: number; blank: number } {
+  const key = exam.answerKey || {};
+  let correct = 0, incorrect = 0, blank = 0;
+  for (let q = 1; q <= exam.totalQuestions; q++) {
+    const a = answers[q];
+    if (!a) {
+      if (duplicateQuestions.includes(q)) incorrect++;
+      else blank++;
+    } else if (key[q] && a === key[q]) correct++;
+    else incorrect++;
+  }
+  return { correct, incorrect, blank };
+}

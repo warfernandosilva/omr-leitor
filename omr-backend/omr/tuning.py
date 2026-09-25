@@ -5,6 +5,13 @@ Cada modelo declara como calcula o divisor marcado/vazio:
 - score_set: 'flat' (todos os scores) ou 'bests' (melhor por questão);
 - hi: teto do divisor adaptativo;
 - force_adaptive: ignora o default OFF (hoje só SAEV, com evidência real).
+
+Evidências (de onde veio cada número):
+- FLOOR=0.30/MARGIN=0.15 (config.py): A/B first-large-gap x Otsu em 19 fotos
+  reais (compare_floors.py: Otsu gap médio 0.349) — fixo vence sem adaptativo.
+- SAEV bests/hi=0.55/force_adaptive: fotos reais 43-44/44 no adaptativo vs
+  18/41 no fixo (evidência de campo; bolhas quadradas têm contraste menor).
+- Demais modelos: default conservador até haver evidência contrária.
 """
 from dataclasses import dataclass
 

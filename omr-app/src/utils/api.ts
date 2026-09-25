@@ -34,11 +34,17 @@ export function getApiBase(): string {
   return '';
 }
 
-async function fetchTimeout(input: string, init: RequestInit, ms = 10000): Promise<Response> {
+/** Fetch com timeout e mensagem amigável — usar em TODAS as chamadas (nunca fetch cru). */
+async function fetchTimeout(input: string, init: RequestInit, ms = 15000): Promise<Response> {
   const ctrl = new AbortController();
   const t = window.setTimeout(() => ctrl.abort(), ms);
   try {
     return await fetch(input, { ...init, signal: ctrl.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(`Tempo esgotado falando com a API (${Math.round(ms / 1000)}s). Verifique a conexão e tente de novo.`);
+    }
+    throw err;
   } finally {
     window.clearTimeout(t);
   }
@@ -147,7 +153,7 @@ export interface TemplateCoords {
 
 export async function checkHealth(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/health`, { headers: authHeaders() });
+    const res = await fetchTimeout(`${API_BASE}/api/health`, { headers: authHeaders() });
     return res.ok;
   } catch {
     return false;
@@ -264,7 +270,7 @@ export async function gradeAnswers(
   answerKey: Record<number, string>,
   gradeScale: string = '0-10',
 ): Promise<GradeResult> {
-  const res = await fetch(`${API_BASE}/api/omr/grade`, {
+  const res = await fetchTimeout(`${API_BASE}/api/omr/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -282,7 +288,7 @@ export async function generateCard(
   subjectMat: string,
   format: 'PNG' | 'PDF' = 'PNG',
 ): Promise<Blob> {
-  const res = await fetch(`${API_BASE}/api/card/generate`, {
+  const res = await fetchTimeout(`${API_BASE}/api/card/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -290,13 +296,13 @@ export async function generateCard(
       subject_mat: subjectMat,
       format,
     }),
-  });
+  }, 120000);
 
   return res.blob();
 }
 
 export async function getTemplateCoords(): Promise<TemplateCoords> {
-  const res = await fetch(`${API_BASE}/api/template/coords`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/template/coords`, { headers: authHeaders() });
   return res.json();
 }
 
@@ -308,7 +314,7 @@ export async function generateBlankCard(
   format: 'PNG' | 'PDF',
   opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar' | 'saev'; sae?: SaeSpec },
 ): Promise<Blob> {
-  const res = await fetch(`${API_BASE}/api/card/generate`, {
+  const res = await fetchTimeout(`${API_BASE}/api/card/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -320,7 +326,7 @@ export async function generateBlankCard(
       template: opts?.template ?? 'padrao',
       sae: opts?.sae ? { ...opts.sae, n_questoes: opts?.questionsPerSubject ?? 26 } : null,
     }),
-  });
+  }, 120000);
   if (!res.ok) throw new Error(`Falha ao gerar cartão no servidor (${res.status})`);
   return res.blob();
 }
@@ -410,7 +416,7 @@ export async function syncExam(exam: {
   templateType?: 'padrao' | 'sae' | 'colar' | 'saev';
   saeSpec?: SaeSpec;
 }): Promise<SyncExamResult> {
-  const res = await fetch(`${API_BASE}/api/exams/sync`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -437,7 +443,7 @@ export interface DeletedExamInfo {
 
 /** Lápides de provas excluídas (para os aparelhos removerem cópias locais sem ressuscitar). */
 export async function getDeletedExamsFromDB(): Promise<DeletedExamInfo[]> {
-  const res = await fetch(`${API_BASE}/api/exams/deleted`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/exams/deleted`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Falha ao listar exclusões (${res.status})`);
   return res.json();
 }
@@ -452,7 +458,7 @@ export async function importStudentsAPI(
   examExternalId: string,
   alunos: { nome: string; matricula?: string | null }[],
 ): Promise<ImportStudentsResult> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/students/import`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/students/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -475,7 +481,7 @@ export interface GenerateGabaritosResult {
 }
 
 export async function generateGabaritos(examExternalId: string): Promise<GenerateGabaritosResult> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/generate`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/generate`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -488,10 +494,10 @@ export async function generateGabaritos(examExternalId: string): Promise<Generat
 }
 
 export async function generateGabaritosPDF(examExternalId: string): Promise<Blob> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/pdf`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/pdf`, {
     method: 'POST',
     headers: authHeaders(),
-  });
+  }, 120000);
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
@@ -501,7 +507,7 @@ export async function generateGabaritosPDF(examExternalId: string): Promise<Blob
 }
 
 export async function fetchGabaritos(examExternalId: string): Promise<GabaritosListResult> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`Falha ao consultar gabaritos (${res.status})`);
@@ -515,7 +521,7 @@ export interface ResetExamResult {
 }
 
 export async function resetExam(examExternalId: string): Promise<ResetExamResult> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/students`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/students`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -528,7 +534,7 @@ export async function resetExam(examExternalId: string): Promise<ResetExamResult
 }
 
 export async function deleteAluno(alunoId: number): Promise<{ nome: string; gabaritos_removidos: number }> {
-  const res = await fetch(`${API_BASE}/api/alunos/${alunoId}`, { method: 'DELETE', headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/alunos/${alunoId}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
@@ -539,7 +545,7 @@ export async function deleteAluno(alunoId: number): Promise<{ nome: string; gaba
 }
 
 export async function lookupCodigo(codigo: string): Promise<LookupResult> {
-  const res = await fetch(`${API_BASE}/api/gabaritos/${encodeURIComponent(codigo)}/lookup`, {
+  const res = await fetchTimeout(`${API_BASE}/api/gabaritos/${encodeURIComponent(codigo)}/lookup`, {
     headers: authHeaders(),
   });
   if (res.status === 404) return { found: false };
@@ -561,7 +567,7 @@ export async function saveGabaritoResultado(
   payload: ResultadoPayload,
   overwrite = false,
 ): Promise<void> {
-  const res = await fetch(
+  const res = await fetchTimeout(
     `${API_BASE}/api/gabaritos/${encodeURIComponent(codigo)}/resultado?overwrite=${overwrite}`,
     {
       method: 'POST',
@@ -599,20 +605,20 @@ export interface DBExam {
 }
 
 export async function getExamsFromDB(): Promise<DBExam[]> {
-  const res = await fetch(`${API_BASE}/api/exams`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/exams`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Falha ao listar avaliações (${res.status})`);
   return res.json();
 }
 
 /** Busca UMA avaliação pelo external_id (para trazer a prova do QR quando ela não está neste aparelho). */
 export async function getExamFromDB(externalId: string): Promise<DBExam> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Falha ao buscar avaliação (${res.status})`);
   return res.json();
 }
 
 export async function deleteExamFromDB(externalId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}`, { method: 'DELETE', headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
@@ -621,7 +627,7 @@ export async function deleteExamFromDB(externalId: string): Promise<void> {
 }
 
 export async function putAnswerKeyDB(externalId: string, answerKey: Record<string, string>, gradeScale?: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/answer-key`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/answer-key`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ answer_key: answerKey, grade_scale: gradeScale }),
@@ -649,13 +655,13 @@ export interface DBResultado {
 }
 
 export async function getResultadosFromDB(): Promise<DBResultado[]> {
-  const res = await fetch(`${API_BASE}/api/resultados`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/resultados`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Falha ao listar resultados (${res.status})`);
   return res.json();
 }
 
 export async function deleteResultadoDB(codigo: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/gabaritos/${encodeURIComponent(codigo)}/resultado`, { method: 'DELETE', headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/gabaritos/${encodeURIComponent(codigo)}/resultado`, { method: 'DELETE', headers: authHeaders() });
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
@@ -667,7 +673,7 @@ export async function postAvulsoResultado(
   externalId: string,
   payload: { nome: string; matricula?: string | null; respostas?: Record<string, string>; acertos?: number; erros?: number; brancos?: number; nota?: number; observacoes?: string },
 ): Promise<{ codigo_unico: string }> {
-  const res = await fetch(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/resultados/avulso`, {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/resultados/avulso`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
@@ -745,7 +751,7 @@ export async function login(email: string, password: string): Promise<{ access_t
 }
 
 export async function getMe(): Promise<AuthUser> {
-  const res = await fetch(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/auth/me`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Falha ao validar sessão (${res.status})`);
   const user = await res.json();
   localStorage.setItem('omr_user', JSON.stringify(user));
@@ -770,7 +776,7 @@ export interface AdminUser {
 }
 
 export async function adminListUsers(): Promise<AdminUser[]> {
-  const res = await fetch(`${API_BASE}/api/admin/users`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/admin/users`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`Falha ao listar usuários (${res.status})`);
   return res.json();
 }
@@ -779,7 +785,7 @@ export async function adminUpdateUser(
   userId: number,
   patch: { role?: string; is_active?: boolean; password?: string },
 ): Promise<AdminUser> {
-  const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+  const res = await fetchTimeout(`${API_BASE}/api/admin/users/${userId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(patch),
@@ -793,7 +799,7 @@ export async function adminUpdateUser(
 }
 
 export async function adminDeleteUser(userId: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+  const res = await fetchTimeout(`${API_BASE}/api/admin/users/${userId}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -815,7 +821,7 @@ export interface RestoreCounts {
 
 /** Baixa o dump JSON do banco (abre o diálogo de download). */
 export async function adminDownloadBackup(): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/admin/backup`, { headers: authHeaders() });
+  const res = await fetchTimeout(`${API_BASE}/api/admin/backup`, { headers: authHeaders() }, 120000);
   if (!res.ok) throw new Error(`Falha ao gerar backup (${res.status})`);
   const blob = await res.blob();
   const cd = res.headers.get('content-disposition') || '';
@@ -839,11 +845,11 @@ export async function adminRestoreBackup(
   const formData = new FormData();
   formData.append('file', file);
   formData.append('confirm', confirm ? 'true' : 'false');
-  const res = await fetch(`${API_BASE}/api/admin/restore`, {
+  const res = await fetchTimeout(`${API_BASE}/api/admin/restore`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
-  });
+  }, 120000);
   if (!res.ok) throw new Error(`Falha no restore (${res.status})`);
   return res.json();
 }

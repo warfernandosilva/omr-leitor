@@ -14,7 +14,7 @@ import {
   checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
-import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
+import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange, scoreAnswers } from '../utils/exam';
 import { useAutoCapture } from '../hooks/useAutoCapture';
 import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
 import {
@@ -67,18 +67,8 @@ function countResults(
   answers: Record<number, string>,
   dupList: number[],
 ): { correct: number; incorrect: number; blank: number } {
-  let correct = 0, incorrect = 0, blank = 0;
-  const key = exam.answerKey || {};
-  for (let q = 1; q <= exam.totalQuestions; q++) {
-    const a = answers[q];
-    if (!a) {
-      // Política: duplicada não resolvida conta como ERRO
-      if (dupList.includes(q)) incorrect++;
-      else blank++;
-    } else if (key[q] && a === key[q]) correct++;
-    else incorrect++;
-  }
-  return { correct, incorrect, blank };
+  // Regra única em utils/exam.ts (não duplicar a política aqui)
+  return scoreAnswers(exam, answers, dupList);
 }
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
@@ -631,27 +621,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       return;
     }
     // §18 — gabarito de outra avaliação não pode ser corrigido aqui
-    if (identified?.kind === 'wrong_exam') return;
+    if (identified?.kind === 'wrong_exam') {
+      setError(`Este cartão pertence à prova "${identified.examTitle}". Selecione a prova correta para corrigir.`);
+      return;
+    }
 
-    const answerKey = activeExam.answerKey || {};
     const dupList = omrResult?.duplicateQuestions ?? [];
     const dupMarks = omrResult?.duplicateMarks ?? {};
-    let correctCount = 0;
-    let incorrectCount = 0;
-    let blankCount = 0;
-
-    for (let q = 1; q <= activeExam.totalQuestions; q++) {
-      const studentAnswer = manualAnswers[q];
-      if (!studentAnswer) {
-        // Política: duplicada não resolvida conta como ERRO
-        if (dupList.includes(q)) incorrectCount++;
-        else blankCount++;
-      } else if (answerKey[q] && studentAnswer === answerKey[q]) {
-        correctCount++;
-      } else {
-        incorrectCount++;
-      }
-    }
+    const { correct: correctCount, incorrect: incorrectCount, blank: blankCount } =
+      scoreAnswers(activeExam, manualAnswers, dupList);
 
     const grade = calculateGrade(correctCount, activeExam.totalQuestions, activeExam.gradeScale);
     const observacoes = dupList.length
