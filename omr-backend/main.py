@@ -36,6 +36,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import logging
 import json as _json
+import time as _time
 
 from database import DB_LABEL, get_db, init_db
 from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
@@ -87,7 +88,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-init_db()
+# O banco pode subir depois do backend (ex: ZimaOS ignora depends_on):
+# tenta por ~60s antes de desistir, em vez de morrer no primeiro boot.
+_db_last_err: Exception | None = None
+for _db_attempt in range(30):
+    try:
+        init_db()
+        _db_last_err = None
+        break
+    except Exception as exc:  # noqa: BLE001 - qualquer falha de conexão na subida
+        _db_last_err = exc
+        logger.warning("DB indisponível (tentativa %d/30): %s", _db_attempt + 1, exc)
+        _time.sleep(2)
+if _db_last_err is not None:
+    raise _db_last_err
 
 
 class ProcessResponse(BaseModel):
