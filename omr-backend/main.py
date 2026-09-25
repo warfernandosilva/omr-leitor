@@ -72,6 +72,7 @@ from omr.template_saev import (
 from omr.template_herby import (
     HerbySpec, build_herby_batch_pdf, HERBY_COORDS,
     HERBY_MIN_QPS, HERBY_MAX_QPS,
+    generate_herby_card_bytes,
 )
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
@@ -899,6 +900,21 @@ def generate_card_endpoint(req: CardRequest, current_user: User = Depends(auth.g
         else:
             data = generate_saev_card_bytes("PNG", spec)
             media, fname = "image/png", "cartao-saev.png"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    if req.template == "herby":
+        qps = max(HERBY_MIN_QPS, min(HERBY_MAX_QPS, int(req.questions_per_subject or 22)))
+        spec = HerbySpec(n_questoes=qps)
+        if fmt == "PDF":
+            data = generate_herby_card_bytes("PDF", spec)
+            media, fname = "application/pdf", "cartao-herby.pdf"
+        else:
+            data = generate_herby_card_bytes("PNG", spec)
+            media, fname = "image/png", "cartao-herby.png"
         return StreamingResponse(
             io.BytesIO(data),
             media_type=media,
