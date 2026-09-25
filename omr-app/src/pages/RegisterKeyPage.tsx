@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { AppView, isSaeExam, isSaevExam } from '../types';
+import { AppView, isSaeExam, isSaevExam, isHerbyExam } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { putAnswerKeyDB, processImage as apiProcessImage, loadAdaptiveFlag } from '../utils/api';
@@ -75,7 +75,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
     setReadError(null);
     setReadSummary(null);
     try {
-      const template = activeExam.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : 'padrao';
+      const template = activeExam.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby' : 'padrao';
       const res = await apiProcessImage(
         file,
         activeExam.questionsPerSubject,

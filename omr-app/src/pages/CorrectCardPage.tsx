@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, templateLabel } from '../types';
+import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, isHerbyExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
@@ -218,10 +218,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   // ─── Guia de captura adaptado ao gabarito da prova ───
   // SAEV usa adaptativo sempre (evidência: fotos reais 43-44/44 vs 18/41 no fixo)
-  const useAdaptive = adaptive || isSaevExam(activeExam);
+  const useAdaptive = adaptive || isSaevExam(activeExam) || isHerbyExam(activeExam);
   const captureTemplate = activeExam?.templateType === 'colar'
     ? 'colar'
-    : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : 'padrao';
+    : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby' : 'padrao';
   const guideThresholds = useMemo(() => thresholdsFor(captureTemplate), [captureTemplate]);
   // Mede o visor para desenhar o maior A4 sem distorção
   const viewRef = useRef<HTMLDivElement>(null);
@@ -255,8 +255,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // cruzado) e avisa se divergir do modelo da prova selecionada.
   // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay;
   // SAEV tem família própria (quadrados). Mapeia para o modelo canônico.
-  const canonicalModel = (t?: string): 'sae' | 'saev' | 'padrao' =>
-    t === 'sae' || t === 'colar' ? 'sae' : t === 'saev' ? 'saev' : 'padrao';
+  const canonicalModel = (t?: string): 'sae' | 'saev' | 'herby' | 'padrao' =>
+    t === 'sae' || t === 'colar' ? 'sae' : t === 'saev' ? 'saev' : t === 'herby' ? 'herby' : 'padrao';
   const overlayModel = omrResult?.templateUsed
     ? canonicalModel(omrResult.templateUsed)
     : canonicalModel(activeExam?.templateType);

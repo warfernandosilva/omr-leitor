@@ -11,7 +11,7 @@
 import { GuideThresholds, DEFAULT_THRESHOLDS } from './frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT } from './card-template';
 
-export type CaptureTemplate = 'padrao' | 'sae' | 'colar' | 'saev';
+export type CaptureTemplate = 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
 
 export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT; // ≈0.7071 (A4 retrato)
 
@@ -50,6 +50,12 @@ const ANCHOR_BOX: Record<CaptureTemplate, { x0: number; y0: number; x1: number; 
   saev: {
     x0: 72.5 / CARD_WIDTH, y0: 507.5 / CARD_HEIGHT,
     x1: 1375.5 / CARD_WIDTH, y1: 1942.5 / CARD_HEIGHT,
+  },
+  // QR + quadrados Herby: QR head (121,76) 243px, QR foot (458,1849) 142px
+  // Grade: 4 subcolunas × ceil(qps/2) linhas, quadrados 28px, pitch 40
+  herby: {
+    x0: 121 / CARD_WIDTH, y0: 76 / CARD_HEIGHT,
+    x1: 1327 / CARD_WIDTH, y1: 1950 / CARD_HEIGHT,
   },
 };
 
@@ -90,10 +96,10 @@ export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): A
 }
 
 // Limiares do detector por modelo (SAE/Colar: âncoras pequenas, quad menor;
-// SAEV: âncoras grandes, mesma ordem de grandeza do padrão)
+// SAEV/Herby: âncoras grandes/QR, mesma ordem de grandeza do padrão)
 export function thresholdsFor(template: CaptureTemplate): GuideThresholds {
   if (template === 'padrao') return { ...DEFAULT_THRESHOLDS };
-  if (template === 'saev') return { ...DEFAULT_THRESHOLDS };
+  if (template === 'saev' || template === 'herby') return { ...DEFAULT_THRESHOLDS };
   return {
     ...DEFAULT_THRESHOLDS,
     minAreaFrac: 0.00012, // quadrado 40px ≈ 2.8% da folha (vs ArUco 7.2%)
@@ -107,5 +113,6 @@ export function captureTemplateFor(templateType?: string): CaptureTemplate {
   if (templateType === 'sae') return 'sae';
   if (templateType === 'colar') return 'colar';
   if (templateType === 'saev') return 'saev';
+  if (templateType === 'herby') return 'herby';
   return 'padrao';
 }

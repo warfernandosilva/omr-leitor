@@ -9,10 +9,12 @@ export interface Exam {
   gradeScale: '0-10' | '0-100' | 'count';
   answerKey: Record<number, string> | null;
   layoutMode?: 'dual' | 'single';
-  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua), 'colar' (Colar em Avaliação, só grade) ou 'saev' (Gabarito SAEV, dual 16+16 a 26+26). */
-  templateType?: 'padrao' | 'sae' | 'colar' | 'saev';
+  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua), 'colar' (Colar em Avaliação, só grade), 'saev' (Gabarito SAEV, dual 16+16 a 26+26), 'herby' (Gabarito Herby, dual 1+1 a 26+26, QR duplo). */
+  templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
   /** Cabeçalho editável do cartão SAE (só quando templateType === 'sae'). */
   saeSpec?: SaeSpec;
+  /** Cabeçalho editável do cartão Herby (só quando templateType === 'herby'). */
+  herbySpec?: HerbySpec;
 }
 
 /** Cabeçalho editável do cartão "Avaliação Contínua" (espelha SaeSpec do backend). */
@@ -40,6 +42,25 @@ export const DEFAULT_SAE_SPEC: SaeSpec = {
   codigo_barras: '6357256532',
 };
 
+/** Cabeçalho editável do cartão "Gabarito Herby" (espelha HerbySpec do backend). */
+export interface HerbySpec {
+  evento: string;
+  serie: string;
+  caderno: string;
+  turma: string;
+  magic_base: string;
+  n_questoes: number;
+}
+
+export const DEFAULT_HERBY_SPEC: HerbySpec = {
+  evento: '',
+  serie: '',
+  caderno: '',
+  turma: '',
+  magic_base: '',
+  n_questoes: 22,
+};
+
 export const SAE_MAX_QUESTIONS = 28;
 
 /** qps por disciplina no Gabarito SAEV (dual). */
@@ -54,6 +75,10 @@ export function isSaevExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'saev';
 }
 
+export function isHerbyExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
+  return exam?.templateType === 'herby';
+}
+
 /** SAE e Colar compartilham a mesma geometria de grade/âncoras (leitura e overlay). */
 export function isSaeFamilyExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'sae' || exam?.templateType === 'colar';
@@ -63,6 +88,7 @@ export function templateLabel(t?: Exam['templateType']): string {
   if (t === 'sae') return 'Avaliação Contínua';
   if (t === 'colar') return 'Colar em Avaliação';
   if (t === 'saev') return 'Gabarito SAEV';
+  if (t === 'herby') return 'Gabarito Herby';
   return 'Padrão';
 }
 

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
-import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, isSaeExam, templateLabel } from '../types';
+import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, HerbySpec, isSaeExam, isHerbyExam, templateLabel } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { generateBlankCard, checkHealth, syncExam } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
@@ -37,11 +37,15 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
     : exam ?? undefined;
 
   const isSae = isSaeExam(activeExam);
-  const isColar = activeExam?.templateType === 'colar';
+const isHerby = isHerbyExam(activeExam);
+const isColar = activeExam?.templateType === 'colar';
 
-  // Carrega o cabeçalho SAE salvo na prova ao trocar de prova
+// Carrega o cabeçalho SAE salvo na prova ao trocar de prova
+const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC });
+
   useEffect(() => {
     setSaeSpec({ ...DEFAULT_SAE_SPEC, ...(activeExam?.saeSpec ?? {}) });
+    setHerbySpec({ ...DEFAULT_HERBY_SPEC, ...(activeExam?.herbySpec ?? {}) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExamId]);
 
@@ -62,6 +66,8 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
     syncExam(updated).catch(() => {});
   };
 
+  
+
   // PNG oficial do backend para o preview react-pdf (mesma imagem dos gabaritos)
   useEffect(() => {
     if (!showPreview || !activeExam) {
@@ -78,7 +84,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
           activeExam.subjectLP,
           activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
           'PNG',
-          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined },
+          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined },
         );
         if (cancelled) return;
         urlRef.current = URL.createObjectURL(blob);
@@ -105,7 +111,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
         activeExam.subjectLP,
         activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
         'PDF',
-        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined },
+        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined },
       );
     } catch {
       return null;
@@ -142,7 +148,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
     try {
       const blob = await buildServerPdf();
       if (blob) {
-        downloadBlob(blob, `${isColar ? 'colar-avaliacao' : isSae ? 'cartao-sae' : 'cartao-resposta'}-${cardId}.pdf`);
+        downloadBlob(blob, `${isColar ? 'colar-avaliacao' : isSae ? 'cartao-sae' : isHerby ? 'cartao-herby' : 'cartao-resposta'}-${cardId}.pdf`);
         setSourceNote('PDF gerado pelo servidor — idêntico aos gabaritos oficiais (sem QR/nome).');
         return;
       }

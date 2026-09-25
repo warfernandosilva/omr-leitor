@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, DEFAULT_SAE_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS } from '../types';
+import { AppView, Exam, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS } from '../types';
 import {
   saveExam, getExams, deleteExam, applyRemoteExams,
   getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
@@ -17,7 +17,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const { user } = useAuth();
   const [exams, setExams] = useState(() => getExams(user?.id));
   const [name, setName] = useState('');
-  const [templateType, setTemplateType] = useState<'padrao' | 'sae' | 'colar' | 'saev'>('padrao');
+  const [templateType, setTemplateType] = useState<'padrao' | 'sae' | 'colar' | 'saev' | 'herby'>('padrao');
   const [layoutMode, setLayoutMode] = useState<'dual' | 'single'>('dual');
   const [subjectLP, setSubjectLP] = useState('LÍNGUA PORTUGUESA');
   const [subjectMat, setSubjectMat] = useState('MATEMÁTICA');
@@ -31,10 +31,12 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isSae = templateType === 'sae';
   const isColar = templateType === 'colar';
   const isSaev = templateType === 'saev';
+  const isHerby = templateType === 'herby';
   const isCustom = isSae || isColar;
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
-  const maxQps = isSaev ? SAEV_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
-  const minQps = isSaev ? SAEV_MIN_QPS : 1;
+  // Herby é sempre dual 1+1 a 26+26 por disciplina
+  const maxQps = isSaev || isHerby ? SAEV_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
+  const minQps = isSaev || isHerby ? SAEV_MIN_QPS : 1;
   const totalQuestions = isCustom || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
 
   const refreshFromServer = async (silent: boolean) => {
@@ -108,9 +110,9 @@ export default function NewExamPage({ onNavigate }: Props) {
     setQuestionsPerSubject(v);
   };
 
-  const handleTemplateChange = (t: 'padrao' | 'sae' | 'colar' | 'saev') => {
+  const handleTemplateChange = (t: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby') => {
     setTemplateType(t);
-    if (t === 'saev') {
+    if (t === 'saev' || t === 'herby') {
       setLayoutMode('dual');
       setQuestionsPerSubject((q) => Math.max(SAEV_MIN_QPS, Math.min(SAEV_MAX_QPS, q || 22)));
     } else if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
@@ -119,7 +121,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   };
 
   const handleModeChange = (mode: 'dual' | 'single') => {
-    if (templateType === 'saev' && mode === 'single') return; // SAEV é sempre dual
+    if ((templateType === 'saev' || templateType === 'herby') && mode === 'single') return; // SAEV/Herby sempre dual
     setLayoutMode(mode);
     if (questionsPerSubject > (mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT)) {
       setQuestionsPerSubject(mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT);
@@ -144,6 +146,7 @@ export default function NewExamPage({ onNavigate }: Props) {
       layoutMode: isCustom ? 'single' : layoutMode,
       templateType,
       saeSpec: isSae ? { ...DEFAULT_SAE_SPEC } : undefined,
+      herbySpec: isHerby ? { ...DEFAULT_HERBY_SPEC } : undefined,
     };
 
     saveExam(exam, user?.id);
@@ -186,7 +189,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const handleEdit = (exam: Exam) => {
     setEditingId(exam.id);
     setName(exam.name);
-    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' ? exam.templateType : 'padrao');
+    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' || exam.templateType === 'herby' ? exam.templateType : 'padrao');
     setLayoutMode(exam.layoutMode === 'single' ? 'single' : 'dual');
     setSubjectLP(exam.subjectLP);
     setSubjectMat(exam.subjectMat);
@@ -271,6 +274,18 @@ export default function NewExamPage({ onNavigate }: Props) {
                 Colar em Avaliação
                 <span className="block text-xs font-normal text-gray-400">só o gabarito · até {SAE_MAX_QUESTIONS} questões</span>
               </button>
+              <button
+                type="button"
+                onClick={() => handleTemplateChange('herby')}
+                className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                  templateType === 'herby'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Gabarito Herby
+                <span className="block text-xs font-normal text-gray-400">LP + MAT · QR duplo · 1 a 26 por disciplina</span>
+              </button>
             </div>
           </div>
 
@@ -342,8 +357,9 @@ export default function NewExamPage({ onNavigate }: Props) {
             />
             <p className="text-xs text-gray-400 mt-1">
               {minQps} a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.
-              {!isCustom && layoutMode === 'dual' && templateType !== 'saev' && ' O padrão do layout é 22 por disciplina.'}
+              {!isCustom && layoutMode === 'dual' && templateType !== 'saev' && templateType !== 'herby' && ' O padrão do layout é 22 por disciplina.'}
               {templateType === 'saev' && ' Gabarito SAEV: LP + MAT com QR do sistema e nome impresso.'}
+              {templateType === 'herby' && ' Gabarito Herby: LP + MAT · QR duplo (cabeçalho + rodapé) · 1 a 26 por disciplina · sem ArUco.'}
               {isSae && ' O cabeçalho do cartão (caderno, série, QR etc.) é editado na tela de geração.'}
               {isColar && ' Somente o gabarito, sem cabeçalho — para colar na avaliação. Correção com identificação manual.'}
             </p>

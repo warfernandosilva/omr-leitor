@@ -160,7 +160,7 @@ export async function checkHealth(): Promise<boolean> {
   }
 }
 
-import type { SaeSpec } from '../types';
+import type { SaeSpec, HerbySpec } from '../types';
 
 /** Mapeia a resposta do backend (snake_case → camelCase). Comum a process e process-multi. */
 function mapProcessData(data: Record<string, unknown>): ProcessResult {
@@ -215,7 +215,7 @@ export async function processImage(
   file: File,
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
-  template?: 'padrao' | 'sae' | 'colar' | 'saev',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby',
   adaptive?: boolean,
   debug?: boolean,
 ): Promise<ProcessResult> {
@@ -242,7 +242,7 @@ export async function processMulti(
   files: File[],
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
-  template?: 'padrao' | 'sae' | 'colar' | 'saev',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby',
   adaptive?: boolean,
   debug?: boolean,
 ): Promise<ProcessResult> {
@@ -312,7 +312,7 @@ export async function generateBlankCard(
   subjectLp: string,
   subjectMat: string,
   format: 'PNG' | 'PDF',
-  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar' | 'saev'; sae?: SaeSpec },
+  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby'; sae?: SaeSpec; herby?: HerbySpec },
 ): Promise<Blob> {
   const res = await fetchTimeout(`${API_BASE}/api/card/generate`, {
     method: 'POST',
@@ -325,6 +325,7 @@ export async function generateBlankCard(
       layout_mode: opts?.layoutMode ?? 'dual',
       template: opts?.template ?? 'padrao',
       sae: opts?.sae ? { ...opts.sae, n_questoes: opts?.questionsPerSubject ?? 26 } : null,
+      herby: opts?.herby ? { ...opts.herby, n_questoes: opts?.questionsPerSubject ?? 22 } : null,
     }),
   }, 120000);
   if (!res.ok) throw new Error(`Falha ao gerar cartão no servidor (${res.status})`);
@@ -413,8 +414,9 @@ export async function syncExam(exam: {
   subjectMat: string;
   questionsPerSubject?: number;
   layoutMode?: 'dual' | 'single';
-  templateType?: 'padrao' | 'sae' | 'colar' | 'saev';
+  templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
   saeSpec?: SaeSpec;
+  herbySpec?: HerbySpec;
 }): Promise<SyncExamResult> {
   const res = await fetchTimeout(`${API_BASE}/api/exams/sync`, {
     method: 'POST',
@@ -429,6 +431,9 @@ export async function syncExam(exam: {
       template: exam.templateType ?? 'padrao',
       sae: exam.templateType === 'sae' && exam.saeSpec
         ? { ...exam.saeSpec, n_questoes: exam.questionsPerSubject ?? 26 }
+        : null,
+      herby: exam.templateType === 'herby' && exam.herbySpec
+        ? { ...exam.herbySpec, n_questoes: exam.questionsPerSubject ?? 22 }
         : null,
     }),
   });

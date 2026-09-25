@@ -63,7 +63,9 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
   const students = result?.students ?? [];
   const n = students.length;
   const isColarExam = activeExam?.templateType === 'colar';
+const isHerbyExam = activeExam?.templateType === 'herby';
   const COLAR_BLOCK_MSG = 'Provas "Colar em Avaliação" são avulsas (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
+const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Gerenciar Avaliação (com QR duplo + código único por aluno).';
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -130,6 +132,7 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
   const handleGenerate = async () => {
     if (!activeExam || !result || n === 0) return;
     if (isColarExam) { setGenError(COLAR_BLOCK_MSG); return; }
+    if (isHerbyExam) { setGenError(HERBY_BLOCK_MSG); return; }
     setGenError(null);
     setStep('generating');
     try {

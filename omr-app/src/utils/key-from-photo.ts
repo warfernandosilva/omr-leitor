@@ -21,7 +21,7 @@ export interface KeyFromPhoto {
 export function keyFromProcessResult(
   result: ProcessResult,
   totalQuestions: number,
-  expectedTemplate?: 'padrao' | 'sae' | 'colar' | 'saev',
+  expectedTemplate?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby',
 ): KeyFromPhoto {
   const inRange = (q: number) => q >= 1 && q <= totalQuestions;
 
