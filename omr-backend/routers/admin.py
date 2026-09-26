@@ -48,7 +48,7 @@ def admin_backup(admin: User = Depends(_require_admin)):
 
 
 @router.post("/api/admin/restore")
-async def admin_restore(
+def admin_restore(
     file: UploadFile = File(...),
     confirm: bool = Form(False),
     admin: User = Depends(_require_admin),
@@ -56,31 +56,42 @@ async def admin_restore(
     """Restaura um dump (upsert por id). Exige confirm=true.
 
     Antes de restaurar, grava backup pré-restore automático em backups/.
+
+    `def` (não `async`): restore_all + backup_to_file são bloqueantes (DB +
+    disco); o FastAPI executa no threadpool sem travar o event loop.
     """
     if not confirm:
-        return {"restored": False,
-                "error": "Confirmação exigida: reenvie com confirm=true. O restore atualiza registros existentes."}
-    contents = await file.read()
+        raise HTTPException(status_code=400, detail="Confirmação exigida: reenvie com confirm=true. O restore atualiza registros existentes.")
+    contents = file.file.read()
     if not contents or len(contents) > 50 * 1024 * 1024:
-        return {"restored": False, "error": "Arquivo vazio ou maior que 50MB."}
+        raise HTTPException(status_code=400, detail="Arquivo vazio ou maior que 50MB.")
     try:
         data = _json.loads(contents.decode("utf-8"))
     except Exception:
-        return {"restored": False, "error": "Arquivo inválido (não é um JSON de backup)."}
+        raise HTTPException(status_code=400, detail="Arquivo inválido (não é um JSON de backup).")
     if not isinstance(data, dict) or "avaliacoes" not in data:
-        return {"restored": False, "error": "JSON não parece um backup OMR (sem tabela 'avaliacoes')."}
+        raise HTTPException(status_code=400, detail="JSON não parece um backup OMR (sem tabela 'avaliacoes').")
     try:
         from backup import BACKUP_DIR, backup_to_file, restore_all
         pre, _ = backup_to_file(
             BACKUP_DIR / f"pre-restore-{datetime.now().strftime('%Y-%m-%d-%H%M%S')}.json")
+        # Rotação: mantém os 10 pré-restores mais recentes (contêm hashes — não acumular)
+        try:
+            olds = sorted(BACKUP_DIR.glob("pre-restore-*.json"))
+            for old in olds[:max(0, len(olds) - 10)]:
+                old.unlink()
+        except OSError:
+            pass
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"restored": False, "error": f"Falha no backup pré-restore ({type(e).__name__}) — nada foi alterado."}
+        raise HTTPException(status_code=500, detail=f"Falha no backup pré-restore ({type(e).__name__}) — nada foi alterado.")
     try:
         counts = restore_all(data)
     except ValueError as e:
-        return {"restored": False, "error": str(e)}
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        return {"restored": False, "error": f"Falha no restore ({type(e).__name__}) — rollback aplicado."}
+        raise HTTPException(status_code=500, detail=f"Falha no restore ({type(e).__name__}) — rollback aplicado.")
     return {"restored": True, "counts": counts, "pre_restore": pre.name}
 
 
@@ -128,8 +139,8 @@ def admin_update_user(user_id: int, req: AdminUpdateUserRequest, admin: User = D
     if req.is_active is not None:
         user.is_active = req.is_active
     if req.password is not None:
-        if len(req.password.strip()) < 4:
-            raise HTTPException(status_code=400, detail="Senha deve ter ao menos 4 caracteres")
+        if len(req.password.strip()) < 8:
+            raise HTTPException(status_code=400, detail="Senha deve ter ao menos 8 caracteres")
         user.hashed_password = auth.hash_password(req.password.strip())
     db.commit()
     db.refresh(user)

@@ -1,4 +1,4 @@
-import { Exam, StudentResult, SaeSpec, DEFAULT_SAE_SPEC } from '../types';
+import { Exam, StudentResult, SaeSpec, DEFAULT_SAE_SPEC, HerbySpec, DEFAULT_HERBY_SPEC } from '../types';
 import type { DBExam } from './api';
 
 const STORAGE_KEY = 'omr-app-data';
@@ -31,8 +31,9 @@ function migrateExam(raw: unknown): Exam {
     gradeScale: e.gradeScale || '0-10',
     answerKey: e.answerKey || null,
     layoutMode: e.layoutMode === 'single' ? 'single' : 'dual',
-    templateType: e.templateType === 'sae' || e.templateType === 'colar' || e.templateType === 'saev' ? e.templateType : undefined,
+    templateType: e.templateType === 'sae' || e.templateType === 'colar' || e.templateType === 'saev' || e.templateType === 'herby' ? e.templateType : undefined,
     saeSpec: e.saeSpec,
+    herbySpec: e.herbySpec,
   };
 }
 
@@ -114,6 +115,21 @@ function remoteSaeSpec(raw: Record<string, unknown> | null | undefined): SaeSpec
  * - Insere as ausentes; o SERVIDOR vence nos campos espelhados (inclui answerKey).
  * - Provas só-locais são preservadas. createdAt local é mantido se o remoto não trouxer.
  */
+function remoteHerbySpec(raw: Record<string, unknown> | null | undefined): HerbySpec | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const get = (k: string, fb: string | number): string =>
+    typeof raw[k] === 'string' ? String(raw[k]) : String(fb);
+  const nq = typeof raw.n_questoes === 'number' ? raw.n_questoes : DEFAULT_HERBY_SPEC.n_questoes;
+  return {
+    evento: get('evento', DEFAULT_HERBY_SPEC.evento),
+    serie: get('serie', DEFAULT_HERBY_SPEC.serie),
+    caderno: get('caderno', DEFAULT_HERBY_SPEC.caderno),
+    turma: get('turma', DEFAULT_HERBY_SPEC.turma),
+    magic_base: get('magic_base', DEFAULT_HERBY_SPEC.magic_base),
+    n_questoes: nq,
+  };
+}
+
 export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exam[]; stats: MergeStats } {
   const merged = local.map(e => ({ ...e }));
   const byId = new Map(merged.map(e => [e.id, e]));
@@ -121,8 +137,11 @@ export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exa
 
   for (const db of remote) {
     const layoutMode = db.layout_mode === 'single' ? 'single' : 'dual';
-    const templateType = db.template === 'sae' || db.template === 'colar' || db.template === 'saev' ? db.template : undefined;
+    const templateType = db.template === 'sae' || db.template === 'colar' || db.template === 'saev' || db.template === 'herby' ? db.template : undefined;
     const qps = db.questions_per_subject;
+    const prev = byId.get(db.external_id);
+    // Servidor vence — exceto answerKey nulo (preserva chave local registrada offline)
+    const remoteKey = (db.answer_key as Record<number, string> | null) || null;
     const exam: Exam = {
       id: db.external_id,
       name: db.titulo,
@@ -130,14 +149,14 @@ export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exa
       subjectMat: db.subject_mat,
       questionsPerSubject: qps,
       totalQuestions: layoutMode === 'single' ? qps : qps * 2,
-      createdAt: db.created_at || byId.get(db.external_id)?.createdAt || new Date().toISOString(),
+      createdAt: db.created_at || prev?.createdAt || new Date().toISOString(),
       gradeScale: (db.grade_scale as Exam['gradeScale']) || '0-10',
-      answerKey: (db.answer_key as Record<number, string> | null) || null,
+      answerKey: remoteKey ?? prev?.answerKey ?? null,
       layoutMode,
       templateType,
-      saeSpec: templateType === 'sae' ? remoteSaeSpec(db.sae_spec) : undefined,
+      saeSpec: templateType === 'sae' ? remoteSaeSpec(db.sae_spec) ?? prev?.saeSpec : prev?.saeSpec,
+      herbySpec: templateType === 'herby' ? remoteHerbySpec(db.herby_spec as Record<string, unknown> | null) ?? prev?.herbySpec : prev?.herbySpec,
     };
-    const prev = byId.get(db.external_id);
     if (!prev) {
       merged.push(exam);
       byId.set(exam.id, exam);

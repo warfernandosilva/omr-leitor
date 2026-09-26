@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS } from '../types';
+import { AppView, Exam, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS, templateLabel } from '../types';
+import { HERBY_MIN_QPS, HERBY_MAX_QPS } from '../utils/herby-template';
 import {
   saveExam, getExams, deleteExam, applyRemoteExams,
   getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
@@ -35,8 +36,8 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isCustom = isSae || isColar;
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
   // Herby é sempre dual 1+1 a 26+26 por disciplina
-  const maxQps = isSaev || isHerby ? SAEV_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
-  const minQps = isSaev || isHerby ? SAEV_MIN_QPS : 1;
+  const maxQps = isSaev ? SAEV_MAX_QPS : isHerby ? HERBY_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
+  const minQps = isSaev ? SAEV_MIN_QPS : isHerby ? HERBY_MIN_QPS : 1;
   const totalQuestions = isCustom || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
 
   const refreshFromServer = async (silent: boolean) => {
@@ -112,9 +113,12 @@ export default function NewExamPage({ onNavigate }: Props) {
 
   const handleTemplateChange = (t: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby') => {
     setTemplateType(t);
-    if (t === 'saev' || t === 'herby') {
+    if (t === 'saev') {
       setLayoutMode('dual');
       setQuestionsPerSubject((q) => Math.max(SAEV_MIN_QPS, Math.min(SAEV_MAX_QPS, q || 22)));
+    } else if (t === 'herby') {
+      setLayoutMode('dual');
+      setQuestionsPerSubject((q) => Math.max(HERBY_MIN_QPS, Math.min(HERBY_MAX_QPS, q || 22)));
     } else if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
       setQuestionsPerSubject(SAE_MAX_QUESTIONS);
     }
@@ -128,10 +132,13 @@ export default function NewExamPage({ onNavigate }: Props) {
     }
   };
 
+  const [saving, setSaving] = useState(false);
   const handleSave = async () => {
+    if (saving) return;
     if (!name.trim() || !subjectLP.trim()) return;
     if (layoutMode === 'dual' && !subjectMat.trim()) return;
     if (questionsPerSubject < 1) return;
+    setSaving(true);
 
     const exam: Exam = {
       id: editingId || uuidv4(),
@@ -149,7 +156,13 @@ export default function NewExamPage({ onNavigate }: Props) {
       herbySpec: isHerby ? { ...DEFAULT_HERBY_SPEC } : undefined,
     };
 
-    saveExam(exam, user?.id);
+    try {
+      saveExam(exam, user?.id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Falha ao salvar neste aparelho.');
+      setSaving(false);
+      return;
+    }
     syncExam(exam).catch(() => {});
     setExams(getExams(user?.id));
     setSaved(true);
@@ -382,7 +395,8 @@ export default function NewExamPage({ onNavigate }: Props) {
             <button
               onClick={handleSave}
               disabled={
-                !name.trim() || !subjectLP.trim()
+                saving
+                || !name.trim() || !subjectLP.trim()
                 || (layoutMode === 'dual' && !subjectMat.trim())
                 || questionsPerSubject < 1
               }
@@ -423,7 +437,7 @@ export default function NewExamPage({ onNavigate }: Props) {
                   <p className="font-medium text-gray-900 truncate">{exam.name}</p>
                   <p className="text-sm text-gray-500">
                     {exam.templateType && exam.templateType !== 'padrao' && (
-                      <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">{exam.templateType === 'sae' ? 'Avaliação Contínua' : exam.templateType === 'saev' ? 'Gabarito SAEV' : 'Colar em Avaliação'}</span>
+                      <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">{templateLabel(exam.templateType)}</span>
                     )}
                     {exam.layoutMode === 'single'
                       ? exam.subjectLP

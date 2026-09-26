@@ -1,0 +1,7 @@
+omr-backend/*.jpg filter=lfs diff=lfs merge=lfs -text
+omr-backend/*.png filter=lfs diff=lfs merge=lfs -text
+omr-app/test/**/*.png filter=lfs diff=lfs merge=lfs -text
+omr-app/test/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+omr-app/test/**/*.jpeg filter=lfs diff=lfs merge=lfs -text
+omr-backend/calibration/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+omr-backend/calibration/**/*.jpeg filter=lfs diff=lfs merge=lfs -text

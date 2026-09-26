@@ -9,3 +9,10 @@ output/
 dist/
 build/
 *.log
+calibration/
+test_*.py
+test_*.jpg
+test_*.png
+*.jpg
+*.jpeg
+*.png

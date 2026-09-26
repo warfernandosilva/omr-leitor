@@ -10,7 +10,11 @@ if not sqlite_path.exists():
     exit(0)
 
 print(f"SQLite: {sqlite_path}")
-print(f"Postgres: {pg_engine.url}")
+try:
+    from database import DB_LABEL
+    print(f"Postgres: {DB_LABEL}")
+except Exception:
+    print("Postgres: (destino configurado via DATABASE_URL)")
 
 # Verifica se Postgres já tem dados — não sobrescrever sem confirmação
 from sqlalchemy import text as t

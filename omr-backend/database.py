@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from urllib.parse import urlparse
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 _DEFAULT_DB = Path(__file__).resolve().parent / "data" / "omr.db"
@@ -63,6 +63,21 @@ else:
             connect_args={"check_same_thread": False},
         )
         DB_LABEL = f"sqlite:///{DB_PATH}"
+
+def _sqlite_wal(dbapi_conn, _record) -> None:
+    """WAL + busy_timeout: leitores não bloqueiam escritores; espera até 5s em lock."""
+    try:
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA busy_timeout=5000")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.close()
+    except Exception:
+        pass
+
+
+if engine.dialect.name == "sqlite":
+    event.listen(engine, "connect", _sqlite_wal)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 

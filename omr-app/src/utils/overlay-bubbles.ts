@@ -9,6 +9,7 @@ import {
   SINGLE_X, SINGLE_BUBBLE_RADIUS, singleQuestionYFor,
 } from './card-template';
 import { SAEV_SIDE, saevBubbleCenter, saevRowYs } from './saev-template';
+import { HERBY_SIDE, herbyBubbleCenter, herbyRowYs, herbyRowsFor } from './herby-template';
 
 export const OVERLAY_LETTERS = ['A', 'B', 'C', 'D'] as const;
 
@@ -94,6 +95,47 @@ export function overlaySaevBubbleFor(
   const r = (local - 1) % rows;
   const [x, y] = saevBubbleCenter(col, r, ci, qps);
   return { x, y, side: SAEV_SIDE };
+}
+// ─── Overlay do Gabarito Herby (quadrados; dual LP=1..qps, MAT=qps+1..2qps) ───
+export interface OverlayHerbyRow {
+  row: number; // linha 1-based dentro da disciplina
+  y: number;
+  side: number;
+  cells: OverlayCell[]; // LP e MAT na mesma linha física
+}
+
+export function overlayHerbyRowFor(qps: number, row: number): OverlayHerbyRow {
+  const ys = herbyRowYs(qps);
+  const y = ys[row - 1] ?? 0;
+  const rows = herbyRowsFor(qps);
+  const cells: OverlayCell[] = [];
+  for (let col = 0; col < 4; col++) {
+    const base = col < 2 ? 0 : qps;
+    const off = col % 2 === 0 ? 0 : rows;
+    const q = base + off + row;
+    if (q > base + qps) continue;
+    for (let ci = 0; ci < 4; ci++) {
+      const [x] = herbyBubbleCenter(col, row - 1, ci, qps);
+      cells.push({ q, letter: OVERLAY_LETTERS[ci], x });
+    }
+  }
+  return { row, y, side: HERBY_SIDE, cells };
+}
+
+// Posição de um quadrado Herby específico (p/ o mapa de duplicadas)
+export function overlayHerbyBubbleFor(
+  qps: number, q: number, letter: string,
+): { x: number; y: number; side: number } | null {
+  const ci = OVERLAY_LETTERS.indexOf(letter as (typeof OVERLAY_LETTERS)[number]);
+  if (ci < 0) return null;
+  const rows = herbyRowsFor(qps);
+  const inMat = q > qps;
+  const local = inMat ? q - qps : q;
+  if (local < 1 || local > qps) return null;
+  const col = (inMat ? 2 : 0) + (local > rows ? 1 : 0);
+  const r = (local - 1) % rows;
+  const [x, y] = herbyBubbleCenter(col, r, ci, qps);
+  return { x, y, side: HERBY_SIDE };
 }
 // Posição de uma bolha específica (p/ o mapa de duplicadas)
 export function overlayBubbleFor(

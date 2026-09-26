@@ -9,6 +9,7 @@ import {
 } from './card-template';
 import { SAE_BUBBLE_RADIUS, saeBubbleCenter } from './sae-template';
 import { SAEV_SIDE, saevBubbleCenter, saevBlockRows } from './saev-template';
+import { HERBY_SIDE, herbyBubbleCenter, herbyBlockRows } from './herby-template';
 
 export const CROP_PAD = 40;
 
@@ -38,6 +39,18 @@ export function gabaritoCropBox(exam: CropInput): CropBox {
       }
     }
     r = SAEV_SIDE / 2;
+  } else if (exam.templateType === 'herby') {
+    const qps = Math.max(1, exam.questionsPerSubject || 0);
+    xs = [];
+    ys = [];
+    for (const [, col, r] of herbyBlockRows(qps)) {
+      for (let ci = 0; ci < 4; ci++) {
+        const [x, y] = herbyBubbleCenter(col, r, ci, qps);
+        xs.push(x);
+        ys.push(y);
+      }
+    }
+    r = HERBY_SIDE / 2;
   } else if (exam.templateType === 'sae' || exam.templateType === 'colar') {
     const n = Math.max(1, exam.totalQuestions || 0);
     xs = [];

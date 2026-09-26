@@ -3,3 +3,7 @@ dist
 dist-ssr
 *.local
 .git
+test/
+*.png
+*.jpg
+*.jpeg

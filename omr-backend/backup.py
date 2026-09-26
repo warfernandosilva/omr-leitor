@@ -45,7 +45,8 @@ def export_all() -> dict:
                 "subject_lp": a.subject_lp, "subject_mat": a.subject_mat,
                 "questions_per_subject": a.questions_per_subject,
                 "layout_mode": a.layout_mode, "template": a.template,
-                "sae_spec": a.sae_spec, "grade_scale": a.grade_scale,
+                "sae_spec": a.sae_spec, "herby_spec": a.herby_spec,
+                "grade_scale": a.grade_scale,
                 "answer_key": a.answer_key, "owner_id": a.owner_id,
                 "created_at": _dt(a.created_at), "updated_at": _dt(a.updated_at),
             })
@@ -62,6 +63,7 @@ def export_all() -> dict:
             gabaritos.append({
                 "id": g.id, "avaliacao_id": g.avaliacao_id, "aluno_id": g.aluno_id,
                 "codigo_unico": g.codigo_unico, "qr_code_payload": g.qr_code_payload,
+                "magic_link": g.magic_link, "photo_status": g.photo_status,
                 "numero_pagina": g.numero_pagina, "status": g.status,
                 "respostas": g.respostas, "acertos": g.acertos, "erros": g.erros,
                 "brancos": g.brancos, "nota": g.nota, "observacoes": g.observacoes,
@@ -95,10 +97,23 @@ def export_all() -> dict:
 
 def backup_to_file(path: str | Path) -> tuple[Path, dict]:
     """Exporta e grava o backup. Devolve (arquivo, resumo)."""
+    import os
+    import tempfile
     data = export_all()
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    # Escrita atômica: crash no meio não corrompe o dump anterior
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.stem + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(data, ensure_ascii=False))
+        os.replace(tmp, p)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return p, data["counts"]
 
 
@@ -140,9 +155,20 @@ def restore_all(data: dict) -> dict:
             obj.layout_mode = a.get("layout_mode", "dual")
             obj.template = a.get("template", "padrao")
             obj.sae_spec = a.get("sae_spec")
+            obj.herby_spec = a.get("herby_spec")
             obj.grade_scale = a.get("grade_scale", "0-10")
             obj.answer_key = a.get("answer_key")
             obj.owner_id = a.get("owner_id")
+            if a.get("created_at"):
+                try:
+                    obj.created_at = datetime.fromisoformat(a["created_at"])
+                except ValueError:
+                    pass
+            if a.get("updated_at"):
+                try:
+                    obj.updated_at = datetime.fromisoformat(a["updated_at"])
+                except ValueError:
+                    pass
             n["avaliacoes"] += 1
         db.flush()
         for al in data.get("alunos", []):
@@ -165,6 +191,8 @@ def restore_all(data: dict) -> dict:
             obj.aluno_id = g["aluno_id"]
             obj.codigo_unico = g["codigo_unico"]
             obj.qr_code_payload = g["qr_code_payload"]
+            obj.magic_link = g.get("magic_link")
+            obj.photo_status = g.get("photo_status")
             obj.numero_pagina = g.get("numero_pagina", 0)
             obj.status = g.get("status", "gerado")
             obj.respostas = g.get("respostas")
@@ -173,17 +201,24 @@ def restore_all(data: dict) -> dict:
             obj.brancos = g.get("brancos")
             obj.nota = g.get("nota")
             obj.observacoes = g.get("observacoes")
+            for _field in ("data_geracao", "data_leitura", "data_correcao", "created_at", "updated_at"):
+                if g.get(_field):
+                    try:
+                        setattr(obj, _field, datetime.fromisoformat(g[_field]))
+                    except ValueError:
+                        pass
             n["gabaritos"] += 1
         db.flush()
         for t in data.get("tombstones", []):
             obj = db.scalar(select(DeletedExam).where(DeletedExam.external_id == t["external_id"]))
             if obj is None:
                 try:
-                    obj = DeletedExam(external_id=t["external_id"], owner_id=t.get("owner_id"))
-                    db.add(obj)
-                    db.flush()
+                    # Savepoint: falha isolada não reverte o resto do restore
+                    with db.begin_nested():
+                        obj = DeletedExam(external_id=t["external_id"], owner_id=t.get("owner_id"))
+                        db.add(obj)
+                        db.flush()
                 except Exception:
-                    db.rollback()
                     continue
             n["tombstones"] += 1
         db.commit()
@@ -203,28 +238,34 @@ def _backup_lock():
     """Lock anti-concorrência (2 agendadores / boot duplo). Devolve o Path ou None.
 
     Lock obsoleto (>1h, ex.: PC desligou no meio) é considerado órfão e roubado.
+    Fecha o fd imediatamente após criar (Windows não permite unlink com fd aberto).
     """
     import os
     import time
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     lock = BACKUP_DIR / "backup.lock"
-    try:
-        os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+
+    def _try_acquire() -> bool:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
+        os.close(fd)
+        return True
+
+    if _try_acquire():
         return lock
-    except FileExistsError:
-        pass
     try:
         age = time.time() - lock.stat().st_mtime
     except OSError:
         age = 0
     if age < 3600:
         return None  # outro backup em andamento
-    lock.unlink(missing_ok=True)
     try:
-        os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        return lock
-    except FileExistsError:
+        lock.unlink(missing_ok=True)
+    except PermissionError:
         return None
+    return lock if _try_acquire() else None
 
 
 def daily_backup(keep: int = 30) -> tuple[Path, dict]:
@@ -245,7 +286,10 @@ def daily_backup(keep: int = 30) -> tuple[Path, dict]:
                 pass
         return path, counts
     finally:
-        lock.unlink(missing_ok=True)
+        try:
+            lock.unlink(missing_ok=True)
+        except PermissionError:
+            pass
 
 
 if __name__ == "__main__":

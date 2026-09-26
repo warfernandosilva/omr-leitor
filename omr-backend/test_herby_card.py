@@ -1,30 +1,42 @@
-import sys
-sys.path.insert(0, '.')
-import io, json
-from fastapi.testclient import TestClient
-import main as M
+"""Herby via API: sync + import + generate + /api/card/generate (PNG válido).
 
-c = TestClient(M.app)
-r = c.post('/api/auth/login', data={'username': 'test@herby.com', 'password': '123456'})
-assert r.status_code == 200, r.text
-tok = r.json()['access_token']
-c.headers.update({'Authorization': f'Bearer {tok}'})
+Isolado por módulo (conftest): registra o usuário (ou loga), nunca toca o
+banco real; o PNG vai para tmp_path, nunca para o repo.
 
-r = c.post('/api/exams/sync', json={'external_id': 'herby-test-1', 'titulo': 'Herby Teste', 'turma': '5A', 'template': 'herby', 'questions_per_subject': 22})
-print('sync:', r.status_code, r.json())
-av_id = r.json()['avaliacao_id']
+Executar: python -m pytest test_herby_card.py -q
+"""
+from conftest import TEST_PASSWORD
 
-r = c.post('/api/exams/herby-test-1/students/import', json={'alunos': [{'nome': 'ALUNO TESTE'}]})
-print('import:', r.status_code, r.json())
-gen = c.post('/api/exams/herby-test-1/gabaritos/generate')
-print('generate:', gen.status_code, gen.json())
 
-import io
-r = c.post('/api/card/generate', json={'template': 'herby', 'subject_lp': 'PORTUGUES', 'subject_mat': 'MATEMATICA', 'questions_per_subject': 22, 'format': 'PNG'})
-print('card generate:', r.status_code, r.headers.get('content-disposition'))
-if r.status_code == 200:
-    with open('test_herby_card.png', 'wb') as f:
-        f.write(r.content)
-    print('Saved test_herby_card.png')
+def test_herby_card_api(client, tmp_path):
+    c = client
+    r = c.post('/api/auth/register', json={'email': 'test@herby.com', 'nome': 'Herby', 'password': TEST_PASSWORD})
+    if r.status_code == 400:
+        r = c.post('/api/auth/login', data={'username': 'test@herby.com', 'password': TEST_PASSWORD})
+    assert r.status_code == 200, r.text
+    c.headers.update({'Authorization': f"Bearer {r.json()['access_token']}"})
 
-print('DONE')
+    r = c.post('/api/exams/sync', json={'external_id': 'herby-test-1', 'titulo': 'Herby Teste',
+                                        'turma': '5A', 'template': 'herby', 'questions_per_subject': 22})
+    assert r.status_code == 200, f"sync herby → 200: {r.text}"
+    assert r.json()['avaliacao_id'] > 0
+
+    r = c.post('/api/exams/herby-test-1/students/import', json={'alunos': [{'nome': 'ALUNO TESTE'}]})
+    assert r.status_code == 200, f"import → 200: {r.text}"
+    gen = c.post('/api/exams/herby-test-1/gabaritos/generate')
+    assert gen.status_code == 200, f"generate → 200: {gen.text}"
+    assert gen.json()["total_gabaritos"] == 1
+
+    r = c.post('/api/card/generate', json={'template': 'herby', 'subject_lp': 'PORTUGUES',
+                                           'subject_mat': 'MATEMATICA', 'questions_per_subject': 22,
+                                           'format': 'PNG'})
+    assert r.status_code == 200, f"card generate → 200: {r.text[:200]}"
+    assert r.content[:8] == b"\x89PNG\r\n\x1a\n", "resposta é um PNG válido"
+    out = tmp_path / "test_herby_card.png"
+    out.write_bytes(r.content)
+
+
+if __name__ == "__main__":
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

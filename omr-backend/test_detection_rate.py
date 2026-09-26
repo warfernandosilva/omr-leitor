@@ -1,8 +1,10 @@
-"""Taxa de detecção ArUco sob degradações (rotação, escala, blur, sombra, JPEG)."""
-import sys
-sys.path.insert(0, '.')
+"""Taxa de detecção ArUco sob degradações (rotação, escala, blur, sombra, JPEG).
+
+Executar: python -m pytest test_detection_rate.py -q
+"""
 import cv2
 import numpy as np
+
 from omr.template import generate_card
 from omr.detector import detect_markers, validate_geometry
 
@@ -57,7 +59,7 @@ def degrade(img, name):
     raise ValueError(name)
 
 
-def main():
+def test_detection_rate():
     card = generate_card()
     conds = ['clean', 'rot+5', 'rot-8', 'small', 'blur', 'shadow', 'jpeg']
     ok = 0
@@ -69,8 +71,10 @@ def main():
         ok += passed
         print(f'{name:8s} found={sorted(det.found_ids)} geo={geo} -> {"OK" if passed else "FAIL"}')
     print(f'\nTaxa: {ok}/{len(conds)} ({ok/len(conds)*100:.0f}%)')
-    sys.exit(0 if ok >= 6 else 1)
+    assert ok >= 6, f"taxa de detecção abaixo do mínimo: {ok}/{len(conds)}"
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

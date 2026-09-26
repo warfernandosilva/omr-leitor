@@ -1,3 +1,4 @@
 .env
 omr-leitor-zimaos.zip
 .zimaos-stage/
+.playwright-cli/

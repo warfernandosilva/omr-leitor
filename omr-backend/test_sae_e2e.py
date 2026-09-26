@@ -1,5 +1,7 @@
-"""E2E SAE: gera cartão, preenche bolhas, lê e confere 26/26 + QR."""
+"""E2E SAE: gera cartão, preenche bolhas, lê e confere 26/26 + QR.
 
+Executar: python -m pytest test_sae_e2e.py -q
+"""
 import cv2
 import numpy as np
 
@@ -32,15 +34,18 @@ def check(img: np.ndarray, label: str) -> bool:
     assert not wrong, f"{label}: erradas={wrong}"
     assert res.qr_id == "2269M0901", f"{label}: QR={res.qr_id!r}"
     assert not res.blank_questions, f"{label}: brancas={res.blank_questions}"
-    print(f"{label}: OK 26/26 QR={res.qr_id}")
     return True
 
 
-def main() -> None:
+def test_sae_e2e_clean():
     base = generate_sae_card(SaeSpec())
     filled = fill_card(base, EXPECTED)
-    check(filled, "limpo")
+    assert check(filled, "limpo")
 
+
+def test_sae_e2e_perspective_noise():
+    base = generate_sae_card(SaeSpec())
+    filled = fill_card(base, EXPECTED)
     # Robustez: perspectiva leve + reescala + ruído
     h, w = filled.shape[:2]
     src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
@@ -51,10 +56,10 @@ def main() -> None:
     rng = np.random.default_rng(7)
     noise = rng.integers(-8, 9, small.shape, dtype=np.int16)
     noisy = np.clip(small.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-    check(noisy, "perspectiva+ruido")
-
-    print("E2E SAE: PASS")
+    assert check(noisy, "perspectiva+ruido")
 
 
 if __name__ == "__main__":
-    main()
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

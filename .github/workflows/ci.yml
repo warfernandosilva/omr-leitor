@@ -36,28 +36,6 @@ jobs:
       # pyzbar precisa da libzbar; opencv precisa da libGL no Linux
       - run: sudo apt-get update && sudo apt-get install -y libzbar0 libgl1
       - run: pip install -r omr-backend/requirements.txt
-      # Os testes do backend são scripts (python test_*.py a partir de omr-backend/)
-      - run: |
-          cd omr-backend
-          python test_dup_regression.py
-          python test_adaptive.py
-          python test_sanity.py
-          python test_saev_busy.py
-          python test_e2e.py
-          python test_sae_e2e.py
-          python test_colar_e2e.py
-          python test_detection_rate.py
-          python test_pipeline.py
-          python test_persistence.py
-          python test_ops.py
-          python test_vote.py
-          python test_backup.py
-          python test_backup_routes.py
-          python test_delete_exam.py
-          python test_tombstones.py
-          python test_api_gaps.py
-          python test_tuning.py
-          python test_thresholds.py
-          python test_debug.py
-          python test_fuzz.py
-          python test_contract.py
+      # Suíte pytest (conftest.py isola um SQLite por módulo; pytest.ini descobre test_*.py).
+      - run: python -m pytest -q
+        working-directory: omr-backend

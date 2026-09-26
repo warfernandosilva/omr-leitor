@@ -233,6 +233,11 @@ export async function processImage(
     body: formData,
   });
 
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); if ((j as { error?: string })?.error) detail = String((j as { error?: string }).error); } catch { /* corpo não-JSON */ }
+    throw new Error(detail);
+  }
   const data = await res.json();
   return mapProcessData(data as Record<string, unknown>);
 }
@@ -261,6 +266,11 @@ export async function processMulti(
     body: formData,
   });
 
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); if ((j as { error?: string })?.error) detail = String((j as { error?: string }).error); } catch { /* corpo não-JSON */ }
+    throw new Error(detail);
+  }
   const data = await res.json();
   return mapProcessData(data as Record<string, unknown>);
 }
@@ -280,6 +290,7 @@ export async function gradeAnswers(
     }),
   });
 
+  if (!res.ok) throw new Error(`Falha ao corrigir (${res.status})`);
   return res.json();
 }
 
@@ -602,8 +613,9 @@ export interface DBExam {
   subject_mat: string;
   questions_per_subject: number;
   layout_mode: 'dual' | 'single';
-  template: 'padrao' | 'sae' | 'colar' | 'saev';
+  template: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
   sae_spec: Record<string, unknown> | null;
+  herby_spec?: Record<string, unknown> | null;
   grade_scale: string;
   answer_key: Record<string, string> | null;
   created_at: string | null;

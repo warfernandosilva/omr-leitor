@@ -3,15 +3,13 @@ Fuzz nos detectores: distratores aleatórios (seed fixa) para os 4 modelos.
 
 Replica a lógica do test_saev_busy p/ Padrão, SAE e Colar, com asserts
 de TEMPO além do acerto. O SAEV já tem o próprio (test_saev_busy).
+
+Executar: python -m pytest test_fuzz.py -q
 """
-import sys
-sys.path.insert(0, '.')
 import time
+
 import cv2
 import numpy as np
-
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from omr.template import generate_card, QUESTION_Y, PORT_X, MAT_X, BUBBLE_RADIUS, ARUCO_CENTERS
 from omr.template_sae import generate_sae_card, SaeSpec, CORNER_CENTERS as SAE_CORNERS
@@ -24,12 +22,6 @@ from omr.reader_sae import process_sae_image
 from omr.reader_saev import process_saev_image
 
 BUDGET = 15.0
-PASS, FAIL = [], []
-
-
-def check(name, cond, extra=""):
-    (PASS if cond else FAIL).append(name)
-    print(f"   {'OK ' if cond else 'FALHA'}  {name} {extra}")
 
 
 def degrade(img, seed=7):
@@ -75,17 +67,15 @@ def run_case(name, make_image, reader, kw, expect_ok, n_expected=None):
     res = reader(img, **kw)
     dt = time.perf_counter() - t0
     if expect_ok:
-        if res is None:
-            check(f"{name}: detectado", False, f"None em {dt:.1f}s")
-            return
-        check(f"{name}: pipeline < {BUDGET:.0f}s", dt < BUDGET, f"{dt:.1f}s")
+        assert res is not None, f"{name}: detectado: None em {dt:.1f}s"
+        assert dt < BUDGET, f"{name}: pipeline < {BUDGET:.0f}s: {dt:.1f}s"
         target = n_expected if n_expected is not None else expected
         if target is not None:
             ok = sum(1 for q, l in target.items() if res.answers.get(q) == l)
-            check(f"{name}: acerto >= {int(0.9 * len(target))}/{len(target)}",
-                  ok >= 0.9 * len(target), f"{ok}/{len(target)}")
+            assert ok >= 0.9 * len(target), \
+                f"{name}: acerto >= {int(0.9 * len(target))}/{len(target)}: {ok}/{len(target)}"
     else:
-        check(f"{name}: falha rápida < {BUDGET:.0f}s", res is None and dt < BUDGET, f"{dt:.1f}s")
+        assert res is None and dt < BUDGET, f"{name}: falha rápida < {BUDGET:.0f}s: {dt:.1f}s"
 
 
 # ─── Padrão (ArUco) ───
@@ -101,8 +91,10 @@ def make_padrao():
     return degrade(distract(card, list(ARUCO_CENTERS.values()), seed=11, avoid=grid), seed=12), expected
 
 
-run_case("padrão+suja", make_padrao, process_image,
-         {"questions_per_subject": 22, "layout_mode": "dual"}, True)
+def test_fuzz_padrao():
+    run_case("padrão+suja", make_padrao, process_image,
+             {"questions_per_subject": 22, "layout_mode": "dual"}, True)
+
 
 # ─── SAE ───
 def make_sae():
@@ -121,7 +113,9 @@ def make_sae():
     return degrade(distract(card, list(SAE_CORNERS.values()), seed=21, avoid=grid), seed=22), expected
 
 
-run_case("sae+suja", make_sae, process_sae_image, {"n_questions": 26}, True)
+def test_fuzz_sae():
+    run_case("sae+suja", make_sae, process_sae_image, {"n_questions": 26}, True)
+
 
 # ─── SAEV ───
 def make_saev():
@@ -139,20 +133,30 @@ def make_saev():
     return degrade(distract(card, list(SAEV_CORNER_CENTERS.values()), seed=31, avoid=grid), seed=32), expected
 
 
-run_case("saev+suja", make_saev, process_saev_image,
-         {"questions_per_subject": 22, "adaptive": True}, True)
+def test_fuzz_saev():
+    run_case("saev+suja", make_saev, process_saev_image,
+             {"questions_per_subject": 22, "adaptive": True}, True)
+
 
 # ─── Sem cartão (só distratores): falha rápida nos 3 leitores ───
 def make_blank_noise():
     noise = np.full((1200, 900, 3), 200, dtype=np.uint8)
     return degrade(distract(noise, [(600, 300)], seed=41), seed=42), None
 
-run_case("sem cartão/padrão", make_blank_noise, process_image, {}, False)
-run_case("sem cartão/sae", make_blank_noise, process_sae_image, {"n_questions": 26}, False)
-run_case("sem cartão/saev", make_blank_noise, process_saev_image, {"questions_per_subject": 22}, False)
 
-print(f"\nFUZZ: {len(PASS)} OK | {len(FAIL)} FALHA")
-if FAIL:
-    print("FALHAS:", FAIL)
-    sys.exit(1)
-print("FUZZ PASS")
+def test_fuzz_no_card_padrao():
+    run_case("sem cartão/padrão", make_blank_noise, process_image, {}, False)
+
+
+def test_fuzz_no_card_sae():
+    run_case("sem cartão/sae", make_blank_noise, process_sae_image, {"n_questions": 26}, False)
+
+
+def test_fuzz_no_card_saev():
+    run_case("sem cartão/saev", make_blank_noise, process_saev_image, {"questions_per_subject": 22}, False)
+
+
+if __name__ == "__main__":
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

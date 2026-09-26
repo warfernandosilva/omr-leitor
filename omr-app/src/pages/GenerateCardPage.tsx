@@ -66,6 +66,13 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
     syncExam(updated).catch(() => {});
   };
 
+  const persistHerby = () => {
+    if (!activeExam) return;
+    const updated: Exam = { ...activeExam, herbySpec: { ...herbySpec } };
+    saveExam(updated, userId);
+    syncExam(updated).catch(() => {});
+  };
+
   
 
   // PNG oficial do backend para o preview react-pdf (mesma imagem dos gabaritos)
@@ -100,7 +107,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPreview, activeExam?.id, activeExam?.subjectLP, activeExam?.subjectMat, activeExam?.questionsPerSubject, activeExam?.layoutMode, activeExam?.templateType, JSON.stringify(saeSpec)]);
+  }, [showPreview, activeExam?.id, activeExam?.subjectLP, activeExam?.subjectMat, activeExam?.questionsPerSubject, activeExam?.layoutMode, activeExam?.templateType, JSON.stringify(saeSpec), JSON.stringify(herbySpec)]);
 
   // PDF oficial do backend (mesmo desenho dos gabaritos personalizados)
   const buildServerPdf = async (): Promise<Blob | null> => {
@@ -283,7 +290,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
               )}
 
               <button
-                onClick={() => { if (isSae) persistSae(); setShowPreview(true); }}
+                onClick={() => { if (isSae) persistSae(); if (isHerby) persistHerby(); setShowPreview(true); }}
                 disabled={!selectedExamId}
                 className="btn btn-primary"
               >

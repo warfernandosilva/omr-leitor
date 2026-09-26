@@ -21,7 +21,8 @@ import {
   guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide,
 } from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
-import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor } from '../utils/overlay-bubbles';
+import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor } from '../utils/overlay-bubbles';
+import { herbyRowsFor } from '../utils/herby-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 
@@ -207,6 +208,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     refreshExamsFromServer(true).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+  // Cleanup: libera a câmera ao desmontar (navegação pela Sidebar/logout)
+  useEffect(() => () => {
+    try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
+    streamRef.current = null;
+    window.clearTimeout(flashTimerRef.current);
+  }, []);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -262,6 +269,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     : canonicalModel(activeExam?.templateType);
   const overlaySae = overlayModel === 'sae';
   const overlaySaev = overlayModel === 'saev';
+  const overlayHerby = overlayModel === 'herby';
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
     && canonicalModel(omrResult.templateUsed) !== canonicalModel(activeExam.templateType);
 
@@ -275,7 +283,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       totalQuestions: activeExam.totalQuestions,
       templateType: overlayModel === 'sae'
         ? (activeExam.templateType === 'colar' ? 'colar' : 'sae')
-        : overlayModel === 'saev' ? 'saev' : 'padrao',
+        : overlayModel === 'saev' ? 'saev' : overlayModel === 'herby' ? 'herby' : 'padrao',
     });
   }, [activeExam, overlayModel]);
 
@@ -492,6 +500,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setStep('processing');
       processOMR(dataUrl);
     };
+    reader.onerror = () => setError('Falha ao ler o arquivo de imagem. Tente outra foto.');
     reader.readAsDataURL(file);
   };
 
@@ -504,7 +513,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
-      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : 'padrao';
+      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : activeExam?.templateType === 'herby' ? 'herby' : 'padrao';
 
       let result: ProcessResult;
       if (frames.length > 1) {
@@ -754,6 +763,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     const items: BatchItem[] = [];
     files.forEach((file) => {
       const reader = new FileReader();
+      const done = () => {
+        loaded++;
+        if (loaded === files.length) {
+          items.sort((a, b) => a.fileName.localeCompare(b.fileName));
+          setBatchItems(items);
+          if (items.length === 0) setError('Nenhum arquivo pôde ser lido. Tente outras fotos.');
+        }
+      };
       reader.onload = () => {
         items.push({
           file,
@@ -761,12 +778,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           dataUrl: reader.result as string,
           status: 'pending',
         });
-        loaded++;
-        if (loaded === files.length) {
-          items.sort((a, b) => a.fileName.localeCompare(b.fileName));
-          setBatchItems(items);
-        }
+        done();
       };
+      reader.onerror = () => done();
       reader.readAsDataURL(file);
     });
   };
@@ -793,8 +807,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       try {
         // 1. Leitura OMR + QR (usa o modelo da prova; fallback cruzado no backend)
-        const tpl = exam.templateType === 'saev' ? 'saev' : undefined;
-        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev');
+        const tpl = exam.templateType === 'saev' ? 'saev' : exam.templateType === 'herby' ? 'herby' : undefined;
+        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev', debugMode);
         if (!result.success || !result.answers) {
           patchItem(item.fileName, { status: 'error', detail: result.error || 'Falha na leitura' });
           continue;
@@ -1459,6 +1473,27 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         );
                       })}
                     </g>
+                  ) : overlayHerby ? (
+                    <g>
+                      {Array.from({ length: herbyRowsFor(activeExam.questionsPerSubject) }, (_, i) => {
+                        const { y, side, cells } = overlayHerbyRowFor(activeExam.questionsPerSubject, i + 1);
+                        const h = side / 2;
+                        return (
+                          <g key={i + 1}>
+                            {cells.map(({ q: qg, letter, x }) => {
+                              const key = activeExam.answerKey?.[qg];
+                              const isMarked = manualAnswers[qg] === letter;
+                              const isCorrect = key ? letter === key : false;
+                              let stroke = '#333'; let fill = 'none'; let sw = 2;
+                              if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
+                              else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
+                              else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
+                              return <rect key={`herby-${qg}-${letter}`} x={x - h} y={y - h} width={side} height={side} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                            })}
+                          </g>
+                        );
+                      })}
+                    </g>
                   ) : (
                   Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
                     // Geometria por layout (single usa colunas centrais) — overlay-bubbles.ts
@@ -1486,6 +1521,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                       const marks = omrResult?.duplicateMarks?.[q] ?? [];
                       return marks.map(letter => {
                         const pos = overlaySaevBubbleFor(activeExam.questionsPerSubject, q, letter);
+                        if (!pos) return null;
+                        const h = pos.side / 2 + 4;
+                        return <rect key={`dup-${q}-${letter}`} x={pos.x - h} y={pos.y - h} width={h * 2} height={h * 2} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
+                      });
+                    }
+                    if (overlayHerby) {
+                      const marks = omrResult?.duplicateMarks?.[q] ?? [];
+                      return marks.map(letter => {
+                        const pos = overlayHerbyBubbleFor(activeExam.questionsPerSubject, q, letter);
                         if (!pos) return null;
                         const h = pos.side / 2 + 4;
                         return <rect key={`dup-${q}-${letter}`} x={pos.x - h} y={pos.y - h} width={h * 2} height={h * 2} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;

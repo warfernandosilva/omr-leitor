@@ -362,17 +362,23 @@ class TokenResponse(BaseModel):
 
 @app.post("/api/auth/register", response_model=TokenResponse)
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    # Primeiro usuário vira admin automaticamente
-    existing = db.scalar(select(User).where(User.email == req.email.strip().lower()))
+    # Primeiro usuário vira admin automaticamente; demais sempre professor.
+    # O campo `role` do cliente é ignorado de propósito (anti-escalação:
+    # registro público nunca pode criar admin).
+    email = req.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=400, detail="E-mail inválido")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Senha deve ter ao menos 8 caracteres")
+    if not req.nome.strip():
+        raise HTTPException(status_code=400, detail="Nome é obrigatório")
+    existing = db.scalar(select(User).where(User.email == email))
     if existing:
         raise HTTPException(status_code=400, detail="E-mail já cadastrado")
-    role = req.role if req.role in ("admin", "professor") else "professor"
-    # Se é o primeiro usuário do sistema, força admin
     total = db.scalar(select(func.count()).select_from(User)) or 0
-    if total == 0:
-        role = "admin"
+    role = "admin" if total == 0 else "professor"
     user = User(
-        email=req.email.strip().lower(),
+        email=email,
         nome=req.nome.strip(),
         hashed_password=auth.hash_password(req.password),
         role=role,
@@ -473,7 +479,7 @@ def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
 
 
 @app.post("/api/omr/process", response_model=ProcessResponse)
-async def process_omr(
+def process_omr(
     file: UploadFile = File(...),
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
@@ -483,8 +489,12 @@ async def process_omr(
     client_duration_ms: int | None = Form(None),  # Herby: tempo client-side por foto (diagnóstico)
     current_user: User = Depends(auth.get_current_user),
 ):
-    """Processa uma imagem (foto/scan) do cartão preenchido."""
-    contents = await file.read()
+    """Processa uma imagem (foto/scan) do cartão preenchido.
+
+    `def` (não `async`): o pipeline cv2 é bloqueante e o FastAPI o executa
+    no threadpool — `async def` travaria o event loop para as demais rotas.
+    """
+    contents = file.file.read()
 
     # Validação defensiva
     if not contents or len(contents) < 100:
@@ -685,7 +695,7 @@ async def process_omr(
 
 
 @app.post("/api/omr/process-multi", response_model=ProcessResponse)
-async def process_omr_multi(
+def process_omr_multi(
     files: list[UploadFile] = File(...),
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
@@ -700,6 +710,9 @@ async def process_omr_multi(
     Divergência entre frames vira low_confidence (conferência manual) —
     foto tremida/luz variando lê diferente por frame. 1 frame válido se
     comporta exatamente como /api/omr/process.
+
+    `def` (não `async`): votação + N pipelines cv2 são bloqueantes; o
+    FastAPI executa no threadpool sem travar o event loop.
     """
     if not files or len(files) > 4:
         return ProcessResponse(success=False, error="Envie de 1 a 4 frames do mesmo cartão.")
@@ -709,7 +722,7 @@ async def process_omr_multi(
     first_image: np.ndarray | None = None
 
     for f in files:
-        contents = await f.read()
+        contents = f.file.read()
         if not contents or len(contents) < 100 or len(contents) > 10 * 1024 * 1024:
             continue
         image = _decode_image_bytes(contents)
@@ -1326,6 +1339,11 @@ def list_exams(limit: int = 100, offset: int = 0, db: Session = Depends(get_db),
     if current_user.role != "admin":
         q = q.where((Avaliacao.owner_id == current_user.id) | (Avaliacao.owner_id.is_(None)))
     avaliacoes = db.scalars(q).all()
+    def _visible_key(av) -> dict | None:
+        # Gabarito só para dono/admin; exame órfão sem dono expõe metadados, não a chave
+        if current_user.role == "admin" or (av.owner_id is not None and av.owner_id == current_user.id):
+            return av.answer_key
+        return None
     return [
         {
             "id": av.id,
@@ -1338,8 +1356,9 @@ def list_exams(limit: int = 100, offset: int = 0, db: Session = Depends(get_db),
             "layout_mode": av.layout_mode,
             "template": av.template or "padrao",
             "sae_spec": av.sae_spec,
+            "herby_spec": av.herby_spec,
             "grade_scale": av.grade_scale,
-            "answer_key": av.answer_key,
+            "answer_key": _visible_key(av),
             "created_at": av.created_at.isoformat() if av.created_at else None,
         }
         for av in avaliacoes
@@ -1365,6 +1384,7 @@ def get_exam(external_id: str, db: Session = Depends(get_db), current_user: User
     av = _get_avaliacao(db, external_id)
     auth.require_owner_or_admin(av, current_user)
     total_alunos = db.scalar(select(func.count()).select_from(Aluno).where(Aluno.avaliacao_id == av.id)) or 0
+    show_key = current_user.role == "admin" or (av.owner_id is not None and av.owner_id == current_user.id)
     return {
         "id": av.id,
         "external_id": av.external_id,
@@ -1376,8 +1396,9 @@ def get_exam(external_id: str, db: Session = Depends(get_db), current_user: User
         "layout_mode": av.layout_mode,
         "template": av.template or "padrao",
         "sae_spec": av.sae_spec,
+        "herby_spec": av.herby_spec,
         "grade_scale": av.grade_scale,
-        "answer_key": av.answer_key,
+        "answer_key": av.answer_key if show_key else None,
         "total_alunos": total_alunos,
     }
 

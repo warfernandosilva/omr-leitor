@@ -7,63 +7,41 @@ Lápides anti-ressurreição (multi-aparelho): prova excluída NÃO volta via sy
 4. Sync com id novo → 200 (não bloqueia o resto)
 5. Backup exporta as lápides (restore não ressuscita)
 
-Executar: python test_tombstones.py
+Executar: python -m pytest test_tombstones.py -q
 """
-
-import os
-import sys
-import tempfile
-
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-
-_TMP_DIR = tempfile.mkdtemp(prefix="omr_test_tomb_")
-os.environ["OMR_DB_PATH"] = os.path.join(_TMP_DIR, "test_omr.db")
-
-sys.path.insert(0, ".")
-
-from fastapi.testclient import TestClient  # noqa: E402
-import main as main_module  # noqa: E402
-
-PASS = []
-FAIL = []
+from conftest import TEST_PASSWORD
 
 
-def check(name: str, cond: bool, extra: str = ""):
-    if cond:
-        PASS.append(name)
-        print(f"   PASS  {name} {extra}")
-    else:
-        FAIL.append(name)
-        print(f"   FAIL  {name} {extra}")
+def test_tombstone_flow(client):
+    c = client
+    r = c.post("/api/auth/register", json={"email": "tomb@t.com", "nome": "Tomb", "password": TEST_PASSWORD})
+    assert r.status_code == 200, r.text
+    c.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+
+    c.post("/api/exams/sync", json={"external_id": "ex-t1", "titulo": "Morta"})
+    c.post("/api/exams/ex-t1/students/import", json={"alunos": [{"nome": "A UM"}]})
+    d = c.delete("/api/exams/ex-t1")
+    assert d.status_code == 200, f"DELETE prova → 200: {d.text[:100]}"
+
+    gone = c.get("/api/exams/deleted")
+    assert gone.status_code == 200, f"GET deleted → 200: {gone.text[:100]}"
+    assert any(t["external_id"] == "ex-t1" for t in gone.json()), "lápide de ex-t1 listada"
+
+    re = c.post("/api/exams/sync", json={"external_id": "ex-t1", "titulo": "Ressuscitada?"})
+    assert re.status_code == 410, f"sync do id lapidado → 410: status={re.status_code}"
+
+    ok = c.post("/api/exams/sync", json={"external_id": "ex-t2", "titulo": "Viva"})
+    assert ok.status_code == 200, f"sync de id novo → 200: {ok.text[:100]}"
+
+    import backup as backup_module
+    counts = backup_module.export_all()["counts"]
+    assert counts.get("tombstones", 0) >= 1, f"backup exporta tombstones: {counts}"
+
+    lst = c.get("/api/exams").json()
+    assert all(e["external_id"] != "ex-t1" for e in lst), "ex-t1 fora da listagem"
 
 
-c = TestClient(main_module.app)
-r = c.post("/api/auth/register", json={"email": "tomb@t.com", "nome": "Tomb", "password": "123456"})
-assert r.status_code == 200, r.text
-c.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
-
-c.post("/api/exams/sync", json={"external_id": "ex-t1", "titulo": "Morta"})
-c.post("/api/exams/ex-t1/students/import", json={"alunos": [{"nome": "A UM"}]})
-d = c.delete("/api/exams/ex-t1")
-check("DELETE prova → 200", d.status_code == 200, d.text[:100])
-
-gone = c.get("/api/exams/deleted")
-check("GET deleted → 200", gone.status_code == 200, gone.text[:100])
-check("lápide de ex-t1 listada", any(t["external_id"] == "ex-t1" for t in gone.json()))
-
-re = c.post("/api/exams/sync", json={"external_id": "ex-t1", "titulo": "Ressuscitada?"})
-check("sync do id lapidado → 410", re.status_code == 410, f"status={re.status_code}")
-
-ok = c.post("/api/exams/sync", json={"external_id": "ex-t2", "titulo": "Viva"})
-check("sync de id novo → 200", ok.status_code == 200, ok.text[:100])
-
-import backup as backup_module
-counts = backup_module.export_all()["counts"]
-check("backup exporta tombstones", counts.get("tombstones", 0) >= 1, str(counts))
-
-lst = c.get("/api/exams").json()
-check("ex-t1 fora da listagem", all(e["external_id"] != "ex-t1" for e in lst))
-
-print(f"TOMBSTONES: {len(PASS)} pass, {len(FAIL)} fail")
-sys.exit(1 if FAIL else 0)
+if __name__ == "__main__":
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

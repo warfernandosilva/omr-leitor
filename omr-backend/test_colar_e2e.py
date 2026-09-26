@@ -1,5 +1,7 @@
-"""E2E Colar: gera cartão sem cabeçalho, preenche bolhas, lê e confere N/N sem QR."""
+"""E2E Colar: gera cartão sem cabeçalho, preenche bolhas, lê e confere N/N sem QR.
 
+Executar: python -m pytest test_colar_e2e.py -q
+"""
 import cv2
 import numpy as np
 
@@ -25,7 +27,7 @@ def fill_card(img: np.ndarray, answers: dict[int, str]) -> np.ndarray:
     return out
 
 
-def main() -> None:
+def test_colar_e2e_clean():
     base = generate_colar_card(N)
     filled = fill_card(base, EXPECTED)
     res = process_sae_image(filled, n_questions=N)
@@ -35,8 +37,11 @@ def main() -> None:
     assert not wrong, f"erradas={wrong}"
     assert res.qr_id is None, f"QR deveria ser None, veio {res.qr_id!r}"
     assert not res.blank_questions, f"brancas={res.blank_questions}"
-    print(f"limpo: OK {N}/{N} sem QR")
 
+
+def test_colar_e2e_perspective():
+    base = generate_colar_card(N)
+    filled = fill_card(base, EXPECTED)
     h, w = filled.shape[:2]
     src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
     dst = np.float32([[15, 25], [w - 20, 10], [w - 12, h - 18], [12, h - 12]])
@@ -47,10 +52,9 @@ def main() -> None:
     wrong2 = {q: (res2.answers.get(q), e) for q, e in EXPECTED.items()
               if res2.answers.get(q) != e}
     assert not wrong2, f"perspectiva erradas={wrong2}"
-    print(f"perspectiva: OK {N}/{N} sem QR")
-
-    print("E2E COLAR: PASS")
 
 
 if __name__ == "__main__":
-    main()
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

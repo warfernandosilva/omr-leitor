@@ -4,11 +4,12 @@ Regressão: branco de "Android ruim" não pode virar duplicada.
 Simula foto de celular inferior: ruído de sensor + blur leve + JPEG
 recomprimido + luz desigual. Cartão em branco (ou meio-preenchido) deve
 sair com ZERO duplicadas; duplicada real continua sendo detectada.
+
+Executar: python -m pytest test_dup_regression.py -q
 """
-import sys
-sys.path.insert(0, '.')
 import cv2
 import numpy as np
+
 from omr.template import (
     generate_card, QUESTION_Y, BUBBLE_RADIUS, PORT_X, MAT_X,
     QUESTIONS_PER_SUBJECT,
@@ -50,54 +51,64 @@ def fill(img, x, y, radius=BUBBLE_RADIUS):
     cv2.circle(img, (int(x), int(y)), int(radius) - 2, (0, 0, 0), -1)
 
 
-def check(name: str, cond: bool, detail: str = ""):
-    print(f"   {'OK ' if cond else 'FALHA'} {name} {detail}")
-    if not cond:
-        check.failed = True
+def test_blank_degraded_no_ghost_dups():
+    # 1. Padrão totalmente em branco + degradação -> 44 brancas, 0 duplicadas
+    blank = degrade_android(generate_card())
+    r = process_image(blank)
+    assert r is not None, "process_image retornou None no branco degradado"
+    assert r.duplicate_questions == [], \
+        f"padrao branco: 0 duplicadas: {r.duplicate_questions}"
+    assert len(r.blank_questions) == 44, \
+        f"padrao branco: 44 em branco: {len(r.blank_questions)}"
 
 
-check.failed = False
+def test_half_filled_degraded():
+    # 2. Padrão meio-preenchido (LP toda marcada, MAT em branco) + degradação
+    half = generate_card()
+    letters = ["A", "B", "C", "D"]
+    for q in range(QUESTIONS_PER_SUBJECT):
+        fill(half, PORT_X[q % 4], int(QUESTION_Y[q]))
+    r2 = process_image(degrade_android(half, seed=21))
+    assert r2 is not None, "process_image retornou None no meio-preenchido"
+    mat_dups = [q for q in r2.duplicate_questions if q > QUESTIONS_PER_SUBJECT]
+    assert mat_dups == [], f"padrao MAT branca: 0 duplicadas: {mat_dups}"
+    mat_blank = [q for q in r2.blank_questions if q > QUESTIONS_PER_SUBJECT]
+    assert len(mat_blank) == 22, \
+        f"padrao MAT branca: 22 em branco: {sorted(set(range(23, 45)) - set(mat_blank))}"
 
-# 1. Padrão totalmente em branco + degradação -> 44 brancas, 0 duplicadas
-blank = degrade_android(generate_card())
-r = process_image(blank)
-assert r is not None, "process_image retornou None no branco degradado"
-check("padrao branco: 0 duplicadas", r.duplicate_questions == [], str(r.duplicate_questions))
-check("padrao branco: 44 em branco", len(r.blank_questions) == 44, str(len(r.blank_questions)))
 
-# 2. Padrão meio-preenchido (LP toda marcada, MAT em branco) + degradação
-half = generate_card()
-letters = ["A", "B", "C", "D"]
-for q in range(QUESTIONS_PER_SUBJECT):
-    fill(half, PORT_X[q % 4], int(QUESTION_Y[q]))
-r2 = process_image(degrade_android(half, seed=21))
-assert r2 is not None, "process_image retornou None no meio-preenchido"
-mat_dups = [q for q in r2.duplicate_questions if q > QUESTIONS_PER_SUBJECT]
-check("padrao MAT branca: 0 duplicadas", mat_dups == [], str(mat_dups))
-mat_blank = [q for q in r2.blank_questions if q > QUESTIONS_PER_SUBJECT]
-check("padrao MAT branca: 22 em branco", len(mat_blank) == 22, str(sorted(set(range(23, 45)) - set(mat_blank))))
+def test_real_duplicate_still_detected():
+    # 3. Duplicada REAL continua sendo detectada (LP Q1 = A+B)
+    dup = generate_card()
+    fill(dup, PORT_X[0], int(QUESTION_Y[0]))
+    fill(dup, PORT_X[1], int(QUESTION_Y[0]))
+    r3 = process_image(degrade_android(dup, seed=33))
+    assert r3 is not None, "process_image retornou None na duplicada real"
+    assert 1 in r3.duplicate_questions, \
+        f"padrao duplicada real Q1 detectada: dups={r3.duplicate_questions} low={r3.low_confidence}"
 
-# 3. Duplicada REAL continua sendo detectada (LP Q1 = A+B)
-dup = generate_card()
-fill(dup, PORT_X[0], int(QUESTION_Y[0]))
-fill(dup, PORT_X[1], int(QUESTION_Y[0]))
-r3 = process_image(degrade_android(dup, seed=33))
-assert r3 is not None, "process_image retornou None na duplicada real"
-check("padrao duplicada real Q1 detectada", 1 in r3.duplicate_questions,
-      f"dups={r3.duplicate_questions} low={r3.low_confidence}")
 
-# 4. SAE em branco + degradação -> 0 duplicadas
-sae_blank = degrade_android(generate_sae_card(SaeSpec()))
-r4 = process_sae_image(sae_blank, n_questions=26)
-assert r4 is not None, "process_sae_image retornou None no branco degradado"
-check("sae branco: 0 duplicadas", r4.duplicate_questions == [], str(r4.duplicate_questions))
+def test_sae_blank_no_ghost_dups():
+    # 4. SAE em branco + degradação -> 0 duplicadas
+    sae_blank = degrade_android(generate_sae_card(SaeSpec()))
+    r4 = process_sae_image(sae_blank, n_questions=26)
+    assert r4 is not None, "process_sae_image retornou None no branco degradado"
+    assert r4.duplicate_questions == [], \
+        f"sae branco: 0 duplicadas: {r4.duplicate_questions}"
 
-# 5. Padrão em branco + degradação FORTE (sombra na base) -> 0 duplicadas
-forte = degrade_android_forte(generate_card())
-r5 = process_image(forte)
-assert r5 is not None, "process_image retornou None no branco forte"
-check("padrao branco forte: 0 duplicadas", r5.duplicate_questions == [], str(r5.duplicate_questions))
-check("padrao branco forte: 44 em branco", len(r5.blank_questions) == 44, str(len(r5.blank_questions)))
 
-print("\nREGRESSAO DUP:", "PASS" if not check.failed else "FAIL")
-sys.exit(1 if check.failed else 0)
+def test_strong_degradation_no_ghost_dups():
+    # 5. Padrão em branco + degradação FORTE (sombra na base) -> 0 duplicadas
+    forte = degrade_android_forte(generate_card())
+    r5 = process_image(forte)
+    assert r5 is not None, "process_image retornou None no branco forte"
+    assert r5.duplicate_questions == [], \
+        f"padrao branco forte: 0 duplicadas: {r5.duplicate_questions}"
+    assert len(r5.blank_questions) == 44, \
+        f"padrao branco forte: 44 em branco: {len(r5.blank_questions)}"
+
+
+if __name__ == "__main__":
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

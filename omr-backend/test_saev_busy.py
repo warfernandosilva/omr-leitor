@@ -6,12 +6,14 @@ puro travava o worker por minutos (UI congelava nos 50%).
 Cenário: cartão gerado + degradação de celular + distratores quadrados
 (caixas de texto, finders de QR, sujeira) forçando dezenas de candidatos.
 Assert de TEMPO (<20s p/ o pipeline) além do acerto.
+
+Executar: python -m pytest test_saev_busy.py -q
 """
-import sys
-sys.path.insert(0, '.')
 import time
+
 import cv2
 import numpy as np
+
 from omr.template_saev import (
     SaevSpec, generate_saev_card, saev_block_rows, saev_bubble_center,
     SAEV_SIDE, SAEV_CORNER_CENTERS, SAEV_COLS_X, SAEV_NUM_W, SAEV_PITCH,
@@ -23,14 +25,6 @@ QPS = 22
 N = QPS * 2
 BUDGET = 8.0  # era 57s antes do _pick_four vetorizado; pipeline faz ~0.2s local
 
-
-def check(name: str, cond: bool, detail: str = ""):
-    print(f"   {'OK ' if cond else 'FALHA'} {name} {detail}")
-    if not cond:
-        check.failed = True
-
-
-check.failed = False
 rng = np.random.default_rng(7)
 
 
@@ -77,35 +71,40 @@ def distract(img):
     return out
 
 
-# 1. Cartão marcado + sujeira + degradação: tem que achar e ler RÁPIDO
-card = generate_saev_card(SaevSpec(n_questoes=QPS), student_name="ALUNA SUJA")
-half = int(SAEV_SIDE / 2) - 6
-expected = {}
-for q, col, r in saev_block_rows(QPS):
-    letter = "ABCD"[(q * 7 + 2) % 4]
-    expected[q] = letter
-    cx, cy = saev_bubble_center(col, r, "ABCD".index(letter), QPS)
-    cx, cy = int(cx), int(cy)
-    cv2.rectangle(card, (cx - half, cy - half), (cx + half, cy + half), (20, 20, 20), -1)
+def test_busy_photo_fast_and_accurate():
+    # 1. Cartão marcado + sujeira + degradação: tem que achar e ler RÁPIDO
+    card = generate_saev_card(SaevSpec(n_questoes=QPS), student_name="ALUNA SUJA")
+    half = int(SAEV_SIDE / 2) - 6
+    expected = {}
+    for q, col, r in saev_block_rows(QPS):
+        letter = "ABCD"[(q * 7 + 2) % 4]
+        expected[q] = letter
+        cx, cy = saev_bubble_center(col, r, "ABCD".index(letter), QPS)
+        cx, cy = int(cx), int(cy)
+        cv2.rectangle(card, (cx - half, cy - half), (cx + half, cy + half), (20, 20, 20), -1)
 
-busy = degrade(distract(card), seed=99)
+    busy = degrade(distract(card), seed=99)
 
-t0 = time.perf_counter()
-res = process_saev_image(busy, questions_per_subject=QPS, adaptive=True)
-dt = time.perf_counter() - t0
-assert res is not None, "pipeline retornou None na foto suja"
-check("foto suja: âncoras achadas", True, f"{dt:.1f}s")
-check(f"foto suja: pipeline < {BUDGET:.0f}s", dt < BUDGET, f"{dt:.1f}s")
-ok = sum(1 for q, l in expected.items() if res.answers.get(q) == l)
-check("foto suja: acerto >= 40/44", ok >= 40, f"{ok}/{N}")
+    t0 = time.perf_counter()
+    res = process_saev_image(busy, questions_per_subject=QPS, adaptive=True)
+    dt = time.perf_counter() - t0
+    assert res is not None, "pipeline retornou None na foto suja"
+    assert dt < BUDGET, f"foto suja: pipeline < {BUDGET:.0f}s: {dt:.1f}s"
+    ok = sum(1 for q, l in expected.items() if res.answers.get(q) == l)
+    assert ok >= 40, f"foto suja: acerto >= 40/44: {ok}/{N} ({dt:.1f}s)"
 
-# 2. Foto suja SEM cartão (só distratores): tem que FALHAR RÁPIDO, não travar
-noise = np.full((1200, 900, 3), 200, dtype=np.uint8)
-noise = degrade(distract(noise), seed=5)
-t0 = time.perf_counter()
-res2 = process_saev_image(noise, questions_per_subject=QPS)
-dt2 = time.perf_counter() - t0
-check(f"sem cartão: retorna None < {BUDGET:.0f}s", res2 is None and dt2 < BUDGET, f"{dt2:.1f}s")
 
-print("\nSAEV BUSY:", "PASS" if not check.failed else "FAIL")
-sys.exit(1 if check.failed else 0)
+def test_no_card_fails_fast():
+    # 2. Foto suja SEM cartão (só distratores): tem que FALHAR RÁPIDO, não travar
+    noise = np.full((1200, 900, 3), 200, dtype=np.uint8)
+    noise = degrade(distract(noise), seed=5)
+    t0 = time.perf_counter()
+    res2 = process_saev_image(noise, questions_per_subject=QPS)
+    dt2 = time.perf_counter() - t0
+    assert res2 is None and dt2 < BUDGET, f"sem cartão: retorna None < {BUDGET:.0f}s: {dt2:.1f}s"
+
+
+if __name__ == "__main__":
+    import pytest as _pytest
+    import sys as _sys
+    _sys.exit(_pytest.main([__file__, "-q"]))

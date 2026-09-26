@@ -55,11 +55,18 @@ export default function DashboardPage({ onNavigate }: Props) {
     if (!results.length) return null;
     const grades = results.map(r => r.grade).sort((a,b)=>a-b);
     const avg = grades.reduce((a,b)=>a+b,0)/grades.length;
-    const median = grades[Math.floor(grades.length/2)];
+    const mid = Math.floor(grades.length/2);
+    const median = grades.length % 2 === 0 ? (grades[mid-1] + grades[mid]) / 2 : grades[mid];
     const max = Math.max(...grades);
     const min = Math.min(...grades);
-    const buckets = Array(11).fill(0).map((_,i)=>({ name: String(i), count: 0 }));
-    for (const g of grades) buckets[Math.min(10, Math.max(0, Math.round(g)))].count++;
+    // Buckets na escala da prova: 0-10 → 11 faixas inteiras; 0-100/count → 10 faixas de 10
+    const scaleMax = exam?.gradeScale === '0-100' ? 100 : exam?.gradeScale === 'count' ? (exam?.totalQuestions || 44) : 10;
+    const nBuckets = scaleMax === 10 ? 11 : 10;
+    const buckets = Array(nBuckets).fill(0).map((_,i)=>({ name: scaleMax === 10 ? String(i) : `${Math.round(i*scaleMax/nBuckets)}–${Math.round((i+1)*scaleMax/nBuckets)}`, count: 0 }));
+    for (const g of grades) {
+      const idx = Math.min(nBuckets-1, Math.max(0, Math.floor(g/scaleMax*nBuckets)));
+      buckets[idx].count++;
+    }
     const qTotal = exam?.totalQuestions || 44;
     const qCorrect: Record<number, number> = {};
     const qAttempts: Record<number, number> = {};
@@ -114,7 +121,7 @@ export default function DashboardPage({ onNavigate }: Props) {
           </div>
 
           <div className="card card-hover">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Distribuição de notas (0-10)</h3>
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Distribuição de notas ({exam.gradeScale === '0-100' ? '0-100' : exam.gradeScale === 'count' ? 'acertos' : '0-10'})</h3>
             <div style={{ height: 140 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats.buckets}>
