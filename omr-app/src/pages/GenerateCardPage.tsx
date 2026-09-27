@@ -227,6 +227,11 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                       <p><strong>Modelo:</strong> Avaliação Contínua (cabeçalho editável abaixo)</p>
                       <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
                     </>
+                  ) : activeExam.layoutMode === 'single' ? (
+                    <>
+                      <p><strong>Disciplina:</strong> {activeExam.subjectLP}{isHerby ? ' (Herby 1 disciplina — metade esquerda)' : ''}</p>
+                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                    </>
                   ) : (
                     <>
                       <p><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>

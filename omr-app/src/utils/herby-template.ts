@@ -1,5 +1,6 @@
 // ─── Geometria do cartão "Gabarito Herby" (espelha omr/template_herby.py) ───
 // Canvas: 1448×2048 · 4 subcolunas × ceil(qps/2) linhas (LP 1..qps, MAT qps+1..2*qps)
+// Single: só a metade esquerda (cols 0-1, Q 1..qps)
 // Quadrados lado 28 · qps 1..26 por disciplina · SEM ArUco (âncoras = 2 QRs + bordas)
 
 export const HERBY_COLS_X = [193, 504, 815, 1127];
@@ -38,12 +39,13 @@ export function herbyRowYs(qps: number): number[] {
   return Array.from({ length: rows }, (_, i) => Math.round((HERBY_Y0 + i * step) * 10) / 10);
 }
 
-/** (questão global, coluna 0..3, linha) — LP=1..qps, MAT=qps+1..2*qps. */
-export function herbyBlockRows(qps: number): [number, number, number][] {
+/** (questão global, coluna, linha) — dual: LP=1..qps, MAT=qps+1..2*qps; single: só cols 0-1, Q 1..qps. */
+export function herbyBlockRows(qps: number, layout: 'dual' | 'single' = 'dual'): [number, number, number][] {
   const n = Math.max(1, Math.min(HERBY_MAX_QPS, Math.round(qps)));
   const rows = herbyRowsFor(n);
   const out: [number, number, number][] = [];
-  for (let col = 0; col < 4; col++) {
+  const cols = layout === 'single' ? [0, 1] : [0, 1, 2, 3];
+  for (const col of cols) {
     const base = col < 2 ? 0 : n;
     const off = col % 2 === 0 ? 0 : rows;
     for (let r = 0; r < rows; r++) {

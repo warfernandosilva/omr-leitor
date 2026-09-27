@@ -6,6 +6,8 @@ Canvas: 1448×2048 px (mesmo dos demais modelos).
 (modelo espelhado na folha oficial Herby/SAEV 2026 - Av. Formativa 3).
 Grade: 4 subcolunas × ceil(qps/2) linhas (LP 1..N / MAT 1..N),
 quadrados A-D. Dual 1+1 a 26+26 por disciplina (faixa vertical fixa).
+Single (1 disciplina): só a metade esquerda (subcolunas 0-1, Q 1..qps);
+metade direita fica em branco.
 Identificação:
 - QR cabeçalho (grande): magic link — por padrão o próprio codigo_unico;
   se HerbySpec.magic_base definido, `{base}?codigo={codigo}` (abrir resultado
@@ -69,11 +71,16 @@ def herby_row_ys(qps: int) -> list[float]:
     return [round(HERBY_Y0 + i * step, 1) for i in range(rows)]
 
 
-def herby_block_rows(qps: int):
-    """Itera (questao_global, coluna 0..3, linha) — LP=1..qps, MAT=qps+1..2*qps."""
+def herby_block_rows(qps: int, layout: str = "dual"):
+    """Itera (questao_global, coluna, linha).
+
+    Dual: 4 subcolunas — LP=1..qps, MAT=qps+1..2*qps.
+    Single: só a metade esquerda (cols 0-1) — Q 1..qps.
+    """
     qps = max(1, min(HERBY_MAX_QPS, int(qps)))
     rows = herby_rows_for(qps)
-    for col in range(4):
+    cols = range(2) if layout == "single" else range(4)
+    for col in cols:
         base = 0 if col < 2 else qps          # LP | MAT
         off = 0 if col % 2 == 0 else rows     # 1ª | 2ª subcoluna
         for r in range(rows):
@@ -126,6 +133,7 @@ class HerbySpec:
     n_questoes: int = 22      # por disciplina (1..26)
     turma: str = ""
     magic_base: str = ""      # base do magic link (vazio = QR cabeça = código)
+    layout_mode: str = "dual"  # dual | single (single = 1 disciplina, metade esquerda)
 
     def clamped_qps(self) -> int:
         return max(HERBY_MIN_QPS, min(HERBY_MAX_QPS, int(self.n_questoes or 22)))
@@ -198,8 +206,11 @@ def generate_herby_card(
         _draw_herby_header(d, pil, spec, name, qr_head, codigo)
 
     # ─── Títulos das disciplinas ───
+    # Single: só o título da disciplina única, sobre a metade usada.
+    single = (spec.layout_mode or "dual") == "single"
     font_title = load_font(40)
-    for text, cx in ((spec.titulo_lp, 480), (spec.titulo_mat, 1030)):
+    titles = ((spec.titulo_lp, 480),) if single else ((spec.titulo_lp, 480), (spec.titulo_mat, 1030))
+    for text, cx in titles:
         bbox = d.textbbox((0, 0), text, font=font_title)
         d.text((cx - (bbox[2] - bbox[0]) // 2, HERBY_TITLE_Y), text, fill=black, font=font_title)
 
@@ -207,7 +218,7 @@ def generate_herby_card(
     font_head = load_font(22)
     font_num = load_font(26)
     ys = herby_row_ys(qps)
-    for q, col, r in herby_block_rows(qps):
+    for q, col, r in herby_block_rows(qps, spec.layout_mode):
         y = ys[r]
         x0 = HERBY_COLS_X[col]
         # rótulo: LP "(n)" | MAT "n.)"

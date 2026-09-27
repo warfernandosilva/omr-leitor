@@ -35,7 +35,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isHerby = templateType === 'herby';
   const isCustom = isSae || isColar;
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
-  // Herby é sempre dual 1+1 a 26+26 por disciplina
+  // Herby: dual 1+1 a 26+26 ou single 1..26 (metade esquerda do cartão)
   const maxQps = isSaev ? SAEV_MAX_QPS : isHerby ? HERBY_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
   const minQps = isSaev ? SAEV_MIN_QPS : isHerby ? HERBY_MIN_QPS : 1;
   const totalQuestions = isCustom || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
@@ -117,7 +117,6 @@ export default function NewExamPage({ onNavigate }: Props) {
       setLayoutMode('dual');
       setQuestionsPerSubject((q) => Math.max(SAEV_MIN_QPS, Math.min(SAEV_MAX_QPS, q || 22)));
     } else if (t === 'herby') {
-      setLayoutMode('dual');
       setQuestionsPerSubject((q) => Math.max(HERBY_MIN_QPS, Math.min(HERBY_MAX_QPS, q || 22)));
     } else if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
       setQuestionsPerSubject(SAE_MAX_QUESTIONS);
@@ -125,8 +124,13 @@ export default function NewExamPage({ onNavigate }: Props) {
   };
 
   const handleModeChange = (mode: 'dual' | 'single') => {
-    if ((templateType === 'saev' || templateType === 'herby') && mode === 'single') return; // SAEV/Herby sempre dual
+    if (templateType === 'saev' && mode === 'single') return; // SAEV sempre dual
     setLayoutMode(mode);
+    if (templateType === 'herby') {
+      // Herby vale 1..26 nos dois layouts (single usa a metade esquerda)
+      setQuestionsPerSubject((q) => Math.max(HERBY_MIN_QPS, Math.min(HERBY_MAX_QPS, q || 22)));
+      return;
+    }
     if (questionsPerSubject > (mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT)) {
       setQuestionsPerSubject(mode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT);
     }
@@ -297,7 +301,7 @@ export default function NewExamPage({ onNavigate }: Props) {
                 }`}
               >
                 Gabarito Herby
-                <span className="block text-xs font-normal text-gray-400">LP + MAT · QR duplo · 1 a 26 por disciplina</span>
+                <span className="block text-xs font-normal text-gray-400">1 ou 2 disciplinas · QR duplo · 1 a 26 por disciplina</span>
               </button>
             </div>
           </div>
@@ -372,7 +376,9 @@ export default function NewExamPage({ onNavigate }: Props) {
               {minQps} a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.
               {!isCustom && layoutMode === 'dual' && templateType !== 'saev' && templateType !== 'herby' && ' O padrão do layout é 22 por disciplina.'}
               {templateType === 'saev' && ' Gabarito SAEV: LP + MAT com QR do sistema e nome impresso.'}
-              {templateType === 'herby' && ' Gabarito Herby: LP + MAT · QR duplo (cabeçalho + rodapé) · 1 a 26 por disciplina · sem ArUco.'}
+              {templateType === 'herby' && (layoutMode === 'single'
+                ? ' Gabarito Herby 1 disciplina: grade na metade esquerda · QR duplo (cabeçalho + rodapé) · 1 a 26 questões · sem ArUco.'
+                : ' Gabarito Herby: LP + MAT · QR duplo (cabeçalho + rodapé) · 1 a 26 por disciplina · sem ArUco.')}
               {isSae && ' O cabeçalho do cartão (caderno, série, QR etc.) é editado na tela de geração.'}
               {isColar && ' Somente o gabarito, sem cabeçalho — para colar na avaliação. Correção com identificação manual.'}
             </p>

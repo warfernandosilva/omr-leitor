@@ -1476,7 +1476,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   ) : overlayHerby ? (
                     <g>
                       {Array.from({ length: herbyRowsFor(activeExam.questionsPerSubject) }, (_, i) => {
-                        const { y, side, cells } = overlayHerbyRowFor(activeExam.questionsPerSubject, i + 1);
+                        const { y, side, cells } = overlayHerbyRowFor(activeExam.questionsPerSubject, i + 1, activeExam.layoutMode === 'single' ? 'single' : 'dual');
                         const h = side / 2;
                         return (
                           <g key={i + 1}>
@@ -1529,7 +1529,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     if (overlayHerby) {
                       const marks = omrResult?.duplicateMarks?.[q] ?? [];
                       return marks.map(letter => {
-                        const pos = overlayHerbyBubbleFor(activeExam.questionsPerSubject, q, letter);
+                        const pos = overlayHerbyBubbleFor(activeExam.questionsPerSubject, q, letter, activeExam.layoutMode === 'single' ? 'single' : 'dual');
                         if (!pos) return null;
                         const h = pos.side / 2 + 4;
                         return <rect key={`dup-${q}-${letter}`} x={pos.x - h} y={pos.y - h} width={h * 2} height={h * 2} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;

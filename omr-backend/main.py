@@ -195,6 +195,7 @@ class CardRequest(BaseModel):
     layout_mode: str = "dual"  # dual | single
     template: str = "padrao"  # padrao | sae | colar | saev
     sae: SaeSpecRequest | None = None
+    herby: HerbySpecRequest | None = None  # cabeçalho editável (só Herby)
 
 
 class BatchStudent(BaseModel):
@@ -471,8 +472,10 @@ def _answer_string(result: OMRResult, total: int) -> str:
 
 
 def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
-    if template_used in ("saev", "herby"):
+    if template_used == "saev":
         return 2 * qps
+    if template_used == "herby":
+        return qps if layout_mode == "single" else 2 * qps
     if template_used in ("sae", "colar"):
         return qps
     return qps if layout_mode == "single" else 2 * qps
@@ -518,7 +521,8 @@ def process_omr(
     elif template_used == "saev":
         result = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
     elif template_used == "herby":
-        result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
+        result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug,
+                                     layout_mode=layout_mode)
     else:
         result = process_image(
             image,
@@ -543,7 +547,8 @@ def process_omr(
                 result = saev_result
                 template_used = "saev"
             else:
-                herby_result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
+                herby_result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug,
+                                                   layout_mode=layout_mode)
                 if herby_result is not None:
                     result = herby_result
                     template_used = "herby"
@@ -735,7 +740,8 @@ def process_omr_multi(
         elif template_used == "saev":
             r = process_saev_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
         elif template_used == "herby":
-            r = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug)
+            r = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug,
+                                    layout_mode=layout_mode)
         else:
             r = process_image(image, questions_per_subject=questions_per_subject,
                               layout_mode=layout_mode, adaptive=adaptive, debug=debug)
@@ -921,7 +927,16 @@ def generate_card_endpoint(req: CardRequest, current_user: User = Depends(auth.g
 
     if req.template == "herby":
         qps = max(HERBY_MIN_QPS, min(HERBY_MAX_QPS, int(req.questions_per_subject or 22)))
-        spec = HerbySpec(n_questoes=qps)
+        hb = req.herby or HerbySpecRequest()
+        layout = "single" if req.layout_mode == "single" else "dual"
+        spec = HerbySpec(
+            n_questoes=qps,
+            evento=hb.evento, serie=hb.serie, caderno=hb.caderno,
+            turma=hb.turma, magic_base=hb.magic_base,
+            titulo_lp=(req.subject_lp or "Língua Portuguesa").strip() or "Língua Portuguesa",
+            titulo_mat=(req.subject_mat or "Matemática").strip() or "Matemática",
+            layout_mode=layout,
+        )
         if fmt == "PDF":
             data = generate_herby_card_bytes("PDF", spec)
             media, fname = "application/pdf", "cartao-herby.pdf"
@@ -1255,7 +1270,8 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
         spec = SaevSpec(n_questoes=max(SAEV_MIN_QPS, min(SAEV_MAX_QPS, int(av.questions_per_subject or 22))))
         pages_drawn = build_saev_batch_pdf(registros, spec, out_buf)
     elif (av.template or "padrao") == "herby":
-        # Gabarito Herby: grade 1+1 a 26+26, QR magic link + QR ID + Nome impresso
+        # Gabarito Herby: grade 1+1 a 26+26 (dual) ou 1..26 na metade esquerda (single),
+        # QR magic link + QR ID + Nome impresso
         # (coluna herby_spec chega na Fase 3; getattr mantém compat até lá)
         stored = dict(getattr(av, "herby_spec", None) or {})
         spec = HerbySpec(
@@ -1265,6 +1281,9 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
             caderno=stored.get("caderno", ""),
             turma=stored.get("turma", av.turma or ""),
             magic_base=stored.get("magic_base", ""),
+            titulo_lp=(av.subject_lp or "Língua Portuguesa").strip() or "Língua Portuguesa",
+            titulo_mat=(av.subject_mat or "Matemática").strip() or "Matemática",
+            layout_mode="single" if (av.layout_mode or "dual") == "single" else "dual",
         )
         pages_drawn = build_herby_batch_pdf(registros, spec, out_buf)
     else:

@@ -86,6 +86,15 @@ describe('gabaritoCropBox', () => {
     expect(box.y + box.h).toBeGreaterThanOrEqual(ly + h);
   });
 
+  it('herby single: crop só na metade esquerda', async () => {
+    const box = gabaritoCropBox({
+      questionsPerSubject: 10, layoutMode: 'single', totalQuestions: 10,
+      templateType: 'herby',
+    });
+    inside(box);
+    expect(box.x + box.w).toBeLessThanOrEqual(750);
+  });
+
   it('saev 22+22: contém primeira e última bolha de LP e MAT', async () => {
     const { saevBubbleCenter } = await import('./saev-template');
     const { SAEV_SIDE } = await import('./saev-template');

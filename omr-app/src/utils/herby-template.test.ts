@@ -38,4 +38,14 @@ describe('herby-template (espelho do backend)', () => {
     expect(x).toBeCloseTo(193 + 16 + 20, 6);
     expect(y).toBe(650);
   });
+
+  it('single: só metade esquerda, Q 1..qps', () => {
+    const rows = herbyBlockRows(10, 'single');
+    expect(rows).toHaveLength(10);
+    expect(rows.every(([, col]) => col === 0 || col === 1)).toBe(true);
+    expect(rows.map(([q]) => q).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    // dual inalterado
+    expect(herbyBlockRows(10)).toHaveLength(20);
+    expect(herbyBlockRows(10, 'dual')).toHaveLength(20);
+  });
 });

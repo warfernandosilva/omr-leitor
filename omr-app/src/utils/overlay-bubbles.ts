@@ -96,20 +96,21 @@ export function overlaySaevBubbleFor(
   const [x, y] = saevBubbleCenter(col, r, ci, qps);
   return { x, y, side: SAEV_SIDE };
 }
-// ─── Overlay do Gabarito Herby (quadrados; dual LP=1..qps, MAT=qps+1..2qps) ───
+// ─── Overlay do Gabarito Herby (quadrados; dual LP=1..qps, MAT=qps+1..2qps; single: só cols 0-1) ───
 export interface OverlayHerbyRow {
   row: number; // linha 1-based dentro da disciplina
   y: number;
   side: number;
-  cells: OverlayCell[]; // LP e MAT na mesma linha física
+  cells: OverlayCell[]; // LP e MAT na mesma linha física (single: só LP)
 }
 
-export function overlayHerbyRowFor(qps: number, row: number): OverlayHerbyRow {
+export function overlayHerbyRowFor(qps: number, row: number, layout: 'dual' | 'single' = 'dual'): OverlayHerbyRow {
   const ys = herbyRowYs(qps);
   const y = ys[row - 1] ?? 0;
   const rows = herbyRowsFor(qps);
   const cells: OverlayCell[] = [];
-  for (let col = 0; col < 4; col++) {
+  const cols = layout === 'single' ? [0, 1] : [0, 1, 2, 3];
+  for (const col of cols) {
     const base = col < 2 ? 0 : qps;
     const off = col % 2 === 0 ? 0 : rows;
     const q = base + off + row;
@@ -124,12 +125,13 @@ export function overlayHerbyRowFor(qps: number, row: number): OverlayHerbyRow {
 
 // Posição de um quadrado Herby específico (p/ o mapa de duplicadas)
 export function overlayHerbyBubbleFor(
-  qps: number, q: number, letter: string,
+  qps: number, q: number, letter: string, layout: 'dual' | 'single' = 'dual',
 ): { x: number; y: number; side: number } | null {
   const ci = OVERLAY_LETTERS.indexOf(letter as (typeof OVERLAY_LETTERS)[number]);
   if (ci < 0) return null;
   const rows = herbyRowsFor(qps);
   const inMat = q > qps;
+  if (inMat && layout === 'single') return null;
   const local = inMat ? q - qps : q;
   if (local < 1 || local > qps) return null;
   const col = (inMat ? 2 : 0) + (local > rows ? 1 : 0);

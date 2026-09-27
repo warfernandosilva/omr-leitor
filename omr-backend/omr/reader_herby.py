@@ -56,9 +56,14 @@ def process_herby_image(
     questions_per_subject: int | None = None,
     adaptive: bool = False,
     debug: bool = False,
+    layout_mode: str = "dual",
 ) -> OMRResult | None:
-    """Pipeline completo OMR-Herby. questions_per_subject = por disciplina (1..26)."""
+    """Pipeline completo OMR-Herby. questions_per_subject = por disciplina (1..26).
+
+    layout_mode single: lê só a metade esquerda (Q 1..qps).
+    """
     qps = max(HERBY_MIN_QPS, min(HERBY_MAX_QPS, int(questions_per_subject or 22)))
+    layout = "single" if layout_mode == "single" else "dual"
 
     _t0 = _time.perf_counter()
     det = detect_herby_anchors(image)
@@ -108,7 +113,7 @@ def process_herby_image(
     all_ratios: dict[int, dict[str, float]] = {}
     geom: dict[int, list] = {}
 
-    for q, col, _r in herby_block_rows(qps):
+    for q, col, _r in herby_block_rows(qps, layout):
         _, cy = herby_bubble_center(col, _r, 0, qps)
         x0 = HERBY_COLS_X[col]
         q_ratios: dict[str, float] = {}

@@ -41,9 +41,10 @@ export function gabaritoCropBox(exam: CropInput): CropBox {
     r = SAEV_SIDE / 2;
   } else if (exam.templateType === 'herby') {
     const qps = Math.max(1, exam.questionsPerSubject || 0);
+    const layout = exam.layoutMode === 'single' ? 'single' : 'dual';
     xs = [];
     ys = [];
-    for (const [, col, r] of herbyBlockRows(qps)) {
+    for (const [, col, r] of herbyBlockRows(qps, layout)) {
       for (let ci = 0; ci < 4; ci++) {
         const [x, y] = herbyBubbleCenter(col, r, ci, qps);
         xs.push(x);
