@@ -12,8 +12,9 @@ def test_tuning_table():
     assert saev.score_set == "bests" and saev.hi == 0.55 and saev.force_adaptive, \
         "saev: bests + hi=0.55 + force"
     herby = get_tuning("herby")
-    assert herby.score_set == "bests" and herby.hi == 0.55 and herby.force_adaptive, \
-        "herby: ponto de partida SAEV"
+    assert herby.score_set == "bests" and herby.hi == 0.40 and herby.force_adaptive \
+        and herby.margin == 0.15 and herby.min_peak == 0.45, \
+        "herby: calibrado 28/09 (bests/hi=0.40/force/margin=0.15/min_peak=0.45)"
     assert all(get_tuning(m).score_set == "flat" and get_tuning(m).hi == 0.45
                and not get_tuning(m).force_adaptive for m in ("padrao", "sae", "colar")), \
         "padrao/sae/colar: flat + hi=0.45 sem force"

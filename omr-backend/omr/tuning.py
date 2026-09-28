@@ -7,8 +7,9 @@ Cada modelo declara como calcula o divisor marcado/vazio:
 - force_adaptive: ignora o default OFF (hoje só SAEV, com evidência real).
 
 Evidências (de onde veio cada número):
-- FLOOR=0.30/MARGIN=0.15 (config.py): A/B first-large-gap x Otsu em 19 fotos
+- FLOOR=0.30 (config.py): A/B first-large-gap x Otsu em 19 fotos
   reais (compare_floors.py: Otsu gap médio 0.349) — fixo vence sem adaptativo.
+- MARGIN global=0.22 (config.py); Herby usa margin=0.15 própria (grid 28/09).
 - SAEV bests/hi=0.55/force_adaptive: fotos reais 43-44/44 no adaptativo vs
   18/41 no fixo (evidência de campo; bolhas quadradas têm contraste menor).
 - Demais modelos: default conservador até haver evidência contrária.
@@ -26,6 +27,10 @@ class ModelTuning:
     score_set: str = "flat"
     hi: float = 0.45
     force_adaptive: bool = False
+    margin: float = 0.22  # gap 1º-2º p/ duplicada (Herby: 0.15, evidência abaixo)
+    # Pico mínimo para confiar no adaptativo: se nenhum score chega lá
+    # (folha em branco/ruído), usa o fixo. Herby: 0.45 (virgem top ~0.28).
+    min_peak: float | None = None
 
 
 MODEL_TUNING: dict[str, ModelTuning] = {
@@ -33,9 +38,11 @@ MODEL_TUNING: dict[str, ModelTuning] = {
     "sae": ModelTuning(),
     "colar": ModelTuning(),
     "saev": ModelTuning(score_set="bests", hi=0.55, force_adaptive=True),
-    # Herby: ponto de partida = SAEV (quadrados) até calibração com folhas
-    # preenchidas reais (hoje só há a virgem 2026_MAT__POR_5ano_1.jpg).
-    "herby": ModelTuning(score_set="bests", hi=0.55, force_adaptive=True),
+    # Herby: calibrado em 5 folhas preenchidas reais (220 questões, ground
+    # truth CSV 28/09/2026) — grid hi x score_set x MARGIN: hi=0.40/bests/
+    # margin=0.15 → 59.1% auto + 0.5% erro (vs 35.5% com hi=0.55).
+    # Alinhamento: warp afim + refino pela grade (refine_herby_grid).
+    "herby": ModelTuning(score_set="bests", hi=0.40, force_adaptive=True, margin=0.15, min_peak=0.45),
 }
 
 
@@ -61,6 +68,8 @@ def compute_floor_for(
         scores = [max(qr.values()) for qr in all_ratios.values() if qr]
     else:
         scores = [s for qr in all_ratios.values() for s in qr.values()]
+    if t.min_peak is not None and (not scores or max(scores) < t.min_peak):
+        return FLOOR, "fixed"
     if t.floor_method == "gap":
         return compute_floor(scores, method="gap", hi=t.hi)
     return adaptive_floor(scores, hi=t.hi)

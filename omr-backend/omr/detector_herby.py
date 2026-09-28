@@ -174,8 +174,11 @@ def herby_homography(det: HerbyDetectionResult) -> np.ndarray | None:
         if det.has_page:
             M, _ = cv2.findHomography(src, dst, 0)
             return M
-        A, _ = cv2.estimateAffinePartial2D(src, dst, method=cv2.RANSAC,
-                                           ransacReprojThreshold=REPROJ_MAX)
+        # Só QRs (agrupados à esquerda): afim completa (6 DOF: escala
+        # anisotrópica + shear) — similaridade (4 DOF) erra a escala Y longe
+        # dos QRs (evidência: topo -12px, base 0 em fotos reais).
+        A, _ = cv2.estimateAffine2D(src, dst, method=cv2.RANSAC,
+                                    ransacReprojThreshold=REPROJ_MAX)
         if A is None:
             return None
         return np.vstack([A, [0, 0, 1]])
@@ -243,11 +246,88 @@ def refine_herby_qr_boxes(gray_rectified: np.ndarray, margin: int = 60) -> np.nd
         return None
 
 
+def refine_herby_grid(gray_rectified: np.ndarray, qps: int) -> np.ndarray | None:
+    """Refino fino pela GRADE: casa quadrados detectados com o template.
+
+    Após o warp grosseiro, resíduos de 5-15px com padrão NÃO-linear são
+    comuns (perspectiva real com âncoras só à esquerda — projeção 1D não
+    resolve). Os 176 quadrados impressos (vazios ou marcados) são âncoras
+    espalhadas pela página inteira: detecta quads ~28px via Canny, casa
+    cada centro ao quadrado-template mais próximo (<25px) e estima afim
+    via RANSAC. Devolve M_corr (retificada→template) ou None.
+    """
+    from .template_herby import herby_block_rows, herby_bubble_center
+    h, w = gray_rectified.shape[:2]
+    x0b, x1b, y0b, y1b = 120, 1340, 600, 1900
+    band = gray_rectified[max(0, y0b):min(h, y1b), max(0, x0b):min(w, x1b)]
+    if band.size == 0:
+        return None
+    blur = cv2.GaussianBlur(band, (3, 3), 0)
+    edges = cv2.Canny(blur, 50, 150)
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    det = []
+    for cnt in contours:
+        peri = float(cv2.arcLength(cnt, True))
+        if peri < 60:
+            continue
+        approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+        if len(approx) != 4 or not cv2.isContourConvex(approx):
+            continue
+        pts = approx.reshape(-1, 2).astype(np.float32)
+        edges_len = [float(np.linalg.norm(pts[i] - pts[(i + 1) % 4])) for i in range(4)]
+        side = sum(edges_len) / 4
+        if not (16 <= side <= 40):
+            continue
+        if max(edges_len) / max(1.0, min(edges_len)) > 1.35:
+            continue
+        m = cv2.moments(cnt)
+        if m["m00"] <= 0:
+            continue
+        det.append((m["m10"] / m["m00"] + x0b, m["m01"] / m["m00"] + y0b))
+    if len(det) < 12:
+        return None
+    tmpl = []
+    for _q, col, r in herby_block_rows(qps):
+        for ci in range(4):
+            tmpl.append(herby_bubble_center(col, r, ci, qps))
+    tmpl = np.array(tmpl, dtype=np.float32)
+    det_arr = np.array(det, dtype=np.float32)
+    # vizinho template mais próximo (<25px), com unicidade
+    used = set()
+    pairs = []
+    for d in det_arr:
+        dists = np.linalg.norm(tmpl - d, axis=1)
+        j = int(np.argmin(dists))
+        if dists[j] < 25.0 and j not in used:
+            used.add(j)
+            pairs.append((d, tmpl[j]))
+    if len(pairs) < 10:
+        return None
+    src = np.array([p[0] for p in pairs], dtype=np.float32)
+    dst = np.array([p[1] for p in pairs], dtype=np.float32)
+    if src[:, 0].max() - src[:, 0].min() < 600 or src[:, 1].max() - src[:, 1].min() < 600:
+        return None
+    try:
+        A, mask = cv2.estimateAffine2D(src, dst, method=cv2.RANSAC, ransacReprojThreshold=4.0)
+    except cv2.error:
+        return None
+    if A is None or int((mask > 0).sum()) < 10:
+        return None
+    lin = A[:, :2]
+    s = np.linalg.norm(lin, axis=0)
+    if not (0.92 <= s[0] <= 1.08 and 0.92 <= s[1] <= 1.08):
+        return None
+    if abs(float(A[0, 2])) > 40 or abs(float(A[1, 2])) > 40:
+        return None
+    return np.vstack([A, [0, 0, 1]])
+
+
 __all__ = [
     "HerbyDetectionResult",
     "detect_herby_anchors",
     "herby_homography",
     "refine_herby_qr_boxes",
+    "refine_herby_grid",
     "PAGE_W",
     "PAGE_H",
 ]

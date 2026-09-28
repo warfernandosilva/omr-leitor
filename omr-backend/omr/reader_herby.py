@@ -15,9 +15,9 @@ import cv2
 import numpy as np
 import time as _time
 
-from .config import BLUR_BLOCK, MARGIN
-from .tuning import compute_floor_for
-from .detector_herby import detect_herby_anchors, herby_homography, refine_herby_qr_boxes
+from .config import BLUR_BLOCK
+from .tuning import compute_floor_for, get_tuning
+from .detector_herby import detect_herby_anchors, herby_homography, refine_herby_qr_boxes, refine_herby_grid
 from .reader import (
     OMRResult,
     _decode_qr_from,
@@ -81,11 +81,17 @@ def process_herby_image(
         return None
     # Refino: cantos do detector têm viés para dentro do QR — re-localiza
     # os boxes exatos na retificada e compõe M2 @ M1 (1 interpolação só).
+    # Depois, refino fino por projeção da grade (escala Y residual).
     try:
         gray_pre = cv2.cvtColor(rectified, cv2.COLOR_BGR2GRAY) if len(rectified.shape) == 3 else rectified
         M2 = refine_herby_qr_boxes(gray_pre)
         if M2 is not None:
             M = M2 @ M
+            rectified = cv2.warpPerspective(image, M, (PAGE_W, PAGE_H))
+            gray_pre = cv2.cvtColor(rectified, cv2.COLOR_BGR2GRAY) if len(rectified.shape) == 3 else rectified
+        G = refine_herby_grid(gray_pre, qps)
+        if G is not None:
+            M = G @ M
             rectified = cv2.warpPerspective(image, M, (PAGE_W, PAGE_H))
     except cv2.error:
         pass
@@ -136,9 +142,10 @@ def process_herby_image(
     # Divisor via tabela por modelo (herby = ponto de partida SAEV até
     # calibração com folhas preenchidas reais — ver omr/tuning.py).
     floor, floor_source = compute_floor_for("herby", all_ratios, adaptive)
+    margin = get_tuning("herby").margin
 
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
+        status, best_letter, marks = classify_question(ratios, floor=floor, margin=margin)
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":
