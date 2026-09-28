@@ -81,7 +81,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
         activeExam.questionsPerSubject,
         activeExam.layoutMode ?? 'dual',
         template,
-        loadAdaptiveFlag() || isSaevExam(activeExam),
+        loadAdaptiveFlag() || isSaevExam(activeExam) || isHerbyExam(activeExam),
       );
       if (!res.success || !res.answers) {
         setReadError(res.error || 'Falha na leitura da foto — tente novamente com melhor iluminação.');

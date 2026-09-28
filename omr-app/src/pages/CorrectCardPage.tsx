@@ -808,7 +808,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       try {
         // 1. Leitura OMR + QR (usa o modelo da prova; fallback cruzado no backend)
         const tpl = exam.templateType === 'saev' ? 'saev' : exam.templateType === 'herby' ? 'herby' : undefined;
-        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev', debugMode);
+        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev' || exam.templateType === 'herby', debugMode);
         if (!result.success || !result.answers) {
           patchItem(item.fileName, { status: 'error', detail: result.error || 'Falha na leitura' });
           continue;

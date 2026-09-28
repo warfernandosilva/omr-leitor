@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { overlayRowFor, overlayBubbleFor, isSingleLayout } from './overlay-bubbles';
+import { overlayRowFor, overlayBubbleFor, isSingleLayout, overlayHerbyRowFor, overlayHerbyBubbleFor } from './overlay-bubbles';
 import {
   SINGLE_X, SINGLE_BUBBLE_RADIUS, singleQuestionYFor,
   PORTUGUESE_X, MATHEMATICS_X, BUBBLE_RADIUS, questionYFor,
 } from './card-template';
+import { HERBY_SIDE, herbyBubbleCenter } from './herby-template';
 import type { Exam } from '../types';
 
 function exam(patch: Partial<Exam> = {}): Exam {
@@ -50,5 +51,18 @@ describe('overlay-bubbles', () => {
     expect(m).toEqual({ x: MATHEMATICS_X[1], y: questionYFor(22)[7], r: BUBBLE_RADIUS });
     expect(overlayBubbleFor(dual, 1, 'X')).toBeNull();
     expect(overlayBubbleFor(single, 99, 'A')).toBeNull();
+  });
+
+  it('herby usa quadrados próprios (lado 28, LP=1..qps, MAT=qps+1..)', () => {
+    const row = overlayHerbyRowFor(22, 1);
+    expect(row.side).toBe(HERBY_SIDE);
+    expect(row.cells.map(c => c.q)).toEqual([1, 1, 1, 1, 12, 12, 12, 12, 23, 23, 23, 23, 34, 34, 34, 34]);
+    const [ex] = herbyBubbleCenter(0, 0, 0, 22);
+    expect(row.cells[0].x).toBe(ex);
+    const pos = overlayHerbyBubbleFor(22, 30, 'B');
+    const [bx, by] = herbyBubbleCenter(2, 7, 1, 22);
+    expect(pos).toEqual({ x: bx, y: by, side: HERBY_SIDE });
+    expect(overlayHerbyBubbleFor(22, 99, 'A')).toBeNull();
+    expect(overlayHerbyBubbleFor(22, 1, 'X')).toBeNull();
   });
 });

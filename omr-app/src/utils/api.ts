@@ -561,7 +561,11 @@ export async function deleteAluno(alunoId: number): Promise<{ nome: string; gaba
 }
 
 export async function lookupCodigo(codigo: string): Promise<LookupResult> {
-  const res = await fetchTimeout(`${API_BASE}/api/gabaritos/${encodeURIComponent(codigo)}/lookup`, {
+  // Normaliza magic link (Herby) para o ID puro antes de ir à URL:
+  // '?' em path-parameter quebraria a rota no servidor.
+  const { normalizeHerbyQr } = await import('./herby-template');
+  const chave = normalizeHerbyQr(codigo) || codigo.trim();
+  const res = await fetchTimeout(`${API_BASE}/api/gabaritos/${encodeURIComponent(chave)}/lookup`, {
     headers: authHeaders(),
   });
   if (res.status === 404) return { found: false };

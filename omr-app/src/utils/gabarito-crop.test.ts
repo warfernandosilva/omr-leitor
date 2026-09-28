@@ -111,4 +111,21 @@ describe('gabaritoCropBox', () => {
     expect(box.x + box.w).toBeGreaterThanOrEqual(lx + h);
     expect(box.y + box.h).toBeGreaterThanOrEqual(ly + h);
   });
+
+  it('herby 22+22: contém primeira e última bolha de LP e MAT', async () => {
+    const { herbyBubbleCenter } = await import('./herby-template');
+    const { HERBY_SIDE } = await import('./herby-template');
+    const box = gabaritoCropBox({
+      questionsPerSubject: 22, layoutMode: 'dual', totalQuestions: 44,
+      templateType: 'herby',
+    });
+    inside(box);
+    const [fx, fy] = herbyBubbleCenter(0, 0, 0, 22);
+    const [lx, ly] = herbyBubbleCenter(3, 10, 3, 22);
+    const h = HERBY_SIDE / 2;
+    expect(box.x).toBeLessThanOrEqual(fx - h);
+    expect(box.y).toBeLessThanOrEqual(fy - h);
+    expect(box.x + box.w).toBeGreaterThanOrEqual(lx + h);
+    expect(box.y + box.h).toBeGreaterThanOrEqual(ly + h);
+  });
 });

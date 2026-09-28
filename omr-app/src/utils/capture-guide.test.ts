@@ -45,8 +45,8 @@ describe('guideRectFor', () => {
 describe('anchorTargetsFor', () => {
   const guide = guideRectFor(360, 640);
 
-  it('alvos dos 4 modelos ficam dentro do guia', () => {
-    for (const t of ['padrao', 'sae', 'colar', 'saev'] as const) {
+  it('alvos dos 5 modelos ficam dentro do guia', () => {
+    for (const t of ['padrao', 'sae', 'colar', 'saev', 'herby'] as const) {
       const a = anchorTargetsFor(t, guide);
       for (const k of ['TL', 'TR', 'BR', 'BL'] as const) {
         expect(a[k].x).toBeGreaterThanOrEqual(guide.x);
@@ -89,6 +89,7 @@ describe('thresholdsFor / captureTemplateFor', () => {
     expect(captureTemplateFor('sae')).toBe('sae');
     expect(captureTemplateFor('colar')).toBe('colar');
     expect(captureTemplateFor('saev')).toBe('saev');
+    expect(captureTemplateFor('herby')).toBe('herby');
   });
 
   it('SAEV tem alvos próprios (mais altos que SAE, limiares do padrão)', () => {

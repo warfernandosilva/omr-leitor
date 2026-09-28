@@ -11,7 +11,7 @@ function dbExam(patch: Partial<DBExam> = {}): DBExam {
     id: 1, external_id: 'E1', titulo: 'Prova', turma: null,
     subject_lp: 'LÍNGUA PORTUGUESA', subject_mat: 'MATEMÁTICA',
     questions_per_subject: 22, layout_mode: 'dual', template: 'padrao',
-    sae_spec: null, grade_scale: '0-10', answer_key: null,
+    sae_spec: null, herby_spec: null, grade_scale: '0-10', answer_key: null,
     created_at: '2026-01-01T00:00:00',
     ...patch,
   };
@@ -91,6 +91,19 @@ describe('mergeRemoteExams (servidor vence)', () => {
     const got = merged.find(e => e.id === 'QR-EXAM');
     expect(got?.templateType).toBe('saev');
     expect(got?.totalQuestions).toBe(44);
+  });
+
+  it('preserva templateType herby + herbySpec no merge (correção mobile)', () => {
+    const { merged } = mergeRemoteExams([], [
+      dbExam({
+        external_id: 'H1', template: 'herby', questions_per_subject: 22,
+        herby_spec: { evento: 'Ev', serie: '5º', caderno: 'CAD', turma: 'A', magic_base: '', n_questoes: 22 },
+      }),
+    ]);
+    expect(merged[0].templateType).toBe('herby');
+    expect(merged[0].herbySpec?.caderno).toBe('CAD');
+    expect(merged[0].herbySpec?.n_questoes).toBe(22);
+    expect(merged[0].totalQuestions).toBe(44);
   });
 });
 
