@@ -15,9 +15,10 @@ import numpy as np
 import time as _time
 
 from .config import BLUR_BLOCK, MARGIN
+from .params import OmrParams
 from .tuning import compute_floor_for
 from .detector_sae import detect_sae_corners, sae_homography
-from .reader import OMRResult, _bubble_score, _decode_qr_from, classify_question
+from .reader import OMRResult, DEFAULT_WEIGHTS, _bubble_score, _decode_qr_from, classify_question
 from .template_sae import (
     PAGE_W, PAGE_H,
     SAE_BLOCKS_X, SAE_BUBBLE_DX, SAE_BUBBLE_RADIUS,
@@ -50,8 +51,13 @@ def process_sae_image(
     n_questions: int | None = None,
     adaptive: bool = False,
     debug: bool = False,
+    overrides: OmrParams | None = None,
 ) -> OMRResult | None:
-    """Pipeline completo OMR-SAE. n_questions = total de questões (1..28)."""
+    """Pipeline completo OMR-SAE. n_questions = total de questões (1..28).
+
+    `overrides` é só para Laboratório/Calibração (ver omr/params.py).
+    """
+    p = overrides or OmrParams()
     n = max(1, min(SAE_MAX_QUESTIONS, int(n_questions or 26)))
 
     _t0 = _time.perf_counter()
@@ -76,7 +82,10 @@ def process_sae_image(
     if blur_var < BLUR_BLOCK:
         return None
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(
+        clipLimit=p.clahe_clip if p.clahe_clip is not None else 2.0,
+        tileGridSize=p.clahe_tiles if p.clahe_tiles is not None else (8, 8),
+    )
     gray = clahe.apply(gray)
 
     _t2 = _time.perf_counter()
@@ -88,6 +97,9 @@ def process_sae_image(
     # Máscara um pouco menor que a bolha: ignora o contorno impresso e mede
     # só o interior (marca de lápis/caneta). Bolhas vazias ≈ 0.05.
     radius = max(6, int(round(SAE_BUBBLE_RADIUS)) - 2)
+    if p.inner_radius is not None:
+        radius = p.inner_radius
+    weights = p.weights if p.weights is not None else DEFAULT_WEIGHTS
     all_ratios: dict[int, dict[str, float]] = {}
     geom: dict[int, list] = {}
 
@@ -97,7 +109,7 @@ def process_sae_image(
         q_ratios: dict[str, float] = {}
         q_geom: list = []
         for i, dx in enumerate(SAE_BUBBLE_DX):
-            score = _bubble_score(gray, bx + dx, y, radius=radius)
+            score = _bubble_score(gray, bx + dx, y, radius=radius, weights=weights)
             q_ratios[letters[i]] = score
             if debug:
                 q_geom.append((bx + dx, y, SAE_BUBBLE_RADIUS, letters[i]))
@@ -112,9 +124,14 @@ def process_sae_image(
     low_conf: list[int] = []
 
     floor, floor_source = compute_floor_for("sae", all_ratios, adaptive)
+    if p.floor is not None:
+        floor, floor_source = p.floor, "override"
+    margin = p.margin if p.margin is not None else MARGIN
 
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
+        status, best_letter, marks = classify_question(
+            ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold
+        )
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":

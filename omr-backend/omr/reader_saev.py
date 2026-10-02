@@ -15,10 +15,13 @@ import numpy as np
 import time as _time
 
 from .config import BLUR_BLOCK, MARGIN
+from .params import OmrParams
 from .tuning import compute_floor_for
 from .detector_saev import detect_saev_corners, saev_homography, saev_homography_aruco
 from .reader import (
     OMRResult,
+    BubbleMetrics,
+    DEFAULT_WEIGHTS,
     _decode_qr_from,
     _estimate_paper_brightness,
     classify_question,
@@ -32,18 +35,23 @@ from .template_saev import (
 )
 
 
-def _square_score(
-    gray: np.ndarray, cx: float, cy: float, side: float = SAEV_SIDE, inset: int = 6
-) -> float:
-    """Score 0..1 de preenchimento do interior do quadrado.
+def _square_metrics(
+    gray: np.ndarray,
+    cx: float,
+    cy: float,
+    side: float = SAEV_SIDE,
+    inset: int = 6,
+    weights: tuple[float, float, float] = DEFAULT_WEIGHTS,
+) -> BubbleMetrics:
+    """Componentes de score do quadrado (0.4 média + 0.4 razão escura + 0.2 contraste).
 
-    Mesma ponderação do _bubble_score circular (0.4 média + 0.4 razão
-    escura + 0.2 contraste), com máscara quadrada insetada para ignorar
-    o traço impresso. Quadrado vazio ≈ 0.05.
+    Mesma ponderação da bolha circular, com máscara quadrada insetada para
+    ignorar o traço impresso. Quadrado vazio ≈ 0.05. Componentes expostos
+    para o Laboratório recalcular com pesos próprios.
     """
     half = side / 2 - inset
     if half <= 0:
-        return 0.0
+        return BubbleMetrics.zeros()
     h, w = gray.shape[:2]
     margin = 4
     x0 = max(0, int(cx - half - margin)); y0 = max(0, int(cy - half - margin))
@@ -51,20 +59,38 @@ def _square_score(
     )
     roi = gray[y0:y1, x0:x1]
     if roi.size == 0:
-        return 0.0
+        return BubbleMetrics.zeros()
 
-    _, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    thr_otsu, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     yy, xx = np.ogrid[:roi.shape[0], :roi.shape[1]]
     lx, ly = cx - x0, cy - y0
     mask = (np.abs(xx - lx) <= half) & (np.abs(yy - ly) <= half)
     if mask.sum() == 0:
-        return 0.0
+        return BubbleMetrics.zeros()
 
     brightness = _estimate_paper_brightness(gray, int(cx), int(cy), int(half))
     mean_intensity = 1.0 - (float(np.mean(roi[mask])) / 255.0)
     dark_ratio = float((binary[mask] > 0).sum()) / float(mask.sum())
     contrast = max(0, (brightness - float(np.mean(roi[mask]))) / 255.0)
-    return 0.4 * mean_intensity + 0.4 * dark_ratio + 0.2 * contrast
+
+    return BubbleMetrics(
+        score=weights[0] * mean_intensity + weights[1] * dark_ratio + weights[2] * contrast,
+        mean_intensity=mean_intensity,
+        dark_ratio=dark_ratio,
+        contrast=contrast,
+        otsu_threshold=float(thr_otsu),
+    )
+
+
+def _square_score(
+    gray: np.ndarray,
+    cx: float,
+    cy: float,
+    side: float = SAEV_SIDE,
+    inset: int = 6,
+    weights: tuple[float, float, float] = DEFAULT_WEIGHTS,
+) -> float:
+    return _square_metrics(gray, cx, cy, side, inset, weights).score
 
 
 def _decode_saev_qr(gray_rectified: np.ndarray) -> str | None:
@@ -89,8 +115,13 @@ def process_saev_image(
     questions_per_subject: int | None = None,
     adaptive: bool = False,
     debug: bool = False,
+    overrides: OmrParams | None = None,
 ) -> OMRResult | None:
-    """Pipeline completo OMR-SAEV. questions_per_subject = por disciplina (16..26)."""
+    """Pipeline completo OMR-SAEV. questions_per_subject = por disciplina (16..26).
+
+    `overrides` é só para Laboratório/Calibração (ver omr/params.py).
+    """
+    p = overrides or OmrParams()
     # Mesmo clamp do template (clamped_qps): qps<16 geraria grade incompatível com o cartão real
     qps = max(SAEV_MIN_QPS, min(SAEV_MAX_QPS, int(questions_per_subject or 22)))
 
@@ -128,7 +159,10 @@ def process_saev_image(
     if blur_var < BLUR_BLOCK:
         return None
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(
+        clipLimit=p.clahe_clip if p.clahe_clip is not None else 2.0,
+        tileGridSize=p.clahe_tiles if p.clahe_tiles is not None else (8, 8),
+    )
     gray = clahe.apply(gray)
 
     _t2 = _time.perf_counter()
@@ -137,6 +171,8 @@ def process_saev_image(
     _t3 = _time.perf_counter()
 
     letters = ["A", "B", "C", "D"]
+    weights = p.weights if p.weights is not None else DEFAULT_WEIGHTS
+    inset = p.square_inset if p.square_inset is not None else 6
     all_ratios: dict[int, dict[str, float]] = {}
     geom: dict[int, list] = {}
 
@@ -147,7 +183,7 @@ def process_saev_image(
         q_geom: list = []
         for i in range(4):
             cx = x0 + SAEV_NUM_W + i * SAEV_PITCH + SAEV_PITCH / 2
-            q_ratios[letters[i]] = _square_score(gray, cx, cy)
+            q_ratios[letters[i]] = _square_score(gray, cx, cy, inset=inset, weights=weights)
             if debug:
                 q_geom.append((cx, cy, SAEV_SIDE / 2, letters[i]))
         all_ratios[q] = q_ratios
@@ -163,9 +199,14 @@ def process_saev_image(
     # Divisor via tabela por modelo (score_set='bests', hi=0.55,
     # force_adaptive — ver omr/tuning.py).
     floor, floor_source = compute_floor_for("saev", all_ratios, adaptive)
+    if p.floor is not None:
+        floor, floor_source = p.floor, "override"
+    margin = p.margin if p.margin is not None else MARGIN
 
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
+        status, best_letter, marks = classify_question(
+            ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold
+        )
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":

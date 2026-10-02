@@ -82,3 +82,11 @@ def require_owner_or_admin(avaliacao: models.Avaliacao, user: models.User):
         return  # legado sem dono — visível para todos até migração
     if avaliacao.owner_id != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Sem permissão para esta avaliação")
+
+
+def require_lab_owner_or_admin(session: models.LabSession, user: models.User):
+    """Mesma política de `require_owner_or_admin` para sessões do Laboratório."""
+    if session.owner_id is None:
+        return  # legado sem dono — visível para todos até migração
+    if session.owner_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Sem permissão para esta sessão do Laboratório")

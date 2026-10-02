@@ -412,6 +412,10 @@ def me(current_user: User = Depends(auth.get_current_user)):
 from routers.admin import router as _admin_router
 app.include_router(_admin_router)
 
+# Laboratório OMR (banco de testes/validação/calibração) — reusa o motor de produção
+from routers.lab import router as _lab_router
+app.include_router(_lab_router)
+
 
 def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
     """Decodifica bytes de imagem com correção de orientação EXIF (celular)

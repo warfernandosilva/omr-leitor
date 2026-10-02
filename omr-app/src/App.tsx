@@ -15,6 +15,7 @@ import RegisterKeyPage from './pages/RegisterKeyPage';
 import CorrectCardPage from './pages/CorrectCardPage';
 import ResultsPage from './pages/ResultsPage';
 import DashboardPage from './pages/DashboardPage';
+import LabPage from './pages/LabPage';
 import ViewResultPage from './pages/ViewResultPage';
 import AdminUsersPage from './pages/AdminUsersPage';
 import LoginPage from './pages/LoginPage';
@@ -92,6 +93,8 @@ function AppInner() {
         return <ResultsPage onNavigate={navigate} />;
       case 'dashboard':
         return <DashboardPage onNavigate={navigate} />;
+      case 'lab':
+        return <LabPage onNavigate={navigate} />;
       case 'view-result':
         return <ViewResultPage resultId={selectedResultId} onNavigate={navigate} />;
       case 'admin-users':

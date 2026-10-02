@@ -36,7 +36,39 @@ class BubbleReading:
     ratio: float
 
 
+@dataclass(frozen=True)
+class BubbleMetrics:
+    """Componentes de score de uma bolha (preservados p/ calibração).
+
+    `score` é a ponderação dos três componentes; o Laboratório guarda as
+    partes para recalcular com outros pesos SEM reprocessar a imagem.
+    `otsu_threshold` é o limiar de Otsu da ROI (intensidade bruta 0..255).
+    """
+    score: float
+    mean_intensity: float
+    dark_ratio: float
+    contrast: float
+    otsu_threshold: float
+
+    @classmethod
+    def zeros(cls) -> "BubbleMetrics":
+        return cls(0.0, 0.0, 0.0, 0.0, 0.0)
+
+    def rescore(self, weights: tuple[float, float, float]) -> "BubbleMetrics":
+        """Mesmo ROI, nova ponderação (calibração de pesos)."""
+        return BubbleMetrics(
+            weights[0] * self.mean_intensity
+            + weights[1] * self.dark_ratio
+            + weights[2] * self.contrast,
+            self.mean_intensity,
+            self.dark_ratio,
+            self.contrast,
+            self.otsu_threshold,
+        )
+
+
 from .config import FLOOR, LOW_CONF_THRESHOLD, MARGIN
+from .params import OmrParams
 from .tuning import compute_floor_for
 
 
@@ -65,6 +97,7 @@ def classify_question(
     ratios: dict[str, float],
     floor: float = FLOOR,
     margin: float = MARGIN,
+    low_thr: float | None = None,
 ) -> tuple[str, str | None, list[str]]:
     """Classifica uma questão a partir dos scores A–D.
 
@@ -76,9 +109,11 @@ def classify_question(
 
     A exigência da segunda acima do piso evita que duas bolhas VAZIAS
     com score elevado por ruído (foto de celular) virem "duplicada".
-    O limiar de baixa confiança acompanha o piso (mesmo offset do fixo).
+    O limiar de baixa confiança acompanha o piso (mesmo offset do fixo),
+    a menos que `low_thr` explicite um valor (calibração).
     """
-    low_thr = floor + (LOW_CONF_THRESHOLD - FLOOR)
+    if low_thr is None:
+        low_thr = floor + (LOW_CONF_THRESHOLD - FLOOR)
     ordered = sorted(ratios.items(), key=lambda kv: kv[1], reverse=True)
     best_letter, best_score = ordered[0]
     second_score = ordered[1][1] if len(ordered) > 1 else 0.0
@@ -146,10 +181,21 @@ def _estimate_paper_brightness(gray: np.ndarray, x: int, y: int, radius: int) ->
     return float(np.median(roi[ring_mask]))
 
 
-def _bubble_score(
-    gray: np.ndarray, x: int, y: int, radius: int = int(BUBBLE_RADIUS)
-) -> float:
-    ratio = _sample_bubble_ratio(gray, x, y, radius)
+DEFAULT_WEIGHTS: tuple[float, float, float] = (0.4, 0.4, 0.2)
+
+
+def _bubble_metrics(
+    gray: np.ndarray,
+    x: int,
+    y: int,
+    radius: int = int(BUBBLE_RADIUS),
+    weights: tuple[float, float, float] = DEFAULT_WEIGHTS,
+) -> BubbleMetrics:
+    """Componentes de score da bolha circular (média + razão escura + contraste).
+
+    Mesma fórmula do formato original (0.4/0.4/0.2 por padrão), agora com
+    componentes expostos p/ calibração e pesos configuráveis por override.
+    """
     brightness = _estimate_paper_brightness(gray, x, y, radius)
 
     h, w = gray.shape[:2]
@@ -159,20 +205,35 @@ def _bubble_score(
     y1 = min(h, y + radius + 1)
     roi = gray[y0:y1, x0:x1]
     if roi.size == 0:
-        return 0.0
+        return BubbleMetrics.zeros()
 
-    _, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    thr_otsu, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     yy, xx = np.ogrid[:roi.shape[0], :roi.shape[1]]
     mask = ((xx - (x - x0)) ** 2 + (yy - (y - y0)) ** 2) <= radius ** 2
     if mask.sum() == 0:
-        return 0.0
+        return BubbleMetrics.zeros()
 
     mean_intensity = 1.0 - (float(np.mean(roi[mask])) / 255.0)
     dark_ratio = float((binary[mask] > 0).sum()) / float(mask.sum())
     contrast = max(0, (brightness - float(np.mean(roi[mask]))) / 255.0)
 
-    score = 0.4 * mean_intensity + 0.4 * dark_ratio + 0.2 * contrast
-    return score
+    return BubbleMetrics(
+        score=weights[0] * mean_intensity + weights[1] * dark_ratio + weights[2] * contrast,
+        mean_intensity=mean_intensity,
+        dark_ratio=dark_ratio,
+        contrast=contrast,
+        otsu_threshold=float(thr_otsu),
+    )
+
+
+def _bubble_score(
+    gray: np.ndarray,
+    x: int,
+    y: int,
+    radius: int = int(BUBBLE_RADIUS),
+    weights: tuple[float, float, float] = DEFAULT_WEIGHTS,
+) -> float:
+    return _bubble_metrics(gray, x, y, radius, weights).score
 
 
 def _decode_qr_pyzbar(gray_crop: np.ndarray) -> str | None:
@@ -266,8 +327,14 @@ def process_image(
     layout_mode: str = LAYOUT_DUAL,
     adaptive: bool = False,
     debug: bool = False,
+    overrides: OmrParams | None = None,
 ) -> OMRResult | None:
-    """Pipeline completo OMR. questions_per_subject define quantas linhas ler."""
+    """Pipeline completo OMR. questions_per_subject define quantas linhas ler.
+
+    `overrides` (OmrParams) é só para Laboratório/Calibração: nenhum campo
+    altera produção por padrão (None cai nas constantes/tuning atuais).
+    """
+    p = overrides or OmrParams()
     single = layout_mode == LAYOUT_SINGLE
     qps = questions_per_subject or 22
     if single:
@@ -316,7 +383,10 @@ def process_image(
         return None
 
     # Normalizar iluminação desigual
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(
+        clipLimit=p.clahe_clip if p.clahe_clip is not None else 2.0,
+        tileGridSize=p.clahe_tiles if p.clahe_tiles is not None else (8, 8),
+    )
     gray = clahe.apply(gray)
 
     _t2 = _time.perf_counter()
@@ -329,7 +399,8 @@ def process_image(
     letters = ["A", "B", "C", "D"]
     # Máscara um pouco menor que a bolha: ignora o contorno impresso e mede
     # só o interior (marca de lápis/caneta). Bolhas vazias ≈ 0.05.
-    inner_radius = max(6, int(radius) - 2)
+    inner_radius = p.inner_radius if p.inner_radius is not None else max(6, int(radius) - 2)
+    weights = p.weights if p.weights is not None else DEFAULT_WEIGHTS
 
     for q, y in enumerate(question_y):
         q_num = q + 1
@@ -338,7 +409,7 @@ def process_image(
         q_geom: list = []
 
         for i, x in enumerate(xs):
-            score = _bubble_score(gray, int(x), y, radius=inner_radius)
+            score = _bubble_score(gray, int(x), y, radius=inner_radius, weights=weights)
             q_ratios[letters[i]] = score
             if debug:
                 q_geom.append((int(x), y, radius, letters[i]))
@@ -355,7 +426,7 @@ def process_image(
             q_geom = []
 
             for i, x in enumerate(MAT_X):
-                score = _bubble_score(gray, int(x), y, radius=inner_radius)
+                score = _bubble_score(gray, int(x), y, radius=inner_radius, weights=weights)
                 q_ratios[letters[i]] = score
                 if debug:
                     q_geom.append((int(x), y, radius, letters[i]))
@@ -374,9 +445,14 @@ def process_image(
     # (desligado por padrão — comportamento idêntico ao fixo).
     # Parâmetros vêm da tabela por modelo (omr/tuning.py).
     floor, floor_source = compute_floor_for("padrao", all_ratios, adaptive)
+    if p.floor is not None:
+        floor, floor_source = p.floor, "override"
+    margin = p.margin if p.margin is not None else MARGIN
 
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios, floor=floor, margin=MARGIN)
+        status, best_letter, marks = classify_question(
+            ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold
+        )
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":

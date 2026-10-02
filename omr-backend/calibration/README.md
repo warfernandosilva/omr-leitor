@@ -42,3 +42,31 @@ desta pasta (`omr/thresholds.py`, `test_thresholds.py`). Em 2026-09-23
 (19 fotos): média Otsu 0.332 × gap 0.349 — gap tende levemente acima.
 Nenhum virou default; a tabela `omr/tuning.py` (`floor_method`) é onde o
 vencedor entraria após veredito pela regra acima.
+
+## Dataset de regressão de legibilidade (Fase 4, 2026-10-01)
+
+`omr/robustness.py` gera um cartão com gabarito conhecido (44 respostas),
+aplica degradações sintéticas **determinísticas** (seed 42) e mede o reader
+REAL de produção (`omr.reader.process_image`) — sem pipeline paralelo.
+Regra: se um ajuste de threshold/CLAHE/pesos quebrar qualquer condição, o
+teste falha apontando a condição e as questões divergentes.
+
+```bat
+python -m omr.robustness              :: relatório por condição
+python -m pytest test_robustness.py -q :: gate de regressão
+```
+
+Baseline medido (todas 44/44, sem erros):
+
+| Condição | Degradação | Leitura |
+|----------|------------|---------|
+| clean | — | 44/44 |
+| rot_0/45/90/135/180 | rotação, cartão reenquadrado | 44/44 |
+| scale_0.50 / 0.30 / 0.18 | cartão reduzido e centralizado | 44/44 |
+| persp_100 / 250 / 500 | tilt de câmera (desloc. de cantos, px) | 44/44 |
+| jpeg_q20 / q5 | compressão JPEG destrutiva | 44/44 |
+| combo_rot45_jpeg20 | rotação + JPEG | 44/44 |
+| combo_scale0.5_persp100_jpeg20 | escala + perspectiva + JPEG | 44/44 |
+
+Invariante adicional: cobrir **1 dos 4 ArUco** com fundo branco faz
+`process_image` retornar `None` (foto rejeitada com orientação de recaptura).

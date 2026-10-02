@@ -16,10 +16,12 @@ import numpy as np
 import time as _time
 
 from .config import BLUR_BLOCK
+from .params import OmrParams
 from .tuning import compute_floor_for, get_tuning
 from .detector_herby import detect_herby_anchors, herby_homography, refine_herby_qr_boxes, refine_herby_grid
 from .reader import (
     OMRResult,
+    DEFAULT_WEIGHTS,
     _decode_qr_from,
 )
 from .reader_saev import _square_score
@@ -57,11 +59,14 @@ def process_herby_image(
     adaptive: bool = False,
     debug: bool = False,
     layout_mode: str = "dual",
+    overrides: OmrParams | None = None,
 ) -> OMRResult | None:
     """Pipeline completo OMR-Herby. questions_per_subject = por disciplina (1..26).
 
     layout_mode single: lê só a metade esquerda (Q 1..qps).
+    `overrides` é só para Laboratório/Calibração (ver omr/params.py).
     """
+    p = overrides or OmrParams()
     qps = max(HERBY_MIN_QPS, min(HERBY_MAX_QPS, int(questions_per_subject or 22)))
     layout = "single" if layout_mode == "single" else "dual"
 
@@ -103,7 +108,10 @@ def process_herby_image(
     if blur_var < BLUR_BLOCK:
         return None
 
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    clahe = cv2.createCLAHE(
+        clipLimit=p.clahe_clip if p.clahe_clip is not None else 2.0,
+        tileGridSize=p.clahe_tiles if p.clahe_tiles is not None else (8, 8),
+    )
     gray = clahe.apply(gray)
 
     _t2 = _time.perf_counter()
@@ -116,6 +124,8 @@ def process_herby_image(
     _t3 = _time.perf_counter()
 
     letters = ["A", "B", "C", "D"]
+    weights = p.weights if p.weights is not None else DEFAULT_WEIGHTS
+    inset = p.square_inset if p.square_inset is not None else 6
     all_ratios: dict[int, dict[str, float]] = {}
     geom: dict[int, list] = {}
 
@@ -126,7 +136,7 @@ def process_herby_image(
         q_geom: list = []
         for i in range(4):
             cx = x0 + HERBY_NUM_W + i * HERBY_PITCH + HERBY_PITCH / 2
-            q_ratios[letters[i]] = _square_score(gray, cx, cy, side=HERBY_SIDE)
+            q_ratios[letters[i]] = _square_score(gray, cx, cy, side=HERBY_SIDE, inset=inset, weights=weights)
             if debug:
                 q_geom.append((cx, cy, HERBY_SIDE / 2, letters[i]))
         all_ratios[q] = q_ratios
@@ -142,10 +152,14 @@ def process_herby_image(
     # Divisor via tabela por modelo (herby = ponto de partida SAEV até
     # calibração com folhas preenchidas reais — ver omr/tuning.py).
     floor, floor_source = compute_floor_for("herby", all_ratios, adaptive)
-    margin = get_tuning("herby").margin
+    if p.floor is not None:
+        floor, floor_source = p.floor, "override"
+    margin = p.margin if p.margin is not None else get_tuning("herby").margin
 
     for q_num, ratios in all_ratios.items():
-        status, best_letter, marks = classify_question(ratios, floor=floor, margin=margin)
+        status, best_letter, marks = classify_question(
+            ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold
+        )
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":

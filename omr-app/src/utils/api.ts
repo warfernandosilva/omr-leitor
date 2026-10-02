@@ -874,3 +874,60 @@ export async function adminRestoreBackup(
   if (!res.ok) throw new Error(`Falha no restore (${res.status})`);
   return res.json();
 }
+
+// ─── Genéricos (Laboratório OMR e outros módulos novos) ───
+
+/** Extrai a mensagem de erro do backend (detail do FastAPI ou error legado). */
+async function describeHttpError(res: Response): Promise<string> {
+  let detail = `HTTP ${res.status}`;
+  try {
+    const j = await res.json();
+    const d = (j as { detail?: unknown; error?: unknown })?.detail ?? (j as { error?: unknown })?.error;
+    if (typeof d === 'string') detail = d;
+    else if (Array.isArray(d) && d.length > 0) {
+      // validação pydantic: [{loc, msg, type}]
+      detail = d.map(e => `${(e as { loc?: unknown[] }).loc?.slice(-1)[0] ?? ''}: ${(e as { msg?: string }).msg}`).join('; ');
+    }
+  } catch { /* corpo não-JSON */ }
+  return detail;
+}
+
+/** GET/POST autenticado que devolve JSON. Lança Error com a mensagem do servidor. */
+export async function apiJson<T>(path: string, init: RequestInit = {}, ms = 30000): Promise<T> {
+  const res = await fetchTimeout(`${API_BASE}${path}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } }, ms);
+  if (!res.ok) throw new Error(await describeHttpError(res));
+  return res.json() as Promise<T>;
+}
+
+/** GET autenticado que devolve Blob (downloads, imagens protegidas). */
+export async function apiBlob(path: string, init: RequestInit = {}, ms = 60000): Promise<Blob> {
+  const res = await fetchTimeout(`${API_BASE}${path}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } }, ms);
+  if (!res.ok) throw new Error(await describeHttpError(res));
+  return res.blob();
+}
+
+/** POST/PATCH autenticado com corpo JSON (mesma política de erro do apiJson). */
+export function apiJsonBody<T>(path: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body: unknown, ms = 30000): Promise<T> {
+  return apiJson<T>(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }, ms);
+}
+
+/** POST autenticado com FormData (não definir Content-Type: o browser põe o boundary). */
+export function apiForm<T>(path: string, form: FormData, ms = 120000): Promise<T> {
+  return apiJson<T>(path, { method: 'POST', body: form }, ms);
+}
+
+/** Dispara o download de um Blob no navegador e devolve o nome sugerido. */
+export function saveBlob(blob: Blob, filename: string): void {
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 5000);
+}

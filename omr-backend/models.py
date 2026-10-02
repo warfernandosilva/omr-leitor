@@ -165,3 +165,159 @@ class DeletedExam(Base):
     external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     deleted_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
+class LabSession(Base, TimestampMixin):
+    """Sessão do Laboratório OMR: um conjunto de fotos + gabarito esperado.
+
+    Reutiliza os MESMOS leitores de produção (omr/reader*.py) — o Lab não
+    roda um pipeline paralelo. `ground_truth` é dict {questão: letra};
+    `adaptive` espelha o flag dos endpoints de produção.
+    """
+
+    __tablename__ = "lab_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template: Mapped[str] = mapped_column(String(10), nullable=False, default="padrao")
+    questions_per_subject: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+    layout_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="dual")
+    adaptive: Mapped[bool] = mapped_column(default=False)
+    ground_truth: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+    owner: Mapped["User | None"] = relationship()
+    images: Mapped[list["LabImage"]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+
+class LabImage(Base, TimestampMixin):
+    """Uma foto carregada no Lab, com o resultado do leitor de produção.
+
+    Componentes por bolha ficam em LabOptionScore (recalibração sem
+    reprocessar a imagem); o estado cru do motor fica aqui para a
+    comparação com o gabarito (ver mapeamento em routers/lab.py).
+    """
+
+    __tablename__ = "lab_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("lab_sessions.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    rectified_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="processed")  # processed | error
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_used: Mapped[str] = mapped_column(String(10), nullable=False, default="padrao")
+    qr_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    floor_used: Mapped[float | None] = mapped_column(Float, nullable=True)
+    floor_source: Mapped[str | None] = mapped_column(String(12), nullable=True)  # fixed | adaptive | override
+    total_questions: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Tempos por etapa (ms) — observabilidade do pipeline
+    t_detect: Mapped[float | None] = mapped_column(Float, nullable=True)
+    t_warp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    t_qr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    t_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    session: Mapped["LabSession"] = relationship(back_populates="images")
+    questions: Mapped[list["LabQuestion"]] = relationship(
+        back_populates="image", cascade="all, delete-orphan"
+    )
+    options: Mapped[list["LabOptionScore"]] = relationship(
+        back_populates="image", cascade="all, delete-orphan"
+    )
+
+
+class LabQuestion(Base, TimestampMixin):
+    """Classificação crua do motor por questão (ok | low | duplicate | blank)."""
+
+    __tablename__ = "lab_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    image_id: Mapped[int] = mapped_column(ForeignKey("lab_images.id"), index=True)
+    question_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(12), nullable=False)  # ok | low | duplicate | blank
+    detected_answer: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    duplicate_marks: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    truth_answer: Mapped[str | None] = mapped_column(String(1), nullable=True)
+
+    image: Mapped["LabImage"] = relationship(back_populates="questions")
+    options: Mapped[list["LabOptionScore"]] = relationship(
+        back_populates="question", cascade="all, delete-orphan"
+    )
+
+
+class LabOptionScore(Base, TimestampMixin):
+    """Componentes do score de cada bolha (recalibração de pesos/limiares).
+
+    `score` é a ponderação de produção no momento da leitura; os três
+    componentes (média, razão escura, contraste) permitem rescore com
+    novos pesos SEM reprocessar a imagem (omr.params.BubbleMetrics.rescore).
+    """
+
+    __tablename__ = "lab_option_scores"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    image_id: Mapped[int] = mapped_column(ForeignKey("lab_images.id"), index=True)
+    question_id: Mapped[int | None] = mapped_column(ForeignKey("lab_questions.id"), nullable=True, index=True)
+    option: Mapped[str] = mapped_column(String(1), nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    mean_intensity: Mapped[float] = mapped_column(Float, nullable=False)
+    dark_ratio: Mapped[float] = mapped_column(Float, nullable=False)
+    contrast: Mapped[float] = mapped_column(Float, nullable=False)
+    otsu_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+
+    image: Mapped["LabImage"] = relationship(back_populates="options")
+    question: Mapped["LabQuestion | None"] = relationship(back_populates="options")
+
+
+class CalibrationRun(Base):
+    """Varredura de parâmetros sobre uma sessão do Lab (Fase 2).
+
+    Guardar o grid e o resultado permite comparar calibrações depois e
+    não perder a evidência de por que um threshold foi publicado.
+    """
+
+    __tablename__ = "calibration_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int | None] = mapped_column(ForeignKey("lab_sessions.id"), nullable=True, index=True)
+    template: Mapped[str] = mapped_column(String(10), nullable=False, default="padrao")
+    grid: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    best: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    n_candidates: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    owner: Mapped["User | None"] = relationship()
+
+
+class OmrConfig(Base):
+    """Configuração de thresholds do OMR, versionada e publicável.
+
+    Nenhuma linha vale por si só: só a marcada `ativa` é lida em
+    produção (publicação grava data/active_config.json). O histórico
+    completo permite rollback. Uma linha por calibração — mudanças de
+    produção NUNCA são automáticas.
+    """
+
+    __tablename__ = "omr_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    template: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)  # None = global
+    params: Mapped[dict] = mapped_column(JSON, nullable=False)
+    metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # acurácia no momento da publicação
+    source_session_id: Mapped[int | None] = mapped_column(ForeignKey("lab_sessions.id"), nullable=True, index=True)
+    source_run_id: Mapped[int | None] = mapped_column(ForeignKey("calibration_runs.id"), nullable=True, index=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ativa: Mapped[bool] = mapped_column(default=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    owner: Mapped["User | None"] = relationship()

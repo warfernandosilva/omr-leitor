@@ -133,6 +133,7 @@ export type AppView =
   | 'results'
   | 'dashboard'
   | 'export'
+  | 'lab'
   | 'view-result'
   | 'admin-users';
 
