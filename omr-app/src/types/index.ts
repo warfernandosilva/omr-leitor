@@ -118,6 +118,8 @@ export interface StudentResult {
   lowConfidence?: number[];
   /** false = QR não lido na foto que gerou este resultado */
   qrOk?: boolean;
+  /** true = nome digitado casou com aluno já cadastrado (sem QR) */
+  matchedByName?: boolean;
   /** professor já revisou as pendências deste resultado */
   reviewed?: boolean;
 }

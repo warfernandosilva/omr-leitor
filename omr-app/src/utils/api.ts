@@ -690,22 +690,84 @@ export async function deleteResultadoDB(codigo: string): Promise<void> {
   }
 }
 
+export interface ExamStudent {
+  aluno_id: number;
+  nome: string;
+  matricula: string | null;
+  codigo_unico: string | null;
+  /** false = aluno importado mas ainda sem cartão gerado */
+  tem_gabarito: boolean;
+  status: string | null;
+}
+
+/** Lista TODOS os alunos da prova, inclusive os sem cartão gerado. */
+export async function fetchExamStudents(externalId: string): Promise<ExamStudent[]> {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/students`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Falha ao listar alunos (${res.status})`);
+  return res.json();
+}
+
+export interface NameCandidate {
+  aluno_id: number;
+  nome: string;
+  matricula: string | null;
+  codigo_unico: string | null;
+  tem_gabarito: boolean;
+}
+
+export class AmbiguousNameError extends Error {
+  candidates: NameCandidate[];
+  constructor(candidates: NameCandidate[], detail: string) {
+    super(detail || 'Mais de um aluno com este nome — escolha um.');
+    this.candidates = candidates;
+  }
+}
+
+export interface AvulsoResult {
+  codigo_unico: string;
+  /** true = nome casou com aluno já cadastrado (não criou avulso) */
+  matched: boolean;
+  created: boolean;
+  /** true = aluno existia mas ainda não tinha cartão (cartão criado para ele) */
+  novo_cartao: boolean;
+  aluno: { id: number; nome: string };
+}
+
 export async function postAvulsoResultado(
   externalId: string,
   payload: { nome: string; matricula?: string | null; respostas?: Record<string, string>; acertos?: number; erros?: number; brancos?: number; nota?: number; observacoes?: string },
-): Promise<{ codigo_unico: string }> {
-  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/resultados/avulso`, {
+  opts: { alunoId?: number; overwrite?: boolean } = {},
+): Promise<AvulsoResult> {
+  const qs = new URLSearchParams();
+  if (opts.overwrite) qs.set('overwrite', 'true');
+  if (opts.alunoId != null) qs.set('aluno_id', String(opts.alunoId));
+  const q = qs.toString();
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(externalId)}/resultados/avulso${q ? `?${q}` : ''}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   });
+  if (res.status === 409) {
+    const j = await res.json();
+    if (j?.ambiguous) throw new AmbiguousNameError(j.candidates ?? [], String(j?.detail ?? ''));
+    if (j?.already_graded) throw new AlreadyGradedError(j?.previous ?? {});
+    throw new Error(String(j?.detail ?? 'Conflito ao salvar resultado'));
+  }
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
     throw new Error(detail);
   }
   const j = await res.json();
-  return { codigo_unico: j.gabarito.codigo_unico };
+  return {
+    codigo_unico: j.gabarito.codigo_unico,
+    matched: !!j.matched,
+    created: !!j.created,
+    novo_cartao: !!j.novo_cartao,
+    aluno: j.aluno,
+  };
 }
 
 // ─── Auth ───

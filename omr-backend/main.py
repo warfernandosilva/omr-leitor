@@ -1539,17 +1539,176 @@ class AvulsoResultadoRequest(BaseModel):
     observacoes: str | None = None
 
 
-@app.post("/api/exams/{external_id}/resultados/avulso")
-def post_avulso(external_id: str, req: AvulsoResultadoRequest, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+@app.get("/api/exams/{external_id}/students")
+def list_exam_students(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """
-    Cria um aluno+gabarito avulso (sem importação prévia) e já salva o resultado.
-    Usado pela correção manual quando o QR não foi identificado.
+    Lista TODOS os alunos da avaliação, inclusive os sem cartão gerado
+    (tem_gabarito=false, codigo_unico=null).
+
+    Usado no pareamento manual por nome quando o QR não foi lido.
     """
     av = _get_avaliacao(db, external_id)
     auth.require_owner_or_admin(av, current_user)
+    rows = db.execute(
+        select(Aluno, GabaritoNomeado)
+        .outerjoin(
+            GabaritoNomeado,
+            (GabaritoNomeado.aluno_id == Aluno.id) & (GabaritoNomeado.avaliacao_id == av.id),
+        )
+        .where(Aluno.avaliacao_id == av.id)
+        .order_by(Aluno.nome)
+    ).all()
+    return [
+        {
+            "aluno_id": aluno.id,
+            "nome": aluno.nome,
+            "matricula": aluno.matricula,
+            "codigo_unico": g.codigo_unico if g is not None else None,
+            "tem_gabarito": g is not None,
+            "status": g.status if g is not None else None,
+        }
+        for aluno, g in rows
+    ]
+
+
+@app.post("/api/exams/{external_id}/resultados/avulso")
+def post_avulso(external_id: str, req: AvulsoResultadoRequest, overwrite: bool = False, aluno_id: int | None = None, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    """
+    Salva um resultado SEM QR: tenta casar o nome digitado com um aluno
+    persistido da avaliação (comparação normalizada — ignora caixa,
+    acentos e espaços extras). Sem correspondência, cria aluno+gabarito
+    (avulso) como antes.
+
+    - aluno_id: atribui direto a esse aluno (escolha de homônimo na UI).
+    - overwrite: substitui resultado já salvo no gabarito do aluno.
+    """
+    from omr.names import normalize_nome
+
+    from sqlalchemy.exc import IntegrityError
+    av = _get_avaliacao(db, external_id)
+    auth.require_owner_or_admin(av, current_user)
+
+    def _gabarito_do_aluno(aid: int):
+        return db.scalar(
+            select(GabaritoNomeado).where(
+                GabaritoNomeado.avaliacao_id == av.id,
+                GabaritoNomeado.aluno_id == aid,
+            )
+        )
+
+    def _proxima_pagina() -> int:
+        return (db.scalar(
+            select(func.count()).select_from(GabaritoNomeado).where(GabaritoNomeado.avaliacao_id == av.id)
+        ) or 0) + 1
+
+    def _novo_gabarito(aid: int) -> GabaritoNomeado:
+        """Cria o cartão do aluno (aluno importado ainda sem cartão)."""
+        for attempt in range(2):
+            try:
+                codigo = _next_codigo(db)
+                g = GabaritoNomeado(
+                    avaliacao_id=av.id,
+                    aluno_id=aid,
+                    codigo_unico=codigo,
+                    qr_code_payload=codigo,
+                    numero_pagina=_proxima_pagina(),
+                    status=GabaritoNomeado.STATUS_GERADO,
+                )
+                db.add(g)
+                db.flush()
+                return g
+            except IntegrityError:
+                db.rollback()
+                if attempt == 1:
+                    raise HTTPException(status_code=409, detail="Código duplicado — tente novamente")
+        raise HTTPException(status_code=409, detail="Código duplicado — tente novamente")  # pragma: no cover
+
+    def _grava_no_aluno(aluno: Aluno, matched: bool):
+        g = _gabarito_do_aluno(aluno.id)
+        novo_cartao = g is None
+        if g is None:
+            g = _novo_gabarito(aluno.id)
+        if g.status == GabaritoNomeado.STATUS_CORRIGIDO and not overwrite:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "found": True,
+                    "already_graded": True,
+                    "matched": matched,
+                    "detail": "Gabarito já possui resultado salvo",
+                    "previous": {
+                        "nota": g.nota,
+                        "acertos": g.acertos,
+                        "data_correcao": g.data_correcao.isoformat() if g.data_correcao else None,
+                        "aluno": {"id": aluno.id, "nome": aluno.nome},
+                        "nome": aluno.nome,
+                    },
+                    "aluno": {"id": aluno.id, "nome": aluno.nome},
+                    "codigo_unico": g.codigo_unico,
+                },
+            )
+        agora = datetime.now()
+        g.respostas = req.respostas
+        g.acertos = req.acertos
+        g.erros = req.erros
+        g.brancos = req.brancos
+        g.nota = req.nota
+        g.observacoes = req.observacoes
+        g.status = GabaritoNomeado.STATUS_CORRIGIDO
+        if g.data_leitura is None:
+            g.data_leitura = agora
+        g.data_correcao = agora
+        db.commit()
+        db.refresh(g)
+        return {
+            "created": False,
+            "matched": matched,
+            "novo_cartao": novo_cartao,
+            "aluno": {"id": aluno.id, "nome": aluno.nome},
+            "gabarito": g.to_dict(),
+        }
+
+    if aluno_id is not None:
+        aluno = db.scalar(select(Aluno).where(Aluno.id == aluno_id, Aluno.avaliacao_id == av.id))
+        if aluno is None:
+            raise HTTPException(status_code=404, detail="Aluno não encontrado nesta avaliação")
+        return _grava_no_aluno(aluno, matched=True)
+
     if not req.nome or not req.nome.strip():
         raise HTTPException(status_code=400, detail="Nome do aluno é obrigatório")
-    from sqlalchemy.exc import IntegrityError
+    want = normalize_nome(req.nome)
+    alunos = db.scalars(select(Aluno).where(Aluno.avaliacao_id == av.id)).all()
+    matches = [a for a in alunos if normalize_nome(a.nome) == want]
+    if len(matches) > 1:
+        gab_map = {
+            g.aluno_id: g
+            for g in db.scalars(
+                select(GabaritoNomeado).where(GabaritoNomeado.avaliacao_id == av.id)
+            ).all()
+        }
+        return JSONResponse(
+            status_code=409,
+            content={
+                "found": True,
+                "ambiguous": True,
+                "matched": False,
+                "detail": f"Mais de um aluno com o nome '{req.nome.strip()}' — escolha um.",
+                "candidates": [
+                    {
+                        "aluno_id": a.id,
+                        "nome": a.nome,
+                        "matricula": a.matricula,
+                        "codigo_unico": gab_map[a.id].codigo_unico if a.id in gab_map else None,
+                        "tem_gabarito": a.id in gab_map,
+                    }
+                    for a in matches
+                ],
+            },
+        )
+    if len(matches) == 1:
+        return _grava_no_aluno(matches[0], matched=True)
+
+    # Sem correspondência: cria aluno+gabarito (comportamento anterior)
     for attempt in range(2):
         try:
             if attempt == 0:
@@ -1562,7 +1721,7 @@ def post_avulso(external_id: str, req: AvulsoResultadoRequest, db: Session = Dep
                 aluno_id=aluno.id,
                 codigo_unico=codigo,
                 qr_code_payload=codigo,
-                numero_pagina=db.scalar(select(func.count()).select_from(GabaritoNomeado).where(GabaritoNomeado.avaliacao_id == av.id)) + 1,
+                numero_pagina=_proxima_pagina(),
                 status=GabaritoNomeado.STATUS_CORRIGIDO,
                 respostas=req.respostas,
                 acertos=req.acertos,
@@ -1576,7 +1735,7 @@ def post_avulso(external_id: str, req: AvulsoResultadoRequest, db: Session = Dep
             db.add(g)
             db.commit()
             db.refresh(g)
-            return {"created": True, "aluno": {"id": aluno.id, "nome": aluno.nome}, "gabarito": g.to_dict()}
+            return {"created": True, "matched": False, "aluno": {"id": aluno.id, "nome": aluno.nome}, "gabarito": g.to_dict()}
         except IntegrityError:
             db.rollback()
             if attempt == 1:

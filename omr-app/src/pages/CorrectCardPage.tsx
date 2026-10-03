@@ -10,6 +10,7 @@ import {
 import {
   processImage as apiProcessImage, processMulti, ProcessResult,
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
+  fetchExamStudents, ExamStudent, AmbiguousNameError, NameCandidate,
   getExamsFromDB, getExamFromDB, getDeletedExamsFromDB, deleteExamFromDB, getApiBase,
   checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
 } from '../utils/api';
@@ -161,6 +162,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [processingProgress, setProcessingProgress] = useState(0);
   const [identified, setIdentified] = useState<Identification>(null);
+  // Pareamento manual por nome (sem QR): alunos da prova + homônimos
+  const [examStudents, setExamStudents] = useState<ExamStudent[]>([]);
+  const [candidates, setCandidates] = useState<NameCandidate[] | null>(null);
+  const [manualInfo, setManualInfo] = useState<string | null>(null);
   // Captura automática por enquadramento
   const [autoMode, setAutoMode] = useState(true);
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
@@ -214,6 +219,19 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     streamRef.current = null;
     window.clearTimeout(flashTimerRef.current);
   }, []);
+  // Alunos da prova p/ pareamento manual (só quando o QR não identificou).
+  // Carrega ao entrar na conferência; falha silenciosa mantém o fluxo avulso.
+  useEffect(() => {
+    if (step !== 'review') return;
+    if (identified?.kind === 'ok' || identified?.kind === 'wrong_exam') return;
+    const exam = exams.find(e => e.id === selectedExamId);
+    if (!exam) return;
+    let alive = true;
+    fetchExamStudents(exam.id)
+      .then(list => { if (alive) setExamStudents(Array.isArray(list) ? list : []); })
+      .catch(() => { if (alive) setExamStudents([]); });
+    return () => { alive = false; };
+  }, [step, identified, selectedExamId, exams]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -222,6 +240,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [deviceIdx, setDeviceIdx] = useState(0);
 
   const activeExam = selectedExamId ? exams.find(e => e.id === selectedExamId) : null;
+
+  // Pareamento manual: sugere os nomes da prova quando não há QR válido
+  const canMatchByName = identified === null || identified?.kind === 'unknown';
+  const studentHint = (s: ExamStudent): string | undefined => {
+    const parts: string[] = [];
+    if (s.matricula) parts.push(s.matricula);
+    if (!s.tem_gabarito) parts.push('sem cartão gerado');
+    return parts.length ? parts.join(' · ') : undefined;
+  };
 
   // ─── Guia de captura adaptado ao gabarito da prova ───
   // SAEV usa adaptativo sempre (evidência: fotos reais 43-44/44 vs 18/41 no fixo)
@@ -587,6 +614,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           }
         }
         setIdentified(identification);
+        setCandidates(null);
+        setManualInfo(null);
         setStep('review');
       } else {
         setError(result.error || 'Erro ao processar a imagem');
@@ -612,6 +641,157 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     });
   };
 
+  // Monta o payload da correção a partir da conferência (reuso no salvamento e na escolha de homônimo)
+  const buildManualPayload = () => {
+    if (!activeExam) {
+      setError(
+        'Prova não encontrada neste aparelho. Volte à seleção, toque em "⟳ Atualizar do servidor" '
+        + 'e corrija novamente — o resultado desta leitura foi descartado para não salvar na prova errada.'
+      );
+      return null;
+    }
+    if (!activeExam.answerKey) {
+      alert('Esta prova ainda não tem gabarito cadastrado. Vá em "Cadastrar gabarito" e informe as respostas corretas antes de corrigir.');
+      return null;
+    }
+    const dupList = omrResult?.duplicateQuestions ?? [];
+    const dupMarks = omrResult?.duplicateMarks ?? {};
+    const { correct: correctCount, incorrect: incorrectCount, blank: blankCount } =
+      scoreAnswers(activeExam, manualAnswers, dupList);
+    const grade = calculateGrade(correctCount, activeExam.totalQuestions, activeExam.gradeScale);
+    const observacoes = dupList.length
+      ? `Duplicadas (contadas como erro): ${dupList.map((q) => {
+          const m = dupMarks[q];
+          return `Q${q}${m?.length ? ` (${m.join(', ')})` : ''}`;
+        }).join(', ')}`
+      : undefined;
+    const basePayload = {
+      respostas: Object.fromEntries(Object.entries(manualAnswers).map(([q, a]) => [q, a])),
+      acertos: correctCount,
+      erros: incorrectCount,
+      brancos: blankCount,
+      nota: grade,
+      observacoes,
+    };
+    return { basePayload, correctCount, incorrectCount, blankCount, grade, dupList, dupMarks, observacoes };
+  };
+
+  type ManualPayload = NonNullable<ReturnType<typeof buildManualPayload>>;
+
+  // Persiste sem QR: casa o nome com os alunos da prova. Devolve null quando
+  // o fluxo pausa (homônimos aguardando escolha, ou substituição recusada).
+  const saveManualByName = async (
+    built: ManualPayload,
+    opts: { alunoId?: number; overwrite?: boolean } = {},
+  ): Promise<{ codigoUnico?: string; finalName: string; matchedByName: boolean } | null> => {
+    if (!activeExam) return null;
+    const typed = studentName.trim();
+    const payload = {
+      nome: typed,
+      respostas: built.basePayload.respostas,
+      acertos: built.correctCount,
+      erros: built.incorrectCount,
+      brancos: built.blankCount,
+      nota: built.grade,
+      observacoes: built.observacoes,
+    };
+    const register = (codigoUnico: string, finalName: string, matchedByName: boolean, novoCartao: boolean) => {
+      setStudentName(finalName);
+      setManualInfo(novoCartao
+        ? `Aluno "${finalName}" ainda não tinha cartão gerado — o resultado foi criado e vinculado a ele.`
+        : `Atribuído ao aluno "${finalName}" já cadastrado na prova (cartão ${codigoUnico}).`);
+      return { codigoUnico, finalName, matchedByName };
+    };
+    try {
+      const av = await postAvulsoResultado(activeExam.id, payload, opts);
+      return register(av.codigo_unico, av.aluno.nome, av.matched, av.novo_cartao);
+    } catch (err) {
+      if (err instanceof AlreadyGradedError) {
+        const prev = err.previous;
+        const msg = `O aluno ${prev.nome ?? typed} já possui resultado salvo`
+          + `${prev.nota != null ? ` (nota ${prev.nota})` : ''}. Substituir?`;
+        if (!confirm(msg)) return null;
+        try {
+          const av2 = await postAvulsoResultado(activeExam.id, payload, { ...opts, overwrite: true });
+          return register(av2.codigo_unico, av2.aluno.nome, av2.matched, av2.novo_cartao);
+        } catch {
+          alert('Não foi possível atualizar o resultado no servidor. O resultado ficou salvo apenas neste navegador.');
+          return null;
+        }
+      }
+      if (err instanceof AmbiguousNameError) {
+        setCandidates(err.candidates);
+        return null;
+      }
+      // backend offline — segue apenas local
+      return { codigoUnico: undefined, finalName: typed, matchedByName: false };
+    }
+  };
+
+  const finishSave = async (
+    r: { codigoUnico?: string; finalName: string; matchedByName: boolean },
+    built: ManualPayload,
+    qrOk: boolean,
+  ) => {
+    if (!activeExam) return;
+    const result: StudentResult = {
+      id: uuidv4(),
+      examId: activeExam.id,
+      studentName: r.finalName,
+      answers: { ...manualAnswers },
+      correctCount: built.correctCount,
+      incorrectCount: built.incorrectCount,
+      blankCount: built.blankCount,
+      duplicateCount: built.dupList.length,
+      duplicateQuestions: built.dupList,
+      duplicateMarks: built.dupMarks,
+      lowConfidence: omrResult?.lowConfidence ?? [],
+      qrOk,
+      codigoUnico: r.codigoUnico,
+      matchedByName: r.matchedByName || undefined,
+      grade: built.grade,
+      timestamp: new Date().toISOString(),
+      manualOverrides: {},
+    };
+    try {
+      saveResult(result, userId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Falha ao salvar o resultado neste aparelho.');
+      return;
+    }
+    setSessionCount(c => c + 1);
+    if (continuous) {
+      // Modo contínuo: volta direto à câmera com a mesma prova
+      setStudentName('');
+      setCapturedImage(null);
+      setOmrResult(null);
+      setManualAnswers({});
+      setError(null);
+      setProcessingProgress(0);
+      setIdentified(null);
+      setCandidates(null);
+      setManualInfo(null);
+      setConfirmUrl(null);
+      setSharpRetry(null);
+      resetAuto();
+      await startCamera();
+    } else {
+      setStep('saved');
+    }
+  };
+
+  // Escolha de homônimo: atribui direto ao aluno selecionado
+  const chooseNameCandidate = async (c: NameCandidate) => {
+    setCandidates(null);
+    setError(null);
+    if (!activeExam) return;
+    const built = buildManualPayload();
+    if (!built) return;
+    const r = await saveManualByName(built, { alunoId: c.aluno_id });
+    if (!r) return;
+    await finishSave(r, built, false);
+  };
+
   const handleSaveResult = async () => {
     // Guards com mensagem — jamais retornar silencioso (salvamento "sumido")
     if (!activeExam) {
@@ -634,34 +814,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setError(`Este cartão pertence à prova "${identified.examTitle}". Selecione a prova correta para corrigir.`);
       return;
     }
-
-    const dupList = omrResult?.duplicateQuestions ?? [];
-    const dupMarks = omrResult?.duplicateMarks ?? {};
-    const { correct: correctCount, incorrect: incorrectCount, blank: blankCount } =
-      scoreAnswers(activeExam, manualAnswers, dupList);
-
-    const grade = calculateGrade(correctCount, activeExam.totalQuestions, activeExam.gradeScale);
-    const observacoes = dupList.length
-      ? `Duplicadas (contadas como erro): ${dupList.map((q) => {
-          const m = dupMarks[q];
-          return `Q${q}${m?.length ? ` (${m.join(', ')})` : ''}`;
-        }).join(', ')}`
-      : undefined;
-    const basePayload = {
-      respostas: Object.fromEntries(Object.entries(manualAnswers).map(([q, a]) => [q, a])),
-      acertos: correctCount,
-      erros: incorrectCount,
-      brancos: blankCount,
-      nota: grade,
-      observacoes,
-    };
-
-    let codigoUnico: string | undefined = identified?.kind === 'ok' ? identified.cardId : undefined;
+    const built = buildManualPayload();
+    if (!built) return;
 
     // ─── Persistência oficial no banco (todos os casos) ───
     if (identified?.kind === 'ok') {
       try {
-        await saveGabaritoResultado(identified.cardId, basePayload, false);
+        await saveGabaritoResultado(identified.cardId, built.basePayload, false);
       } catch (err) {
         if (err instanceof AlreadyGradedError) {
           const prev = err.previous;
@@ -670,7 +829,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             + `${prev.nota != null ? ` (nota ${prev.nota})` : ''}. Substituir?`;
           if (confirm(msg)) {
             try {
-              await saveGabaritoResultado(identified.cardId, basePayload, true);
+              await saveGabaritoResultado(identified.cardId, built.basePayload, true);
             } catch {
               alert('Não foi possível atualizar o resultado no servidor. O resultado ficou salvo apenas neste navegador.');
             }
@@ -680,65 +839,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           setError(`Falha ao gravar no banco: ${msg}. Verifique a conexão com ${getApiBase()} (mesma Wi-Fi no celular) e se está logado.`);
         }
       }
+      await finishSave({ codigoUnico: identified.cardId, finalName: studentName.trim(), matchedByName: false }, built, true);
     } else if (studentName.trim() && activeExam) {
-      // Correção manual/avulsa sem QR — cria aluno+gabarito no banco
-      try {
-        const avulso = await postAvulsoResultado(activeExam.id, {
-          nome: studentName.trim(),
-          respostas: basePayload.respostas,
-          acertos: correctCount,
-          erros: incorrectCount,
-          brancos: blankCount,
-          nota: grade,
-          observacoes,
-        });
-        codigoUnico = avulso.codigo_unico;
-      } catch {
-        // backend offline — segue apenas local
-      }
-    }
-
-    const result: StudentResult = {
-      id: uuidv4(),
-      examId: activeExam.id,
-      studentName: studentName.trim(),
-      answers: { ...manualAnswers },
-      correctCount,
-      incorrectCount,
-      blankCount,
-      duplicateCount: dupList.length,
-      duplicateQuestions: dupList,
-      duplicateMarks: dupMarks,
-      lowConfidence: omrResult?.lowConfidence ?? [],
-      qrOk: identified?.kind === 'ok',
-      codigoUnico,
-      grade,
-      timestamp: new Date().toISOString(),
-      manualOverrides: {},
-    };
-
-    try {
-      saveResult(result, userId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Falha ao salvar o resultado neste aparelho.');
-      return;
-    }
-    setSessionCount(c => c + 1);
-    if (continuous) {
-      // Modo contínuo: volta direto à câmera com a mesma prova
-      setStudentName('');
-      setCapturedImage(null);
-      setOmrResult(null);
-      setManualAnswers({});
-      setError(null);
-      setProcessingProgress(0);
-      setIdentified(null);
-      setConfirmUrl(null);
-      setSharpRetry(null);
-      resetAuto();
-      await startCamera();
-    } else {
-      setStep('saved');
+      // Sem QR (ou QR desconhecido): casa o nome com os alunos da prova
+      const r = await saveManualByName(built);
+      if (!r) return;
+      await finishSave(r, built, false);
     }
   };
 
@@ -750,6 +856,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setError(null);
     setProcessingProgress(0);
     setIdentified(null);
+    setCandidates(null);
+    setManualInfo(null);
     setStep('form');
   };
 
@@ -967,6 +1075,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setManualAnswers({ ...(item.answers ?? {}) });
     setIdentified(item.cardId ? { kind: 'unknown', cardId: item.cardId } : null);
     setStudentName('');
+    setCandidates(null);
+    setManualInfo(null);
     setStep('review');
   };
 
@@ -1625,7 +1735,54 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 placeholder={identified?.kind === 'ok' ? identified.name : 'Digite o nome do aluno (cartão sem QR cadastrado)'}
                 value={studentName}
                 onChange={(e) => setStudentName(e.target.value)}
+                list={canMatchByName && examStudents.length > 0 ? 'exam-student-names' : undefined}
+                autoComplete="off"
               />
+              {canMatchByName && examStudents.length > 0 && (
+                <>
+                  <datalist id="exam-student-names">
+                    {examStudents.map(s => (
+                      <option key={s.aluno_id} value={s.nome} label={studentHint(s)} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Digite para buscar entre os {examStudents.length} alunos da prova — se o nome for igual,
+                    o resultado vai para o aluno já cadastrado. Alunos marcados “sem cartão gerado” terão o
+                    resultado criado e vinculado a eles.
+                  </p>
+                </>
+              )}
+              {manualInfo && (
+                <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mt-2">
+                  {manualInfo}
+                </p>
+              )}
+              {candidates && candidates.length > 0 && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-sm text-amber-800 font-medium mb-2">
+                    Mais de um aluno com esse nome — escolha para quem vai o resultado:
+                  </p>
+                  <div className="flex flex-col gap-1.5">
+                    {candidates.map(c => (
+                      <button
+                        key={c.aluno_id}
+                        type="button"
+                        onClick={() => chooseNameCandidate(c)}
+                        className="text-left px-3 py-2 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 text-sm min-h-[44px]"
+                      >
+                        <span className="font-medium">{c.nome}</span>
+                        {c.matricula && <span className="text-gray-500"> · {c.matricula}</span>}
+                        <span className={`ml-2 text-xs ${c.tem_gabarito ? 'text-gray-500' : 'text-amber-700 font-medium'}`}>
+                          {c.tem_gabarito ? `cartão ${c.codigo_unico}` : 'sem cartão gerado'}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => setCandidates(null)} className="mt-2 text-xs text-gray-500 underline">
+                    Cancelar escolha
+                  </button>
+                </div>
+              )}
               {!studentName.trim() && (
                 <p className="text-xs text-amber-600 mt-1">
                   Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.
