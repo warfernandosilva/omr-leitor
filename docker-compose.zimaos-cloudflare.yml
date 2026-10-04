@@ -1,0 +1,87 @@
+# OMR Leitor — YAML pronto para colar em ZimaOS > App Store > Custom Install (com Cloudflare Tunnel).
+# Acesso público HTTPS: https://omr.seudominio.com (configure o hostname no painel do túnel)
+# Acesso LAN: http://<ip-do-zima>:8080 (FRONTEND_PORT)
+# Banco: Postgres zerado (init_db cria as tabelas sozinho via create_all)
+#
+# Na tela do Custom Install, preencha as variáveis (gere valores fortes, não reuse de outro lugar):
+#   POSTGRES_PASSWORD       = (senha forte só deste servidor)
+#   JWT_SECRET              = (segredo longo aleatório, 32+ caracteres)
+#   CLOUDFLARE_TUNNEL_TOKEN = (token do túnel criado em Zero Trust > Networks > Tunnels)
+# Depois: Install > Start > abrir https://omr.seudominio.com
+#
+# No painel do Cloudflare (Zero Trust > Networks > Tunnels > seu túnel > Public Hostname):
+#   Subdomain: omr | Domain: seudominio.com | Service Type: HTTP | URL: frontend:80
+# O CNAME no DNS é criado automaticamente. O cloudflared faz conexão de SAÍDA para a
+# Cloudflare — não precisa abrir porta no roteador.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: omr
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?preencha POSTGRES_PASSWORD no Custom Install}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      omr-net:
+        aliases: [db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d omr"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend:
+    image: ghcr.io/warfernandosilva/omr-leitor-backend:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?preencha POSTGRES_PASSWORD no Custom Install}@db:5432/omr
+      JWT_SECRET: ${JWT_SECRET:?preencha JWT_SECRET no Custom Install}
+      OMR_ENV: production
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - omr-data:/app/omr-backend/data
+      - omr-backups:/app/omr-backend/backups
+    networks:
+      - omr-net
+
+  frontend:
+    image: ghcr.io/warfernandosilva/omr-leitor-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      - backend
+    networks:
+      - omr-net
+
+  # Túnel Cloudflare: expõe o frontend via HTTPS sem abrir portas.
+  # Fala com o frontend pela rede interna (http://frontend:80); o hostname
+  # público é configurado no dashboard do Cloudflare (Public Hostname).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # --protocol http2: cobre ISPs que bloqueiam QUIC/UDP.
+    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN:?preencha CLOUDFLARE_TUNNEL_TOKEN no Custom Install}
+    depends_on:
+      - frontend
+    networks:
+      - omr-net
+
+volumes:
+  pgdata:
+  omr-data:
+  omr-backups:
+
+# Rede explícita: o Custom Install do ZimaOS isola os containers por padrão
+# (sem ela, o backend não resolve o host 'db'). Todas as partes falam por
+# nome de serviço dentro desta rede bridge.
+networks:
+  omr-net:
+    driver: bridge

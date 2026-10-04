@@ -72,6 +72,15 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
 - Deploy: `.\deploy-zimaos.ps1` (não envia `.env` — crie no servidor). Backup: volumes `pgdata/omr-data/omr-backups`; `docker compose down` **sem `-v`** para não apagar o banco.
 - Troubleshooting Docker: porta 8080 em uso → `FRONTEND_PORT=8081`; 502 no início → backend ainda subindo (aguarda Postgres sozinho, ~60s).
 
+## Nuvem via Cloudflare Tunnel (HTTPS público + LAN)
+- Arquivo do Custom Install: `docker-compose.zimaos-cloudflare.yml` (imagens GHCR + serviço `cloudflared`). A LAN continua em `http://<ip-do-zima>:8080`; o público fica em `https://omr.seudominio.com`.
+- **1. Domínio:** registre um domínio (Cloudflare Registrar ou outro registrador) e adicione a zona no Cloudflare, trocando os nameservers pelos 2 indicados pelo painel.
+- **2. Túnel:** Cloudflare **Zero Trust → Networks → Tunnels → Create tunnel → Cloudflared**, nome `zima-omr` → copie o **token** (`CLOUDFLARE_TUNNEL_TOKEN`).
+- **3. Hostname público:** nesse túnel, aba **Public Hostname** → Add: `omr` + seu domínio, serviço **HTTP**, URL **`frontend:80`** (o CNAME no DNS é criado sozinho).
+- **4. ZimaOS:** App Store → Custom Install → cole o YAML → preencha `POSTGRES_PASSWORD`, `JWT_SECRET` (gere novos, ex.: `openssl rand -hex 32`) e `CLOUDFLARE_TUNNEL_TOKEN` → Install → Start.
+- **5. Verificar:** `https://omr.seudominio.com/api/health` → `{"status":"ok","db":...}`. Com HTTPS, a **câmera ao vivo e a PWA funcionam no celular** (sem ngrok).
+- Notas: o túnel é **de saída** — não abra porta no roteador. Crie uma **Cache Rule “bypass” para `/api/*`** no Cloudflare. Upload Free (100 MB) > restore 50 MB / nginx 55 MB — OK. Backup/volumes: `docker compose down` **sem `-v`**.
+
 ## Troubleshooting
 - **Tela branca no .exe** — faltava `vite.config.ts:base './'` (já corrigido); refaça `electron:build`.
 - **Backend não empacotado** — rode `build-backend-exe.bat` antes de `electron:build`.
