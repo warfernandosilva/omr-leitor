@@ -2,3 +2,5 @@
 omr-leitor-zimaos.zip
 .zimaos-stage/
 .playwright-cli/
+node_modules/
+.playwright-mcp/

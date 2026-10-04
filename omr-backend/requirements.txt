@@ -4,7 +4,7 @@
 fastapi==0.141.1
 uvicorn==0.52.4
 opencv-python==5.0.0.93
-numpy==2.5.2
+numpy==2.4.6  # 2.5.x perdeu os wheels cp311 (só cp312+); 2.4.6 é o último com wheel p/ Python 3.11 do CI/Docker
 Pillow==12.3.0
 python-multipart==0.0.32
 qrcode==8.2
