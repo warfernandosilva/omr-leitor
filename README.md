@@ -66,8 +66,10 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
 - O dump contém hashes de senha — guarde em local seguro, nunca no Git.
 
 ## Deploy ZimaOS (Docker)
-- Stack: `docker-compose.yml` (build local) ou `docker-compose.zimaos-store.yml` (imagens GHCR, para colar no Custom Install). Acesso: `http://<ip-do-zima>:8080` (`FRONTEND_PORT`); o nginx faz proxy `/api/` → backend:8010.
-- Variáveis (Custom Install ou `.env` raiz — gere valores fortes, nunca reuse): `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ chars), `CORS_ORIGINS` (opcional), `FRONTEND_PORT` (opcional, default 8080).
+- Stack: `docker-compose.yml` (build local) ou `docker-compose.zimaos-store.yml` (imagens GHCR, para colar no Custom Install). Acesso: `http://<ip-do-zima>:8080`; o nginx faz proxy `/api/` → backend:8010.
+- **Variáveis:** os YAMLs do **ZimaOS** **não usam interpolação** — o ZimaOS não substitui `${VAR}` (erro `Invalid hostPort` em `ports`, e `environment:` virando literal, o que derruba o backend). Substitua os marcadores `TRECHO_*` no próprio YAML antes de colar; a senha do Postgres aparece **duas vezes** e precisa ser igual. Valores: `POSTGRES_PASSWORD`, `JWT_SECRET` (32+ chars), `CORS_ORIGINS` (opcional) — gere fortes, nunca reuse.
+- **Porta:** literal (`"8080:80"`). Se ocupada, edite para `8081`. `FRONTEND_PORT` só se aplica ao `docker-compose.yml` (deploy por SSH).
+- **API:** o frontend usa **mesma origem** em `/api` (nginx faz proxy para `backend:8010`). O backend **não** publica porta — nunca aponte o app para `:8010`.
 - Publicação: `publish-zimaos.yml` só publica no GHCR **após o CI passar**; depois do 1º push, torne as imagens públicas (GitHub → Packages → Change visibility), senão o ZimaOS não puxa sem login.
 - Deploy: `.\deploy-zimaos.ps1` (não envia `.env` — crie no servidor). Backup: volumes `pgdata/omr-data/omr-backups`; `docker compose down` **sem `-v`** para não apagar o banco.
 - Troubleshooting Docker: porta 8080 em uso → `FRONTEND_PORT=8081`; 502 no início → backend ainda subindo (aguarda Postgres sozinho, ~60s).

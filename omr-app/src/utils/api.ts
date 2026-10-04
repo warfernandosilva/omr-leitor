@@ -9,10 +9,14 @@ const API_BASE = (() => {
   if (envUrl !== undefined) return envUrl.replace(/\/$/, '');
   if (typeof window !== 'undefined') {
     const h = window.location.hostname;
-    // ngrok / tunneling: usa o mesmo host https via proxy do Vite (/api -> localhost:8010).
-    // Qualquer host contendo "ngrok" (ngrok-free.app, ngrok-free.dev, ngrok.io, domínios reservados).
-    if (h && /ngrok/i.test(h)) return '';
-    if (h && h !== 'localhost' && h !== '127.0.0.1') return `${window.location.protocol}//${h}:8010`;
+    // Backend local: app Electron (file://) e Capacitor (capacitor://localhost)
+    // falam direto com o 8010 que o próprio app subiu.
+    if (!h || h === 'localhost' || h === '127.0.0.1') return 'http://localhost:8010';
+    // Qualquer outro host usa MESMA ORIGEM (/api): é o nginx do ZimaOS, o
+    // proxy do Vite em dev (5173), ngrok, Cloudflare ou tailscale serve.
+    // Antes caía no palpite "http://<host>:8010", que quebrava o deploy:
+    // a porta 8010 do backend não é publicada, então a API ficava muda.
+    return '';
   }
   return 'http://localhost:8010';
 })();

@@ -1,18 +1,28 @@
 # OMR Leitor — YAML pronto para colar em ZimaOS > App Store > Custom Install (com Cloudflare Tunnel).
-# Acesso público HTTPS: https://omr.seudominio.com (configure o hostname no painel do túnel)
-# Acesso LAN: http://<ip-do-zima>:8080 (FRONTEND_PORT)
+# Acesso público HTTPS: https://app.seudominio.com (configure o hostname no painel do túnel)
+# Acesso LAN: http://<ip-do-zima>:8080 (porta literal em "ports"; troque se ocupada)
 # Banco: Postgres zerado (init_db cria as tabelas sozinho via create_all)
 #
-# Na tela do Custom Install, preencha as variáveis (gere valores fortes, não reuse de outro lugar):
-#   POSTGRES_PASSWORD       = (senha forte só deste servidor)
-#   JWT_SECRET              = (segredo longo aleatório, 32+ caracteres)
-#   CLOUDFLARE_TUNNEL_TOKEN = (token do túnel criado em Zero Trust > Networks > Tunnels)
-# Depois: Install > Start > abrir https://omr.seudominio.com
+# ─────────────────────────────────────────────────────────────────────────────
+# ATENÇÃO: substitua os 4 marcadores TRECHO_* ANTES de colar no Custom Install.
+# Este arquivo NÃO usa variável de ambiente de propósito: o ZimaOS não interpola
+# (erro "Invalid hostPort" em `ports`, e environment virando literal — o backend
+# sobe sem JWT_SECRET e morre). As duas senhas do Postgres precisam ser IGUAIS:
+# a do serviço db e a que aparece na DATABASE_URL.
+#
+# Gere POSTGRES_PASSWORD e JWT_SECRET com (PowerShell):
+#   function New-Hex([int]$n) { $b = New-Object byte[] $n
+#     $r = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+#     $r.GetBytes($b); $r.Dispose(); (($b | ForEach-Object { $_.ToString('x2') }) -join '') }
+#   New-Hex 24   -> POSTGRES_PASSWORD
+#   New-Hex 32   -> JWT_SECRET (32+ caracteres)
+# O CLOUDFLARE_TUNNEL_TOKEN vem de Zero Trust > Networks > Tunnels.
+# Depois: Install > Start > abrir https://app.seudominio.com
 #
 # No painel do Cloudflare (Zero Trust > Networks > Tunnels > seu túnel > Public Hostname):
-#   Subdomain: omr | Domain: seudominio.com | Service Type: HTTP | URL: frontend:80
-# O CNAME no DNS é criado automaticamente. O cloudflared faz conexão de SAÍDA para a
-# Cloudflare — não precisa abrir porta no roteador.
+#   Subdomain: app | Domain: seudominio.com | Service Type: HTTP | URL: frontend:80
+# O cloudflared faz conexão de SAÍDA para a Cloudflare — não precisa abrir porta
+# no roteador.
 
 services:
   db:
@@ -21,7 +31,7 @@ services:
     environment:
       POSTGRES_DB: omr
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?preencha POSTGRES_PASSWORD no Custom Install}
+      POSTGRES_PASSWORD: "TRECHO_SENHA_DO_POSTGRES_48_HEX"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -38,10 +48,11 @@ services:
     image: ghcr.io/warfernandosilva/omr-leitor-backend:latest
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?preencha POSTGRES_PASSWORD no Custom Install}@db:5432/omr
-      JWT_SECRET: ${JWT_SECRET:?preencha JWT_SECRET no Custom Install}
+      # A senha aqui tem que ser a MESMA de POSTGRES_PASSWORD do serviço db acima.
+      DATABASE_URL: postgresql+psycopg://postgres:TRECHO_SENHA_DO_POSTGRES_48_HEX@db:5432/omr
+      JWT_SECRET: "TRECHO_SEGREDO_JWT_64_HEX"
       OMR_ENV: production
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
     depends_on:
       db:
         condition: service_healthy
@@ -55,7 +66,7 @@ services:
     image: ghcr.io/warfernandosilva/omr-leitor-frontend:latest
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "8080:80"
     depends_on:
       - backend
     networks:
@@ -68,7 +79,7 @@ services:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
     # --protocol http2: cobre ISPs que bloqueiam QUIC/UDP.
-    command: tunnel --no-autoupdate --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN:?preencha CLOUDFLARE_TUNNEL_TOKEN no Custom Install}
+    command: tunnel --no-autoupdate --protocol http2 run --token TRECHO_TOKEN_DO_TUNEL_CLOUDFLARE
     depends_on:
       - frontend
     networks:

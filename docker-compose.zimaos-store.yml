@@ -1,10 +1,20 @@
 # OMR Leitor — YAML pronto para colar em ZimaOS > App Store > Custom Install.
-# Acesso: http://<ip-do-zima>:8080 (FRONTEND_PORT; frontend serve a SPA e faz proxy /api/ -> backend)
+# Acesso: http://<ip-do-zima>:8080 (porta literal em "ports"; troque se ocupada)
 # Banco: Postgres zerado (init_db cria as tabelas sozinho via create_all)
 #
-# Na tela do Custom Install, preencha as variáveis (gere valores fortes, não reuse de outro lugar):
-#   POSTGRES_PASSWORD = (senha forte só deste servidor)
-#   JWT_SECRET        = (segredo longo aleatório, 32+ caracteres)
+# ─────────────────────────────────────────────────────────────────────────────
+# ATENÇÃO: substitua os 3 marcadores TRECHO_* ANTES de colar no Custom Install.
+# Este arquivo NÃO usa variável de ambiente de propósito: o ZimaOS não interpola
+# (erro "Invalid hostPort: $FRONTEND_PORT" em `ports`, e environment virando
+# literal — o backend sobe sem JWT_SECRET e morre). As duas senhas precisam
+# ser IGUAIS: a do Postgres e a que aparece na DATABASE_URL.
+#
+# Gere os valores (PowerShell):
+#   function New-Hex([int]$n) { $b = New-Object byte[] $n
+#     $r = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+#     $r.GetBytes($b); $r.Dispose(); (($b | ForEach-Object { $_.ToString('x2') }) -join '') }
+#   New-Hex 24   -> POSTGRES_PASSWORD
+#   New-Hex 32   -> JWT_SECRET (32+ caracteres)
 # Depois: Install > Start > abrir http://<ip-do-zima>:8080
 
 services:
@@ -14,7 +24,7 @@ services:
     environment:
       POSTGRES_DB: omr
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?preencha POSTGRES_PASSWORD no Custom Install}
+      POSTGRES_PASSWORD: "TRECHO_SENHA_DO_POSTGRES_48_HEX"
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -31,10 +41,11 @@ services:
     image: ghcr.io/warfernandosilva/omr-leitor-backend:latest
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?preencha POSTGRES_PASSWORD no Custom Install}@db:5432/omr
-      JWT_SECRET: ${JWT_SECRET:?preencha JWT_SECRET no Custom Install}
+      # A senha aqui tem que ser a MESMA de POSTGRES_PASSWORD do serviço db acima.
+      DATABASE_URL: postgresql+psycopg://postgres:TRECHO_SENHA_DO_POSTGRES_48_HEX@db:5432/omr
+      JWT_SECRET: "TRECHO_SEGREDO_JWT_64_HEX"
       OMR_ENV: production
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
     depends_on:
       db:
         condition: service_healthy
@@ -48,7 +59,7 @@ services:
     image: ghcr.io/warfernandosilva/omr-leitor-frontend:latest
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-8080}:80"
+      - "8080:80"
     depends_on:
       - backend
     networks:

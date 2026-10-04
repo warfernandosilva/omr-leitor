@@ -22,8 +22,13 @@ publica o frontend com **HTTPS automático** — é esse HTTPS que libera a **c�
 
 1. App Store → **Custom Install**.
 2. Cole o conteúdo de **`docker-compose.zimaos-store.yml`** (imagens GHCR do backend/frontend + Postgres).
-3. Preencha no formulário: `POSTGRES_PASSWORD` e `JWT_SECRET` (gere novos, ex.: `openssl rand -hex 32`).
-4. **Install → Start**. Aguarde ~1–2 min (o backend espera o Postgres subir).
+3. **Substitua os 3 marcadores `TRECHO_*` no próprio YAML** antes de colar (o ZimaOS **não** interpola variáveis — nem em `ports`, nem em `environment:`):
+   - `TRECHO_SENHA_DO_POSTGRES_48_HEX` → **duas vezes** (serviço `db` e `DATABASE_URL` do backend; têm que ser idênticas);
+   - `TRECHO_SEGREDO_JWT_64_HEX` → o segredo do JWT.
+   Gere com `openssl rand -hex 24` / `openssl rand -hex 32` (ou o comando PowerShell no cabeçalho do YAML).
+4. A porta já vem **literal** (`"8080:80"`). Se 8080 estiver ocupada, edite o número antes de colar e use o mesmo valor no `tailscale serve` (A3).
+5. **Install → Start**. Aguarde ~1–2 min (o backend espera o Postgres subir).
+6. **Confira:** `curl http://<ip-do-zima>:8080/api/health` → `{"status":"ok","db":"postgres",...}`. Se retornar **502**, o backend não subiu: veja o troubleshooting.
 
 ## A1. Instalar o Tailscale no ZimaOS
 
@@ -160,10 +165,15 @@ próprio — um endereço `sites.google.com/...` **não serve** para o túnel.
 | Tailscale pediu login de novo | Token expirado/revogado | `tailscale up` de novo e conclua a URL |
 | Login "failed to fetch" no celular | Cache antigo ou DNS propagando | Limpe o cache / aguarde; teste `/api/health` no navegador do celular |
 | Erro 1033 no domínio (caminho B) | Hostname não aponta para o túnel | Confira Public Hostname `app.seudominio.com → http://frontend:80` |
-| 502 nos primeiros 1–2 min | Backend subindo / Postgres iniciando | Aguarde; depois confira se os containers estão `running` |
+| **502** em `/api/health` (app abre, API muda) | Container do **backend** não subiu — quase sempre é YAML colado sem trocar os `TRECHO_*` (backend morre sem `JWT_SECRET`) ou Postgres unhealthy | No terminal do ZimaOS: `docker ps -a` e `docker logs <container-do-backend> --tail 50`. Reinstale o app com os marcadores substituídos |
+| Login diz "Sem resposta da API em http://<ip>:8010" | Bundle antigo, com o palpite de porta 8010 embutido | Atualize a imagem (reinicie o app no Custom Install para puxar o `:latest` novo) e limpe o cache do navegador — a porta 8010 **não** é publicada; a API responde em `/api` do próprio frontend |
+| `Invalid hostPort` ao instalar | ZimaOS não interpola variável em `ports` | Os YAMLs do ZimaOS já vêm com porta literal `8080:80` e **sem** interpolação; use esses arquivos (ou edite o número) em vez de `docker-compose.yml` |
 | `cloudflared` reiniciando (caminho B) | Token com espaço/quebra | Recole o token limpo e reinstale |
 | Túnel "Unhealthy" no dashboard (B) | QUIC/UDP bloqueado | O YAML já usa `--protocol http2`; veja o log do container |
-| Porta 8080 em uso no ZimaOS | Conflito com outro app | `FRONTEND_PORT=8081` e refaça `tailscale serve` para a nova porta |
+| `Invalid hostPort: $FRONTEND_PORT` ao instalar | ZimaOS não interpola variável em `ports` | Os YAMLs do ZimaOS já vêm com a porta literal `8080:80`; use esses arquivos (ou edite o número) em vez de `docker-compose.yml` |
+| `TRECHO_*` ficou no YAML após instalar | Marcador não substituído | Pare o app, corrija os 3 marcadores e reinstale. Senão o banco fica com senha "TRECHO..." e o backend não sobe |
+| `POSTGRES_PASSWORD`/`JWT_SECRET` não aparecem no formulário | Formulário não detectou as variáveis | Substitua os marcadores `${...}` direto no YAML colado, antes de instalar |
+| Porta 8080 em uso no ZimaOS | Conflito com outro app | Troque para `8081` no `ports` do YAML e refaça `tailscale serve --bg http://localhost:8081` |
 | Câmera não abre (só upload) | Endereço sem HTTPS | Use `https://...ts.net` (A) ou `https://app.seudominio.com` (B) |
 
 ---
