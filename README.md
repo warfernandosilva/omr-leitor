@@ -72,13 +72,22 @@ Use `iniciar-desktop.bat` ou distribua com `start-omr.bat` — o Electron em dev
 - Deploy: `.\deploy-zimaos.ps1` (não envia `.env` — crie no servidor). Backup: volumes `pgdata/omr-data/omr-backups`; `docker compose down` **sem `-v`** para não apagar o banco.
 - Troubleshooting Docker: porta 8080 em uso → `FRONTEND_PORT=8081`; 502 no início → backend ainda subindo (aguarda Postgres sozinho, ~60s).
 
-## Nuvem via Cloudflare Tunnel (HTTPS público + LAN)
-- Arquivo do Custom Install: `docker-compose.zimaos-cloudflare.yml` (imagens GHCR + serviço `cloudflared`). A LAN continua em `http://<ip-do-zima>:8080`; o público fica em `https://omr.seudominio.com`.
-- **1. Domínio:** registre um domínio (Cloudflare Registrar ou outro registrador) e adicione a zona no Cloudflare, trocando os nameservers pelos 2 indicados pelo painel.
+## Acesso privado via Tailscale (recomendado)
+- Sem domínio, sem DNS e sem porta aberta: o app **Tailscale** roda no host do ZimaOS e publica o frontend com HTTPS automático (é esse HTTPS que libera a **câmera ao vivo** no celular).
+- Stack no ZimaOS: `docker-compose.zimaos-store.yml` (sem `cloudflared`) → `tailscale up --accept-dns=true` → `tailscale serve --bg http://localhost:8080` → `https://<zima>.<tailnet>.ts.net`.
+- Script auxiliar: `zimaos-tailscale.sh` (`check` / `install` / `up` / `serve` / `unserve` / `status` / `doctor`).
+- Avisos: **não use `tailscale funnel`** (exporia na internet aberta); se mudar `FRONTEND_PORT`, refaça o `serve`.
+- **Passo a passo completo: [`DEPLOY-ZIMAOS.md`](DEPLOY-ZIMAOS.md)** (Tailscale + alternativa Cloudflare + troubleshooting).
+
+## Link público via Cloudflare Tunnel (alternativa)
+- Arquivo do Custom Install: `docker-compose.zimaos-cloudflare.yml` (imagens GHCR + serviço `cloudflared`). A LAN continua em `http://<ip-do-zima>:8080`; o público fica em `https://app.seudominio.com` (exige domínio próprio — `sites.google.com/...` não serve para o túnel).
+- Fluxo: Google Sites (página institucional) → botão "Abrir o corretor" → endereço público do app. Pode conviver com o Tailscale.
+- Resumo:
+- **1. Domínio:** registre um domínio próprio (`.com.br` no Registro.br ou outro) e adicione a zona no Cloudflare, trocando os nameservers pelos 2 indicados pelo painel.
 - **2. Túnel:** Cloudflare **Zero Trust → Networks → Tunnels → Create tunnel → Cloudflared**, nome `zima-omr` → copie o **token** (`CLOUDFLARE_TUNNEL_TOKEN`).
-- **3. Hostname público:** nesse túnel, aba **Public Hostname** → Add: `omr` + seu domínio, serviço **HTTP**, URL **`frontend:80`** (o CNAME no DNS é criado sozinho).
+- **3. Hostname público:** nesse túnel, aba **Public Hostname** → Add: `app` + seu domínio, serviço **HTTP**, URL **`frontend:80`** (o CNAME no DNS é criado sozinho).
 - **4. ZimaOS:** App Store → Custom Install → cole o YAML → preencha `POSTGRES_PASSWORD`, `JWT_SECRET` (gere novos, ex.: `openssl rand -hex 32`) e `CLOUDFLARE_TUNNEL_TOKEN` → Install → Start.
-- **5. Verificar:** `https://omr.seudominio.com/api/health` → `{"status":"ok","db":...}`. Com HTTPS, a **câmera ao vivo e a PWA funcionam no celular** (sem ngrok).
+- **5. Verificar:** `https://app.seudominio.com/api/health` → `{"status":"ok","db":...}`. Com HTTPS, a **câmera ao vivo e a PWA funcionam no celular** (sem ngrok).
 - Notas: o túnel é **de saída** — não abra porta no roteador. Crie uma **Cache Rule “bypass” para `/api/*`** no Cloudflare. Upload Free (100 MB) > restore 50 MB / nginx 55 MB — OK. Backup/volumes: `docker compose down` **sem `-v`**.
 
 ## Troubleshooting
