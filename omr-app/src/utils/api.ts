@@ -100,7 +100,7 @@ export interface ProcessResult {
   allRatios?: Record<number, Record<string, number>>;
   cardId?: string;
   rectifiedImage?: string;
-  templateUsed?: 'padrao' | 'sae' | 'colar' | 'saev';
+  templateUsed?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
   thresholdsUsed?: { floor: number; margin: number; source: string };
   /** sanity pós-leitura (avisos que não bloqueiam) */
   warnings?: string[];
@@ -185,7 +185,8 @@ function mapProcessData(data: Record<string, unknown>): ProcessResult {
     cardId: (data.card_id as string) || undefined,
     rectifiedImage: (data.rectified_image as string) || undefined,
     templateUsed: data.template_used === 'sae' || data.template_used === 'colar' || data.template_used === 'saev'
-      ? data.template_used as 'sae' | 'colar' | 'saev'
+      || data.template_used === 'herby' || data.template_used === 'simulado'
+      ? data.template_used as 'sae' | 'colar' | 'saev' | 'herby' | 'simulado'
       : data.template_used === 'padrao' ? 'padrao' : undefined,
     thresholdsUsed: data.thresholds_used ? {
       floor: Number((data.thresholds_used as Record<string, unknown>).floor ?? 0.3),
@@ -219,7 +220,7 @@ export async function processImage(
   file: File,
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
-  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado',
   adaptive?: boolean,
   debug?: boolean,
 ): Promise<ProcessResult> {
@@ -251,7 +252,7 @@ export async function processMulti(
   files: File[],
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
-  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado',
   adaptive?: boolean,
   debug?: boolean,
 ): Promise<ProcessResult> {
@@ -327,7 +328,7 @@ export async function generateBlankCard(
   subjectLp: string,
   subjectMat: string,
   format: 'PNG' | 'PDF',
-  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby'; sae?: SaeSpec; herby?: HerbySpec },
+  opts?: { questionsPerSubject?: number; layoutMode?: 'dual' | 'single'; template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado'; sae?: SaeSpec; herby?: HerbySpec; turma?: string },
 ): Promise<Blob> {
   const res = await fetchTimeout(`${API_BASE}/api/card/generate`, {
     method: 'POST',
@@ -336,6 +337,7 @@ export async function generateBlankCard(
       subject_lp: subjectLp,
       subject_mat: subjectMat,
       format,
+      turma: opts?.turma ?? '',
       questions_per_subject: opts?.questionsPerSubject ?? 22,
       layout_mode: opts?.layoutMode ?? 'dual',
       template: opts?.template ?? 'padrao',
@@ -429,7 +431,7 @@ export async function syncExam(exam: {
   subjectMat: string;
   questionsPerSubject?: number;
   layoutMode?: 'dual' | 'single';
-  templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
+  templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
   saeSpec?: SaeSpec;
   herbySpec?: HerbySpec;
 }): Promise<SyncExamResult> {
@@ -621,7 +623,7 @@ export interface DBExam {
   subject_mat: string;
   questions_per_subject: number;
   layout_mode: 'dual' | 'single';
-  template: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
+  template: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
   sae_spec: Record<string, unknown> | null;
   herby_spec?: Record<string, unknown> | null;
   grade_scale: string;

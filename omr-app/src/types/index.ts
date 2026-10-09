@@ -9,8 +9,8 @@ export interface Exam {
   gradeScale: '0-10' | '0-100' | 'count';
   answerKey: Record<number, string> | null;
   layoutMode?: 'dual' | 'single';
-  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua), 'colar' (Colar em Avaliação, só grade), 'saev' (Gabarito SAEV, dual 16+16 a 26+26), 'herby' (Gabarito Herby, dual 1+1 a 26+26, QR duplo). */
-  templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
+  /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua), 'colar' (Colar em Avaliação, só grade), 'saev' (Gabarito SAEV, dual 16+16 a 26+26), 'herby' (Gabarito Herby, dual 1+1 a 26+26, QR duplo), 'simulado' (tabela única, réguas como âncora, 22 fixo, sem identificação). */
+  templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
   /** Cabeçalho editável do cartão SAE (só quando templateType === 'sae'). */
   saeSpec?: SaeSpec;
   /** Cabeçalho editável do cartão Herby (só quando templateType === 'herby'). */
@@ -79,6 +79,10 @@ export function isHerbyExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'herby';
 }
 
+export function isSimuladoExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
+  return exam?.templateType === 'simulado';
+}
+
 /** SAE e Colar compartilham a mesma geometria de grade/âncoras (leitura e overlay). */
 export function isSaeFamilyExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'sae' || exam?.templateType === 'colar';
@@ -89,6 +93,7 @@ export function templateLabel(t?: Exam['templateType']): string {
   if (t === 'colar') return 'Colar em Avaliação';
   if (t === 'saev') return 'Gabarito SAEV';
   if (t === 'herby') return 'Gabarito Herby';
+  if (t === 'simulado') return 'Simulado';
   return 'Padrão';
 }
 

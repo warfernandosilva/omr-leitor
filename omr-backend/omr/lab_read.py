@@ -17,8 +17,9 @@ from .reader import OMRResult, _bubble_metrics, process_image
 from .reader_sae import process_sae_image
 from .reader_saev import process_saev_image, _square_metrics
 from .reader_herby import process_herby_image
+from .reader_simulado import process_simulado_image
 
-TEMPLATES = ("padrao", "sae", "colar", "saev", "herby")
+TEMPLATES = ("padrao", "sae", "colar", "saev", "herby", "simulado")
 
 # Constantes geo do template padrão (mesmas usadas em reader.py)
 from .template import (
@@ -41,6 +42,10 @@ from .template_herby import (
     HERBY_COLS_X, HERBY_NUM_W, HERBY_PITCH, HERBY_SIDE,
     HERBY_MIN_QPS, HERBY_MAX_QPS,
     herby_block_rows, herby_bubble_center,
+)
+from .template_simulado import (
+    SIMULADO_MAX_QUESTIONS, SIMULADO_INNER_R,
+    simulado_bubble_center,
 )
 
 
@@ -68,6 +73,9 @@ def run_lab_pipeline(
             image, questions_per_subject=qps, adaptive=adaptive, layout_mode=layout_mode,
             overrides=overrides,
         )
+    if t == "simulado":
+        return process_simulado_image(image, questions_per_subject=qps,
+                                      adaptive=adaptive, overrides=overrides)
     return process_image(
         image, questions_per_subject=qps, layout_mode=layout_mode,
         adaptive=adaptive, overrides=overrides,
@@ -137,6 +145,16 @@ def collect_option_metrics(
             metrics[q] = row
         return metrics
 
+    if t == "simulado":
+        for q in range(1, SIMULADO_MAX_QUESTIONS + 1):
+            row = {}
+            for i in range(4):
+                cx, cy = simulado_bubble_center(q, i)
+                row[letters[i]] = _bubble_metrics(gray, int(round(cx)), int(round(cy)),
+                                                  radius=SIMULADO_INNER_R)
+            metrics[q] = row
+        return metrics
+
     # padrao
     single = layout_mode == "single"
     if single:
@@ -192,6 +210,15 @@ def failure_reason(image, template: str | None) -> str:
             if not det.found:
                 return f"QRs/borda não detectados (faltam: {', '.join(det.missing)})"
             return "Falha na homografia/retificação Herby"
+        if t == "simulado":
+            from .detector_simulado import detect_simulado_table
+            det = detect_simulado_table(image)
+            if not det.found:
+                det_ = ", ".join(det.missing) or "desconhecido"
+                return (f"Réguas da tabela não detectadas ({det_}; "
+                        f"{det.n_reguas} encontradas). Garanta a folha inteira visível, "
+                        "foto nítida e sem sombra.")
+            return "Falha ao retificar a imagem Simulado (foto muito borrada ou escura)"
         from .detector import detect_markers
         det = detect_markers(image)
         if det.missing_ids:

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS, templateLabel } from '../types';
 import { HERBY_MIN_QPS, HERBY_MAX_QPS } from '../utils/herby-template';
+import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import {
   saveExam, getExams, deleteExam, applyRemoteExams,
   getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
@@ -18,7 +19,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const { user } = useAuth();
   const [exams, setExams] = useState(() => getExams(user?.id));
   const [name, setName] = useState('');
-  const [templateType, setTemplateType] = useState<'padrao' | 'sae' | 'colar' | 'saev' | 'herby'>('padrao');
+  const [templateType, setTemplateType] = useState<NonNullable<Exam['templateType']>>('padrao');
   const [layoutMode, setLayoutMode] = useState<'dual' | 'single'>('dual');
   const [subjectLP, setSubjectLP] = useState('LÍNGUA PORTUGUESA');
   const [subjectMat, setSubjectMat] = useState('MATEMÁTICA');
@@ -33,11 +34,14 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isColar = templateType === 'colar';
   const isSaev = templateType === 'saev';
   const isHerby = templateType === 'herby';
+  const isSimulado = templateType === 'simulado';
   const isCustom = isSae || isColar;
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
   // Herby: dual 1+1 a 26+26 ou single 1..26 (metade esquerda do cartão)
-  const maxQps = isSaev ? SAEV_MAX_QPS : isHerby ? HERBY_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
-  const minQps = isSaev ? SAEV_MIN_QPS : isHerby ? HERBY_MIN_QPS : 1;
+  // Simulado: tabela única, sempre single e sempre 22 questões
+  const maxQps = isSimulado ? SIMULADO_MAX_QUESTIONS
+    : isSaev ? SAEV_MAX_QPS : isHerby ? HERBY_MAX_QPS : !isCustom ? layoutMode === 'single' ? MAX_QUESTIONS_SINGLE : MAX_QUESTIONS_PER_SUBJECT : SAE_MAX_QUESTIONS;
+  const minQps = isSimulado ? SIMULADO_MAX_QUESTIONS : isSaev ? SAEV_MIN_QPS : isHerby ? HERBY_MIN_QPS : 1;
   const totalQuestions = isCustom || layoutMode === 'single' ? questionsPerSubject : questionsPerSubject * 2;
 
   const refreshFromServer = async (silent: boolean) => {
@@ -111,13 +115,16 @@ export default function NewExamPage({ onNavigate }: Props) {
     setQuestionsPerSubject(v);
   };
 
-  const handleTemplateChange = (t: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby') => {
+  const handleTemplateChange = (t: NonNullable<Exam['templateType']>) => {
     setTemplateType(t);
     if (t === 'saev') {
       setLayoutMode('dual');
       setQuestionsPerSubject((q) => Math.max(SAEV_MIN_QPS, Math.min(SAEV_MAX_QPS, q || 22)));
     } else if (t === 'herby') {
       setQuestionsPerSubject((q) => Math.max(HERBY_MIN_QPS, Math.min(HERBY_MAX_QPS, q || 22)));
+    } else if (t === 'simulado') {
+      setLayoutMode('single');
+      setQuestionsPerSubject(SIMULADO_MAX_QUESTIONS);
     } else if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
       setQuestionsPerSubject(SAE_MAX_QUESTIONS);
     }
@@ -125,6 +132,7 @@ export default function NewExamPage({ onNavigate }: Props) {
 
   const handleModeChange = (mode: 'dual' | 'single') => {
     if (templateType === 'saev' && mode === 'single') return; // SAEV sempre dual
+    if (templateType === 'simulado') return; // Simulado é tabela única, só single
     setLayoutMode(mode);
     if (templateType === 'herby') {
       // Herby vale 1..26 nos dois layouts (single usa a metade esquerda)
@@ -206,7 +214,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const handleEdit = (exam: Exam) => {
     setEditingId(exam.id);
     setName(exam.name);
-    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' || exam.templateType === 'herby' ? exam.templateType : 'padrao');
+    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado' ? exam.templateType : 'padrao');
     setLayoutMode(exam.layoutMode === 'single' ? 'single' : 'dual');
     setSubjectLP(exam.subjectLP);
     setSubjectMat(exam.subjectMat);
@@ -303,10 +311,22 @@ export default function NewExamPage({ onNavigate }: Props) {
                 Gabarito Herby
                 <span className="block text-xs font-normal text-gray-400">1 ou 2 disciplinas · QR duplo · 1 a 26 por disciplina</span>
               </button>
+              <button
+                type="button"
+                onClick={() => handleTemplateChange('simulado')}
+                className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                  isSimulado
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Simulado
+                <span className="block text-xs font-normal text-gray-400">só a tabela · réguas como âncora · 22 questões · sem QR</span>
+              </button>
             </div>
           </div>
 
-          {(!isCustom && templateType !== 'saev') && (
+          {(!isCustom && templateType !== 'saev' && !isSimulado) && (
           <div>
             <label className="label">Disciplinas *</label>
             <div className="grid grid-cols-2 gap-3">
@@ -369,11 +389,15 @@ export default function NewExamPage({ onNavigate }: Props) {
               className="input"
               min={minQps}
               max={maxQps}
+              disabled={isSimulado}
               value={questionsPerSubject || ''}
               onChange={(e) => handleQpsChange(e.target.value)}
             />
             <p className="text-xs text-gray-400 mt-1">
-              {minQps} a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.
+              {isSimulado
+                ? `${SIMULADO_MAX_QUESTIONS} questões fixas — o cartão Simulado tem tabela única com 22 linhas.`
+                : <>{minQps} a {maxQps} questões — total de {questionsPerSubject > 0 ? totalQuestions : '—'} questões.</>}
+              {templateType === 'simulado' && ' Sem QR, sem nome, sem turma: só a tabela das réguas.'}
               {!isCustom && layoutMode === 'dual' && templateType !== 'saev' && templateType !== 'herby' && ' O padrão do layout é 22 por disciplina.'}
               {templateType === 'saev' && ' Gabarito SAEV: LP + MAT com QR do sistema e nome impresso.'}
               {templateType === 'herby' && (layoutMode === 'single'

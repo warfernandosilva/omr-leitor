@@ -39,6 +39,9 @@ HALF_MK = ARUCO_SIZE // 2
 # ─── Layout ───
 ALUNO_BOX = (85, 137, 1140, 221) #ALUNO_BOX = (85, 137, 1363, 221)
 TURMA_BOX = (85, 229, 725, 313)
+# O rótulo "Turma:" (fonte 38) mede 121px em x=95 -> termina em x=216.
+TURMA_TEXT_X = 226
+TURMA_TEXT_MAX_W = TURMA_BOX[2] - TURMA_TEXT_X - 10   # 489
 
 DIVIDER_X = 723
 DIVIDER_Y0 = 584
@@ -119,6 +122,10 @@ LETTERS = ["A", "B", "C", "D"]
 QR_SIZE = 180     # QR_SIZE = 104
 QR_CENTER = (1265, 230)  # faixa superior central, acima da caixa Aluno (y=137) QR_CENTER = (724, 69)
 STUDENT_NAME_X = 320
+# Matrícula sai da caixa Turma (que passa a mostrar o valor de Turma/prova)
+# para o vão livre à direita dela, parando 10px antes do QR do aluno.
+MATRICULA_POS = (737, 254)
+MATRICULA_MAX_W = QR_CENTER[0] - QR_SIZE // 2 - 10 - MATRICULA_POS[0]   # 428
 ID_TEXT_POS = (95, 1782)  # abaixo da última linha de bolhas, à esquerda do divisor
 
 
@@ -183,6 +190,7 @@ def generate_card(
     student_name: str | None = None,
     student_id: str | None = None,
     student_matricula: str | None = None,
+    turma: str | None = None,
     questions_per_subject: int | None = None,
     layout_mode: str = LAYOUT_DUAL,
 ) -> np.ndarray:
@@ -229,14 +237,15 @@ def generate_card(
         max_w = ALUNO_BOX[2] - STUDENT_NAME_X - 10
         name, name_font = _fit_text(d, student_name.strip(), max_w, start_size=38)
         d.text((STUDENT_NAME_X, 161), name, fill=black, font=name_font)
-    if student_matricula:
-        mat_x = 320
-        max_w = TURMA_BOX[2] - mat_x - 10
-        mat, mat_font = _fit_text(d, f"Matrícula: {student_matricula}", max_w, start_size=34)
-        d.text((mat_x, 254), mat, fill=black, font=mat_font)
-
     d.rectangle(TURMA_BOX, outline=black, width=2)
     d.text((95, 254), "Turma:", fill=black, font=font_label)
+    if (turma or "").strip():
+        val, val_font = _fit_text(d, turma.strip(), TURMA_TEXT_MAX_W, start_size=38)
+        d.text((TURMA_TEXT_X, 254), val, fill=black, font=val_font)
+
+    if student_matricula:
+        mat, mat_font = _fit_text(d, f"Matrícula: {student_matricula}", MATRICULA_MAX_W, start_size=34)
+        d.text(MATRICULA_POS, mat, fill=black, font=mat_font)
 
     # ─── Títulos ───
     if single:
@@ -330,6 +339,7 @@ def build_batch_pdf(
     out_buf: io.BytesIO,
     questions_per_subject: int | None = None,
     layout_mode: str = LAYOUT_DUAL,
+    turma: str | None = None,
 ) -> int:
     """
     Gera 1 página por aluno em um único PDF (reportlab, baixo uso de memória).
@@ -352,6 +362,7 @@ def build_batch_pdf(
             student_name=s["nome"],
             student_id=s["codigo_unico"],
             student_matricula=s.get("matricula"),
+            turma=turma,
             questions_per_subject=questions_per_subject,
             layout_mode=layout_mode,
         )
@@ -380,6 +391,8 @@ TEMPLATE_COORDS = {
     "questions_per_subject": QUESTIONS_PER_SUBJECT,
     "qr_size": QR_SIZE, "qr_center": list(QR_CENTER),
     "student_name_x": STUDENT_NAME_X, "id_text_pos": list(ID_TEXT_POS),
+    "turma_box": list(TURMA_BOX), "turma_text_x": TURMA_TEXT_X,
+    "matricula_pos": list(MATRICULA_POS),
 }
 
 

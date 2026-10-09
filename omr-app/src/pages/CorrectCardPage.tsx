@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, isHerbyExam, templateLabel } from '../types';
+import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
@@ -22,8 +22,9 @@ import {
   guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide,
 } from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
-import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor } from '../utils/overlay-bubbles';
+import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor } from '../utils/overlay-bubbles';
 import { herbyRowsFor } from '../utils/herby-template';
+import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 
@@ -252,10 +253,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   // ─── Guia de captura adaptado ao gabarito da prova ───
   // SAEV usa adaptativo sempre (evidência: fotos reais 43-44/44 vs 18/41 no fixo)
-  const useAdaptive = adaptive || isSaevExam(activeExam) || isHerbyExam(activeExam);
+  const useAdaptive = adaptive || isSaevExam(activeExam) || isHerbyExam(activeExam) || isSimuladoExam(activeExam);
   const captureTemplate = activeExam?.templateType === 'colar'
     ? 'colar'
-    : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby' : 'padrao';
+    : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby'
+    : isSimuladoExam(activeExam) ? 'simulado' : 'padrao';
   const guideThresholds = useMemo(() => thresholdsFor(captureTemplate), [captureTemplate]);
   // Mede o visor para desenhar o maior A4 sem distorção
   const viewRef = useRef<HTMLDivElement>(null);
@@ -289,14 +291,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // cruzado) e avisa se divergir do modelo da prova selecionada.
   // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay;
   // SAEV tem família própria (quadrados). Mapeia para o modelo canônico.
-  const canonicalModel = (t?: string): 'sae' | 'saev' | 'herby' | 'padrao' =>
-    t === 'sae' || t === 'colar' ? 'sae' : t === 'saev' ? 'saev' : t === 'herby' ? 'herby' : 'padrao';
+  const canonicalModel = (t?: string): 'sae' | 'saev' | 'herby' | 'simulado' | 'padrao' =>
+    t === 'sae' || t === 'colar' ? 'sae' : t === 'saev' ? 'saev' : t === 'herby' ? 'herby'
+      : t === 'simulado' ? 'simulado' : 'padrao';
   const overlayModel = omrResult?.templateUsed
     ? canonicalModel(omrResult.templateUsed)
     : canonicalModel(activeExam?.templateType);
   const overlaySae = overlayModel === 'sae';
   const overlaySaev = overlayModel === 'saev';
   const overlayHerby = overlayModel === 'herby';
+  const overlaySimulado = overlayModel === 'simulado';
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
     && canonicalModel(omrResult.templateUsed) !== canonicalModel(activeExam.templateType);
 
@@ -310,7 +314,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       totalQuestions: activeExam.totalQuestions,
       templateType: overlayModel === 'sae'
         ? (activeExam.templateType === 'colar' ? 'colar' : 'sae')
-        : overlayModel === 'saev' ? 'saev' : overlayModel === 'herby' ? 'herby' : 'padrao',
+        : overlayModel === 'saev' ? 'saev' : overlayModel === 'herby' ? 'herby'
+        : overlayModel === 'simulado' ? 'simulado' : 'padrao',
     });
   }, [activeExam, overlayModel]);
 
@@ -540,7 +545,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
-      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : activeExam?.templateType === 'herby' ? 'herby' : 'padrao';
+      const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : activeExam?.templateType === 'herby' ? 'herby' : isSimuladoExam(activeExam) ? 'simulado' : 'padrao';
 
       let result: ProcessResult;
       if (frames.length > 1) {
@@ -915,8 +920,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       try {
         // 1. Leitura OMR + QR (usa o modelo da prova; fallback cruzado no backend)
-        const tpl = exam.templateType === 'saev' ? 'saev' : exam.templateType === 'herby' ? 'herby' : undefined;
-        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev' || exam.templateType === 'herby', debugMode);
+        const tpl = exam.templateType === 'saev' ? 'saev' : exam.templateType === 'herby' ? 'herby'
+          : exam.templateType === 'simulado' ? 'simulado' : undefined;
+        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado', debugMode);
         if (!result.success || !result.answers) {
           patchItem(item.fileName, { status: 'error', detail: result.error || 'Falha na leitura' });
           continue;
@@ -1604,6 +1610,26 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         );
                       })}
                     </g>
+                  ) : overlaySimulado ? (
+                    <g>
+                      {Array.from({ length: SIMULADO_MAX_QUESTIONS }, (_, i) => {
+                        const { y, r, cells } = overlaySimuladoRowFor(i + 1);
+                        return (
+                          <g key={i + 1}>
+                            {cells.map(({ q: qg, letter, x }) => {
+                              const key = activeExam.answerKey?.[qg];
+                              const isMarked = manualAnswers[qg] === letter;
+                              const isCorrect = key ? letter === key : false;
+                              let stroke = '#333'; let fill = 'none'; let sw = 2;
+                              if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
+                              else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
+                              else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
+                              return <circle key={`sim-${qg}-${letter}`} cx={x} cy={y} r={r} fill={fill} stroke={stroke} strokeWidth={sw} />;
+                            })}
+                          </g>
+                        );
+                      })}
+                    </g>
                   ) : (
                   Array.from({ length: activeExam.questionsPerSubject }, (_, i) => {
                     // Geometria por layout (single usa colunas centrais) — overlay-bubbles.ts
@@ -1643,6 +1669,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         if (!pos) return null;
                         const h = pos.side / 2 + 4;
                         return <rect key={`dup-${q}-${letter}`} x={pos.x - h} y={pos.y - h} width={h * 2} height={h * 2} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
+                      });
+                    }
+                    if (overlaySimulado) {
+                      const marks = omrResult?.duplicateMarks?.[q] ?? [];
+                      return marks.map(letter => {
+                        const pos = overlaySimuladoBubbleFor(q, letter);
+                        if (!pos) return null;
+                        return <circle key={`dup-${q}-${letter}`} cx={pos.x} cy={pos.y} r={pos.r + 4} fill="none" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" />;
                       });
                     }
                     if (overlaySae) {

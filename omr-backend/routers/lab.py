@@ -33,6 +33,7 @@ from models import (
     CalibrationRun, LabImage, LabOptionScore, LabQuestion, LabSession, OmrConfig, User,
 )
 from omr.lab_metrics import OptionComponents
+from omr.lab_read import TEMPLATES, normalize_template
 
 router = APIRouter()
 
@@ -170,10 +171,18 @@ def lab_create_session(
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
+    # Rejeita em vez de cair no fallback silencioso de normalize_template:
+    # um template desconhecido faria o Lab ler com o motor errado e gravar
+    # "resposta errada" como se fosse leitura válida.
+    if payload.template not in TEMPLATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"template inválido: {payload.template!r}. Use um de: {', '.join(TEMPLATES)}",
+        )
     session = LabSession(
         nome=payload.nome.strip() or "Sessão sem nome",
         descricao=payload.descricao,
-        template=payload.template,
+        template=normalize_template(payload.template),
         questions_per_subject=max(1, int(payload.questions_per_subject or 22)),
         layout_mode="single" if payload.layout_mode == "single" else "dual",
         adaptive=bool(payload.adaptive),
@@ -331,6 +340,10 @@ def lab_upload_images(
     from main import _decode_image_bytes
 
     session = _get_session(db, sid, current_user)
+    # Template que o leitor VAI usar (não o bruto da linha) — é o que a
+    # imagem deve registrar, senão o histórico diz um modelo e o motor
+    # rodou outro.
+    tpl_used = normalize_template(session.template)
     d = _session_dir(sid)
     results: list[dict] = []
 
@@ -342,7 +355,7 @@ def lab_upload_images(
             rectified_path=None,
             status="error",
             error=error,
-            template_used=session.template,
+            template_used=tpl_used,
         )
         db.add(img)
         db.flush()
@@ -371,13 +384,13 @@ def lab_upload_images(
 
         result = run_lab_pipeline(
             image,
-            template=session.template,
+            template=tpl_used,
             questions_per_subject=session.questions_per_subject,
             layout_mode=session.layout_mode,
             adaptive=adaptive or session.adaptive,
         )
         if result is None:
-            _fail(original_name, failure_reason(image, session.template), rel)
+            _fail(original_name, failure_reason(image, tpl_used), rel)
             continue
 
         rectified_path = None
@@ -392,7 +405,7 @@ def lab_upload_images(
             original_path=str(original_path.relative_to(_LAB_ROOT)),
             rectified_path=rectified_path,
             status="processed",
-            template_used=session.template,
+            template_used=tpl_used,
             qr_id=result.qr_id,
             floor_used=result.floor_used,
             floor_source=result.floor_source,
@@ -412,7 +425,7 @@ def lab_upload_images(
         # Componentes de TODAS as bolhas numa passada só (o reader já tem a
         # retificada em mãos) — evita recalcular a métrica por questão.
         metrics = collect_option_metrics(
-            result.rectified, session.template,
+            result.rectified, tpl_used,
             session.questions_per_subject, session.layout_mode,
         )
 
@@ -667,7 +680,7 @@ def lab_calibration(
 
     run = CalibrationRun(
         session_id=sid,
-        template=session.template,
+        template=normalize_template(session.template),
         grid={
             "floor_grid": floors, "margin_grid": margins,
             "weights_grid": [list(w) for w in weights],

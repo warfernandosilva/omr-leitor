@@ -1,6 +1,8 @@
 // ─── Guia de enquadramento: detector leve dos 4 quadrados-âncora ───
 // Funcões puras sobre buffers grayscale (testáveis em Node, sem DOM).
-// Vale para os 3 modelos: ArUco também aparece como bloco escuro de longe.
+// Vale para os 6 modelos: ArUco/quadrados aparecem como blocos escuros de
+// longe; o Simulado (sem marcador) usa o modo singleRect — as réguas da
+// tabela viram as 4 quinas.
 
 export interface CornerPoint {
   x: number; // 0..1 (normalizado pelo frame)
@@ -33,6 +35,12 @@ export interface GuideThresholds {
   minSharpness: number;
   minBrightness: number;
   maxBrightness: number;
+  /**
+   * Modo "retângulo único": o gabarito não tem marcadores de canto (Simulado)
+   * — a maior malha escura (as réguas da tabela) é reduzida às suas 4 quinas
+   * extremas, que viram TL/TR/BR/BL. Ativa também a faixa de aspecto própria.
+   */
+  singleRect?: boolean;
 }
 
 export const DEFAULT_THRESHOLDS: GuideThresholds = {
@@ -53,6 +61,18 @@ interface Component {
   area: number;
   x0: number; y0: number; x1: number; y1: number;
   cx: number; cy: number;
+  // quinas extremas (min x+y / min y−x / max x+y / max y−x) — modo singleRect
+  xtl: number; ytl: number;
+  xtr: number; ytr: number;
+  xbr: number; ybr: number;
+  xbl: number; ybl: number;
+}
+
+// Faixa de aspecto (largura/altura) por modo: as âncoras clássicas são quase
+// quadradas; a tabela do Simulado é alta e estreita (~0.44).
+function aspectOk(aspect: number, singleRect: boolean | undefined): boolean {
+  if (singleRect) return aspect >= 0.25 && aspect <= 0.75;
+  return aspect >= 0.7 && aspect <= 1.43;
 }
 
 function findDarkComponents(
@@ -70,6 +90,8 @@ function findDarkComponents(
     let area = 0;
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
     let sx = 0, sy = 0;
+    let bestTL = Infinity, bestTR = Infinity, bestBR = -Infinity, bestBL = -Infinity;
+    let xtl = 0, ytl = 0, xtr = 0, ytr = 0, xbr = 0, ybr = 0, xbl = 0, ybl = 0;
     stack.length = 0;
     stack.push(i);
     visited[i] = 1;
@@ -81,6 +103,14 @@ function findDarkComponents(
       if (px > x1) x1 = px;
       if (py < y0) y0 = py;
       if (py > y1) y1 = py;
+      const dTL = px + py;
+      if (dTL < bestTL) { bestTL = dTL; xtl = px; ytl = py; }
+      const dTR = py - px;
+      if (dTR < bestTR) { bestTR = dTR; xtr = px; ytr = py; }
+      const dBR = px + py;
+      if (dBR > bestBR) { bestBR = dBR; xbr = px; ybr = py; }
+      const dBL = py - px;
+      if (dBL > bestBL) { bestBL = dBL; xbl = px; ybl = py; }
       // vizinhos
       if (px > 0) { const q = p - 1; if (!visited[q] && gray[q] < th.darkLevel) { visited[q] = 1; stack.push(q); } }
       if (px < w - 1) { const q = p + 1; if (!visited[q] && gray[q] < th.darkLevel) { visited[q] = 1; stack.push(q); } }
@@ -90,10 +120,12 @@ function findDarkComponents(
     if (area < minArea || area > maxArea) continue;
     const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
     if (bw <= 0 || bh <= 0) continue;
-    const aspect = bw / bh;
-    if (aspect < 0.7 || aspect > 1.43) continue;
+    if (!aspectOk(bw / bh, th.singleRect)) continue;
     if (area / (bw * bh) < th.minFillRatio) continue;
-    comps.push({ area, x0, y0, x1, y1, cx: sx / area, cy: sy / area });
+    comps.push({
+      area, x0, y0, x1, y1, cx: sx / area, cy: sy / area,
+      xtl, ytl, xtr, ytr, xbr, ybr, xbl, ybl,
+    });
   }
   return comps;
 }
@@ -159,18 +191,30 @@ export function analyzeFrame(
   const brightness = bN ? bSum / bN : 0;
 
   const comps = findDarkComponents(gray, w, h, th);
-  // 1 candidato por quadrante (o de maior área)
-  const quad: Partial<Record<CornerName, Component>> = {};
-  for (const c of comps) {
-    const left = c.cx < w / 2, top = c.cy < h / 2;
-    const name: CornerName = top ? (left ? 'TL' : 'TR') : (left ? 'BL' : 'BR');
-    if (!quad[name] || c.area > quad[name]!.area) quad[name] = c;
-  }
   const corners: Partial<Record<CornerName, CornerPoint>> = {};
-  (Object.keys(quad) as CornerName[]).forEach(k => {
-    const c = quad[k]!;
-    corners[k] = { x: c.cx / w, y: c.cy / h };
-  });
+  if (th.singleRect) {
+    // Sem marcadores: um único componente grande vira as 4 quinas extremas.
+    let best: Component | null = null;
+    for (const c of comps) if (!best || c.area > best.area) best = c;
+    if (best) {
+      corners.TL = { x: best.xtl / w, y: best.ytl / h };
+      corners.TR = { x: best.xtr / w, y: best.ytr / h };
+      corners.BR = { x: best.xbr / w, y: best.ybr / h };
+      corners.BL = { x: best.xbl / w, y: best.ybl / h };
+    }
+  } else {
+    // 1 candidato por quadrante (o de maior área)
+    const quad: Partial<Record<CornerName, Component>> = {};
+    for (const c of comps) {
+      const left = c.cx < w / 2, top = c.cy < h / 2;
+      const name: CornerName = top ? (left ? 'TL' : 'TR') : (left ? 'BL' : 'BR');
+      if (!quad[name] || c.area > quad[name]!.area) quad[name] = c;
+    }
+    (Object.keys(quad) as CornerName[]).forEach(k => {
+      const c = quad[k]!;
+      corners[k] = { x: c.cx / w, y: c.cy / h };
+    });
+  }
   const found = (['TL', 'TR', 'BR', 'BL'] as CornerName[]).filter(k => corners[k]).length;
 
   let coverage = 0, skew = 0, rotationDeg = 0;
@@ -187,7 +231,9 @@ export function analyzeFrame(
   let hint = 'Enquadramento bom — segure firme...';
   let locked = false;
   if (found < 4) {
-    hint = `Mostre os 4 cantos do cartão (${found}/4 visíveis)`;
+    hint = th.singleRect
+      ? 'Mostre o cartão inteiro na tela (a tabela ainda não apareceu)'
+      : `Mostre os 4 cantos do cartão (${found}/4 visíveis)`;
   } else if (coverage < th.minCoverage) {
     hint = 'Aproxime o cartão da câmera';
   } else if (coverage > th.maxCoverage) {

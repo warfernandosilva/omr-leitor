@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
-import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, HerbySpec, isSaeExam, isHerbyExam, templateLabel } from '../types';
+import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, HerbySpec, isSaeExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { generateBlankCard, checkHealth, syncExam } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
@@ -39,6 +39,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
   const isSae = isSaeExam(activeExam);
 const isHerby = isHerbyExam(activeExam);
 const isColar = activeExam?.templateType === 'colar';
+const isSimulado = isSimuladoExam(activeExam);
 
 // Carrega o cabeçalho SAE salvo na prova ao trocar de prova
 const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC });
@@ -91,7 +92,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
           activeExam.subjectLP,
           activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
           'PNG',
-          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined },
+          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined, turma: activeExam.name },
         );
         if (cancelled) return;
         urlRef.current = URL.createObjectURL(blob);
@@ -107,7 +108,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
       if (urlRef.current) URL.revokeObjectURL(urlRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showPreview, activeExam?.id, activeExam?.subjectLP, activeExam?.subjectMat, activeExam?.questionsPerSubject, activeExam?.layoutMode, activeExam?.templateType, JSON.stringify(saeSpec), JSON.stringify(herbySpec)]);
+  }, [showPreview, activeExam?.id, activeExam?.name, activeExam?.subjectLP, activeExam?.subjectMat, activeExam?.questionsPerSubject, activeExam?.layoutMode, activeExam?.templateType, JSON.stringify(saeSpec), JSON.stringify(herbySpec)]);
 
   // PDF oficial do backend (mesmo desenho dos gabaritos personalizados)
   const buildServerPdf = async (): Promise<Blob | null> => {
@@ -118,7 +119,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         activeExam.subjectLP,
         activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
         'PDF',
-        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined },
+        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined, turma: activeExam.name },
       );
     } catch {
       return null;
@@ -155,7 +156,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
     try {
       const blob = await buildServerPdf();
       if (blob) {
-        downloadBlob(blob, `${isColar ? 'colar-avaliacao' : isSae ? 'cartao-sae' : isHerby ? 'cartao-herby' : 'cartao-resposta'}-${cardId}.pdf`);
+        downloadBlob(blob, `${isColar ? 'colar-avaliacao' : isSae ? 'cartao-sae' : isHerby ? 'cartao-herby' : isSimulado ? 'cartao-simulado' : 'cartao-resposta'}-${cardId}.pdf`);
         setSourceNote('PDF gerado pelo servidor — idêntico aos gabaritos oficiais (sem QR/nome).');
         return;
       }
@@ -221,6 +222,11 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                     <>
                       <p><strong>Modelo:</strong> Colar em Avaliação (só o gabarito, sem cabeçalho)</p>
                       <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                    </>
+                  ) : isSimulado ? (
+                    <>
+                      <p><strong>Modelo:</strong> Simulado (só a tabela · réguas como âncora · sem QR/nome/turma)</p>
+                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject} fixas</p>
                     </>
                   ) : isSae ? (
                     <>
@@ -352,7 +358,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                   </PDFDownloadLink>
                 </div>
               </div>
-            ) : isSae || isColar ? (
+            ) : isSae || isColar || isSimulado ? (
               <div className="print-answer-card shadow-2xl flex items-center justify-center p-8 text-center text-sm text-gray-500">
                 {loadingPng
                   ? 'Carregando prévia do servidor...'
@@ -371,7 +377,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         )}
       </div>
 
-      {showPreview && activeExam && !isSae && !isColar && (
+      {showPreview && activeExam && !isSae && !isColar && !isSimulado && (
         <div id="print-card" className="print-answer-card" style={{ position: 'fixed', left: -10000, top: 0, zIndex: -1 }}>
           <AnswerCard exam={activeExam} cardId={cardId} />
         </div>

@@ -24,6 +24,10 @@ from omr.template_saev import (
 from omr.template_herby import (
     generate_herby_card, HerbySpec, herby_block_rows, herby_bubble_center,
 )
+from omr.template_simulado import (
+    generate_simulado_card, SIMULADO_MAX_QUESTIONS, SIMULADO_INNER_R,
+    simulado_bubble_center, SIMULADO_BUBBLE_R,
+)
 
 
 def _png(img):
@@ -71,6 +75,15 @@ def _fill_herby():
     return img
 
 
+def _fill_simulado():
+    base = generate_simulado_card()
+    r = int(SIMULADO_BUBBLE_R) - 4
+    for q in range(1, SIMULADO_MAX_QUESTIONS + 1):
+        cx, cy = simulado_bubble_center(q, (q * 7 + 3) % 4)
+        cv2.circle(base, (int(round(cx)), int(round(cy))), r, (20, 20, 20), -1)
+    return base
+
+
 # ---------------------------------------------------------------------------
 # Paridade do coletor de métricas com os leitores de produção
 # ---------------------------------------------------------------------------
@@ -81,6 +94,7 @@ def test_collect_metrics_parity_padrao_sae_saev_herby():
         ("sae", _fill_sae(), {"questions_per_subject": 26}),
         ("saev", _fill_saev(), {"questions_per_subject": 22}),
         ("herby", _fill_herby(), {"questions_per_subject": 22}),
+        ("simulado", _fill_simulado(), {"questions_per_subject": 22}),
     ]
     for template, img, kwargs in cases:
         res = run_lab_pipeline(img, template, **kwargs)
@@ -289,6 +303,51 @@ def test_lab_ground_truth_invalid_keys(client):
     r = client.post(f'/api/lab/sessions/{sid}/ground-truth',
                     json={'ground_truth': {'q1': 'A', '2': 'B'}})
     assert r.status_code == 400, r.text
+
+
+def test_lab_template_invalido_rejeitado_e_linha_legada_normalizada(client, db_session):
+    """Template desconhecido não pode virar leitura silenciosa com o motor errado.
+
+    - a criação REJEITA (400) em vez de cair no fallback de normalize_template;
+    - uma linha legada já gravada com template inválido continua legível: o
+      leitor cai em 'padrao' e a imagem registra o template REALMENTE usado —
+      senão o histórico diz um modelo e o motor rodou outro.
+    """
+    r = client.post('/api/auth/register', json={
+        'email': 'labtpl@example.com', 'nome': 'LabTpl', 'password': TEST_PASSWORD})
+    if r.status_code == 400:
+        r = client.post('/api/auth/login',
+                        data={'username': 'labtpl@example.com', 'password': TEST_PASSWORD})
+    assert r.status_code == 200, r.text
+    client.headers.update({'Authorization': f"Bearer {r.json()['access_token']}"})
+
+    # caixa alta / typo / desconhecido -> 400 com a lista do que é válido
+    for bad in ('SAEV', 'padraoo', 'qualquer'):
+        r = client.post('/api/lab/sessions', json={'nome': 'Ruim', 'template': bad})
+        assert r.status_code == 400, (bad, r.status_code, r.text)
+        assert 'template' in r.json()['detail'], r.json()
+
+    # legítimo -> 201 e gravado normalizado
+    r = client.post('/api/lab/sessions', json={'nome': 'Boa', 'template': 'padrao'})
+    assert r.status_code == 201, r.text
+
+    # linha legada inválida (insert direto: o caminho de API agora bloqueia)
+    from models import LabSession, User
+    db = db_session()
+    owner = db.query(User).filter(User.email == 'labtpl@example.com').one()
+    legacy = LabSession(nome='Legada', template='SAEV', owner_id=owner.id)
+    db.add(legacy)
+    db.commit()
+    db.refresh(legacy)
+
+    card = _fill_padrao()
+    r = client.post(f'/api/lab/sessions/{legacy.id}/images',
+                    files=[('files', ('a.png', _png(card), 'image/png'))])
+    assert r.status_code == 200, r.text
+    res = r.json()['results'][0]
+    assert res['status'] == 'processed', res
+    assert res['template_used'] == 'padrao', (
+        f"imagem registrou {res['template_used']!r} mas o motor usou 'padrao'")
 
 
 if __name__ == "__main__":

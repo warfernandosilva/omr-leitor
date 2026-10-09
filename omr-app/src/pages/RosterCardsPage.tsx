@@ -64,6 +64,8 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
   const n = students.length;
   const isColarExam = activeExam?.templateType === 'colar';
 const isHerbyExam = activeExam?.templateType === 'herby';
+const isSimuladoExam = activeExam?.templateType === 'simulado';
+const SIMULADO_BLOCK_MSG = 'Provas "Simulado" são avulsas (sem QR/nome/turma): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
   const COLAR_BLOCK_MSG = 'Provas "Colar em Avaliação" são avulsas (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
 const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Gerenciar Avaliação (com QR duplo + código único por aluno).';
 
@@ -103,6 +105,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
   const handleImportOnly = async () => {
     if (!activeExam || !result || n === 0) return;
     if (isColarExam) { setGenError(COLAR_BLOCK_MSG); return; }
+    if (isSimuladoExam) { setGenError(SIMULADO_BLOCK_MSG); return; }
     setImportingOnly(true);
     setGenError(null);
     setStage('');
@@ -133,6 +136,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
     if (!activeExam || !result || n === 0) return;
     if (isColarExam) { setGenError(COLAR_BLOCK_MSG); return; }
     if (isHerbyExam) { setGenError(HERBY_BLOCK_MSG); return; }
+    if (isSimuladoExam) { setGenError(SIMULADO_BLOCK_MSG); return; }
     setGenError(null);
     setStep('generating');
     try {
@@ -287,6 +291,11 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
               {isColarExam && (
                 <p className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
                   {COLAR_BLOCK_MSG}
+                </p>
+              )}
+              {isSimuladoExam && (
+                <p className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+                  {SIMULADO_BLOCK_MSG}
                 </p>
               )}
             </div>

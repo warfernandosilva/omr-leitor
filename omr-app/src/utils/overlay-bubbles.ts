@@ -10,6 +10,9 @@ import {
 } from './card-template';
 import { SAEV_SIDE, saevBubbleCenter, saevRowYs } from './saev-template';
 import { HERBY_SIDE, herbyBubbleCenter, herbyRowYs, herbyRowsFor } from './herby-template';
+import {
+  SIMULADO_BUBBLE_R, SIMULADO_COLS, SIMULADO_MAX_QUESTIONS, simuladoRowCenter,
+} from './simulado-template';
 
 export const OVERLAY_LETTERS = ['A', 'B', 'C', 'D'] as const;
 
@@ -139,6 +142,27 @@ export function overlayHerbyBubbleFor(
   const [x, y] = herbyBubbleCenter(col, r, ci, qps);
   return { x, y, side: HERBY_SIDE };
 }
+// ─── Overlay do cartão "Simulado" (tabela única, 22 linhas, sem dual) ───
+export function overlaySimuladoRowFor(row: number): OverlayRow {
+  const n = Math.max(1, Math.min(SIMULADO_MAX_QUESTIONS, Math.round(row)));
+  return {
+    row: n,
+    y: simuladoRowCenter(n),
+    r: SIMULADO_BUBBLE_R,
+    cells: SIMULADO_COLS.map((x, ci) => ({ q: n, letter: OVERLAY_LETTERS[ci], x })),
+  };
+}
+
+/** Posição de uma bolha Simulado específica (p/ o mapa de duplicadas). */
+export function overlaySimuladoBubbleFor(
+  q: number, letter: string,
+): { x: number; y: number; r: number } | null {
+  const ci = OVERLAY_LETTERS.indexOf(letter as (typeof OVERLAY_LETTERS)[number]);
+  if (ci < 0) return null;
+  if (q < 1 || q > SIMULADO_MAX_QUESTIONS) return null;
+  return { x: SIMULADO_COLS[ci], y: simuladoRowCenter(q), r: SIMULADO_BUBBLE_R };
+}
+
 // Posição de uma bolha específica (p/ o mapa de duplicadas)
 export function overlayBubbleFor(
   exam: ExamGeom, q: number, letter: string,

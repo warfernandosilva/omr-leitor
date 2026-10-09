@@ -4,14 +4,13 @@
 // - posição das 4 âncoras de cada modelo projetadas no guia (alvos 🎯);
 // - limiares do detector calibrados por modelo.
 //
-// Âncoras normalizadas (0..1 do cartão 1448×2048):
-// - Padrão: cantos externos dos ArUcos 104px → quad x 0.059–0.941 / y 0.234–0.941
-// - SAE/Colar: quadrados 40px (margem 64, topo 1140, base 1900) → x 0.044–0.956 / y 0.557–0.928
-// - SAEV: quadrados 75px (centros 110/1338 × 545/1905) → x 0.050–0.950 / y 0.248–0.948
+// Âncoras normalizadas (0..1 do cartão 1448×2048) vêm de utils/anchors.ts —
+// mesma fonte usada pelo recorte do "Gabarito recortado" (gabarito-crop.ts).
 import { GuideThresholds, DEFAULT_THRESHOLDS } from './frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT } from './card-template';
+import { CaptureTemplate, normalizedAnchorBox } from './anchors';
 
-export type CaptureTemplate = 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
+export type { CaptureTemplate } from './anchors';
 
 export const CARD_ASPECT = CARD_WIDTH / CARD_HEIGHT; // ≈0.7071 (A4 retrato)
 
@@ -30,34 +29,7 @@ export interface AnchorTargets {
   BL: { x: number; y: number };
 }
 
-// Cantos externos das âncoras em coords do cartão (0..1)
-const ANCHOR_BOX: Record<CaptureTemplate, { x0: number; y0: number; x1: number; y1: number }> = {
-  // ArUco 104px: TL(86,479) TR(1258,479) BR(1258,1824) BL(86,1824)
-  padrao: {
-    x0: 86 / CARD_WIDTH, y0: 479 / CARD_HEIGHT,
-    x1: (1258 + 104) / CARD_WIDTH, y1: (1824 + 104) / CARD_HEIGHT,
-  },
-  // Quadrados 40px: x 64..1384, y 1140..1900 (mesma geometria SAE e Colar)
-  sae: {
-    x0: 64 / CARD_WIDTH, y0: 1140 / CARD_HEIGHT,
-    x1: 1384 / CARD_WIDTH, y1: 1900 / CARD_HEIGHT,
-  },
-  colar: {
-    x0: 64 / CARD_WIDTH, y0: 1140 / CARD_HEIGHT,
-    x1: 1384 / CARD_WIDTH, y1: 1900 / CARD_HEIGHT,
-  },
-  // Quadrados 75px: x 72.5..1375.5, y 507.5..1942.5
-  saev: {
-    x0: 72.5 / CARD_WIDTH, y0: 507.5 / CARD_HEIGHT,
-    x1: 1375.5 / CARD_WIDTH, y1: 1942.5 / CARD_HEIGHT,
-  },
-  // QR + quadrados Herby: QR head (121,76) 243px, QR foot (458,1849) 142px
-  // Grade: 4 subcolunas × ceil(qps/2) linhas, quadrados 28px, pitch 40
-  herby: {
-    x0: 121 / CARD_WIDTH, y0: 76 / CARD_HEIGHT,
-    x1: 1327 / CARD_WIDTH, y1: 1950 / CARD_HEIGHT,
-  },
-};
+// Cantos externos das âncoras vêm de anchors.ts (fonte única, 0..1).
 
 const VIEW_MARGIN = 4; // % livre em cada borda do visor
 
@@ -84,7 +56,7 @@ export function fallbackGuide(): GuideRect {
 
 // Posição das 4 âncoras projetadas dentro do guia (coords 0..100 do overlay)
 export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): AnchorTargets {
-  const box = ANCHOR_BOX[template];
+  const box = normalizedAnchorBox(template);
   const px = (fx: number) => guide.x + fx * guide.w;
   const py = (fy: number) => guide.y + fy * guide.h;
   return {
@@ -96,10 +68,22 @@ export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): A
 }
 
 // Limiares do detector por modelo (SAE/Colar: âncoras pequenas, quad menor;
-// SAEV/Herby: âncoras grandes/QR, mesma ordem de grandeza do padrão)
+// SAEV/Herby: âncoras grandes/QR, mesma ordem de grandeza do padrão;
+// Simulado: sem marcador — modo retângulo único sobre as réguas da tabela)
 export function thresholdsFor(template: CaptureTemplate): GuideThresholds {
   if (template === 'padrao') return { ...DEFAULT_THRESHOLDS };
   if (template === 'saev' || template === 'herby') return { ...DEFAULT_THRESHOLDS };
+  if (template === 'simulado') {
+    return {
+      ...DEFAULT_THRESHOLDS,
+      singleRect: true,
+      // a "malha" da tabela tem baixa densidade (só traços) e enche o quadro
+      maxAreaFrac: 0.35,
+      minFillRatio: 0.004,
+      minCoverage: 0.08,
+      maxCoverage: 0.9,
+    };
+  }
   return {
     ...DEFAULT_THRESHOLDS,
     minAreaFrac: 0.00012, // quadrado 40px ≈ 2.8% da folha (vs ArUco 7.2%)
@@ -114,5 +98,6 @@ export function captureTemplateFor(templateType?: string): CaptureTemplate {
   if (templateType === 'colar') return 'colar';
   if (templateType === 'saev') return 'saev';
   if (templateType === 'herby') return 'herby';
+  if (templateType === 'simulado') return 'simulado';
   return 'padrao';
 }

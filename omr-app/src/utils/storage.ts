@@ -31,7 +31,7 @@ function migrateExam(raw: unknown): Exam {
     gradeScale: e.gradeScale || '0-10',
     answerKey: e.answerKey || null,
     layoutMode: e.layoutMode === 'single' ? 'single' : 'dual',
-    templateType: e.templateType === 'sae' || e.templateType === 'colar' || e.templateType === 'saev' || e.templateType === 'herby' ? e.templateType : undefined,
+    templateType: e.templateType === 'sae' || e.templateType === 'colar' || e.templateType === 'saev' || e.templateType === 'herby' || e.templateType === 'simulado' ? e.templateType : undefined,
     saeSpec: e.saeSpec,
     herbySpec: e.herbySpec,
   };
@@ -137,7 +137,7 @@ export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exa
 
   for (const db of remote) {
     const layoutMode = db.layout_mode === 'single' ? 'single' : 'dual';
-    const templateType = db.template === 'sae' || db.template === 'colar' || db.template === 'saev' || db.template === 'herby' ? db.template : undefined;
+    const templateType = db.template === 'sae' || db.template === 'colar' || db.template === 'saev' || db.template === 'herby' || db.template === 'simulado' ? db.template : undefined;
     const qps = db.questions_per_subject;
     const prev = byId.get(db.external_id);
     // Servidor vence — exceto answerKey nulo (preserva chave local registrada offline)

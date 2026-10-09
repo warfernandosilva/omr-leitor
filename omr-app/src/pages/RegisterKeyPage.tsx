@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { AppView, isSaeExam, isSaevExam, isHerbyExam } from '../types';
+import { AppView, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { putAnswerKeyDB, processImage as apiProcessImage, loadAdaptiveFlag } from '../utils/api';
@@ -75,13 +75,13 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
     setReadError(null);
     setReadSummary(null);
     try {
-      const template = activeExam.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby' : 'padrao';
+      const template = activeExam.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby' : isSimuladoExam(activeExam) ? 'simulado' : 'padrao';
       const res = await apiProcessImage(
         file,
         activeExam.questionsPerSubject,
         activeExam.layoutMode ?? 'dual',
         template,
-        loadAdaptiveFlag() || isSaevExam(activeExam) || isHerbyExam(activeExam),
+        loadAdaptiveFlag() || isSaevExam(activeExam) || isHerbyExam(activeExam) || isSimuladoExam(activeExam),
       );
       if (!res.success || !res.answers) {
         setReadError(res.error || 'Falha na leitura da foto — tente novamente com melhor iluminação.');

@@ -66,6 +66,10 @@ export const STUDENT_NAME_X = 320;
 
 export const ALUNO_BOX = { x0: 85, y0: 137, x1: 1363, y1: 221, label: 'Aluno (a):' };
 export const TURMA_BOX = { x0: 85, y0: 229, x1: 725, y1: 313, label: 'Turma:' };
+// Espelha TURMA_TEXT_X de omr-backend/omr/template.py (rótulo "Turma:" mede 121px).
+export const TURMA_TEXT_X = 226;
+// Espelha MATRICULA_POS — matrícula fora da caixa Turma, 10px antes do QR.
+export const MATRICULA_POS = { x: 737, y: 254 };
 
 export const DIVIDER_X = 723;
 export const DIVIDER_Y0 = 584;

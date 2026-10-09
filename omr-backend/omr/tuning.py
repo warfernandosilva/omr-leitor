@@ -1,7 +1,7 @@
 """Tuning por modelo como DADOS (não branches espalhados).
 
 Cada modelo declara como calcula o divisor marcado/vazio:
-- floor_method: 'otsu' (único implementado; 'gap' chega na Fase 2);
+- floor_method: 'otsu' (padrão) ou 'gap' (first-large-gap; Simulado);
 - score_set: 'flat' (todos os scores) ou 'bests' (melhor por questão);
 - hi: teto do divisor adaptativo;
 - force_adaptive: ignora o default OFF (hoje só SAEV, com evidência real).
@@ -43,6 +43,12 @@ MODEL_TUNING: dict[str, ModelTuning] = {
     # margin=0.15 → 59.1% auto + 0.5% erro (vs 35.5% com hi=0.55).
     # Alinhamento: warp afim + refino pela grade (refine_herby_grid).
     "herby": ModelTuning(score_set="bests", hi=0.40, force_adaptive=True, margin=0.15, min_peak=0.45),
+    # Simulado: 88 scores medidos na foto real (IMG/20261008_203236.jpg, Fase 0)
+    # — vazias 0,156-0,247, preenchidas 0,619-0,836, lacuna 0,372. Otsu(flat)
+    # = 0,248 cai colado no teto das vazias (frágil); first_large_gap = 0,4329,
+    # estável em 22/22 em todas as variações de pré-processamento testadas.
+    "simulado": ModelTuning(floor_method="gap", score_set="flat", hi=0.55,
+                            force_adaptive=True, margin=0.22, min_peak=0.45),
 }
 
 

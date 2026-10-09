@@ -10,7 +10,7 @@
 
 import { apiBlob, apiForm, apiJson, apiJsonBody, saveBlob } from './api';
 
-export type LabTemplate = 'padrao' | 'sae' | 'colar' | 'saev' | 'herby';
+export type LabTemplate = 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
 
 export const LAB_TEMPLATES: { value: LabTemplate; label: string; qps: number }[] = [
   { value: 'padrao', label: 'Padrão (ArUco)', qps: 22 },
@@ -18,6 +18,7 @@ export const LAB_TEMPLATES: { value: LabTemplate; label: string; qps: number }[]
   { value: 'saev', label: 'Gabarito SAEV (quadrado)', qps: 22 },
   { value: 'herby', label: 'Gabarito Herby', qps: 22 },
   { value: 'colar', label: 'Colar em Avaliação', qps: 26 },
+  { value: 'simulado', label: 'Simulado (tabela)', qps: 22 },
 ];
 
 /** Classificação do motor por questão (como vem de reader.classify_question). */

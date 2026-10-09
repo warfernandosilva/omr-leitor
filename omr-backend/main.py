@@ -74,10 +74,15 @@ from omr.template_herby import (
     HERBY_MIN_QPS, HERBY_MAX_QPS,
     generate_herby_card_bytes,
 )
+from omr.template_simulado import (
+    generate_simulado_card_bytes, build_simulado_batch_pdf, SIMULADO_COORDS,
+    SIMULADO_MAX_QUESTIONS,
+)
 from omr.reader import process_image, OMRResult
 from omr.reader_sae import process_sae_image
 from omr.reader_saev import process_saev_image
 from omr.reader_herby import process_herby_image
+from omr.reader_simulado import process_simulado_image
 from omr.config import MARGIN
 from omr.grading import grade, GradingResult
 
@@ -191,9 +196,10 @@ class CardRequest(BaseModel):
     subject_lp: str = "LÍNGUA PORTUGUESA"
     subject_mat: str = "MATEMÁTICA"
     format: str = "PNG"  # PNG ou PDF
+    turma: str = ""  # valor impresso no campo "Turma:" (ex.: nome da prova)
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae | colar | saev
+    template: str = "padrao"  # padrao | sae | colar | saev | herby | simulado
     sae: SaeSpecRequest | None = None
     herby: HerbySpecRequest | None = None  # cabeçalho editável (só Herby)
 
@@ -229,7 +235,7 @@ class ExamSyncRequest(BaseModel):
     subject_mat: str = "MATEMÁTICA"
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
-    template: str = "padrao"  # padrao | sae | colar | saev | herby
+    template: str = "padrao"  # padrao | sae | colar | saev | herby | simulado
     sae: SaeSpecRequest | None = None  # cabeçalho editável (só SAE)
     herby: HerbySpecRequest | None = None  # cabeçalho editável (só Herby)
     grade_scale: str | None = None
@@ -344,6 +350,11 @@ def template_saev_coords():
 @app.get("/api/template/herby-coords")
 def template_herby_coords():
     return HERBY_COORDS
+
+
+@app.get("/api/template/simulado-coords")
+def template_simulado_coords():
+    return SIMULADO_COORDS
 
 
 # ─── Auth ───
@@ -476,6 +487,8 @@ def _answer_string(result: OMRResult, total: int) -> str:
 
 
 def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
+    if template_used == "simulado":
+        return SIMULADO_MAX_QUESTIONS  # fixo em 22, ignora qps/layout
     if template_used == "saev":
         return 2 * qps
     if template_used == "herby":
@@ -490,7 +503,7 @@ def process_omr(
     file: UploadFile = File(...),
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
-    template: str = Form("padrao"),  # padrao | sae | colar (colar: mesma grade do sae, sem QR)
+    template: str = Form("padrao"),  # padrao | sae | colar | saev | herby | simulado
     adaptive: bool = Form(False),  # limiar adaptativo por foto (experimental, default OFF)
     debug: bool = Form(False),  # heatmap de diagnóstico (default off = zero custo)
     client_duration_ms: int | None = Form(None),  # Herby: tempo client-side por foto (diagnóstico)
@@ -519,7 +532,7 @@ def process_omr(
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
 
     result: OMRResult | None
-    template_used = template if template in ("padrao", "sae", "colar", "saev", "herby") else "padrao"
+    template_used = template if template in ("padrao", "sae", "colar", "saev", "herby", "simulado") else "padrao"
     if template_used in ("sae", "colar"):
         result = process_sae_image(image, n_questions=questions_per_subject, adaptive=adaptive, debug=debug)
     elif template_used == "saev":
@@ -527,6 +540,9 @@ def process_omr(
     elif template_used == "herby":
         result = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug,
                                      layout_mode=layout_mode)
+    elif template_used == "simulado":
+        result = process_simulado_image(image, questions_per_subject=questions_per_subject,
+                                        adaptive=adaptive, debug=debug)
     else:
         result = process_image(
             image,
@@ -556,7 +572,13 @@ def process_omr(
                 if herby_result is not None:
                     result = herby_result
                     template_used = "herby"
-    elif result is None and template_used in ("sae", "colar", "saev", "herby"):
+                else:
+                    sim_result = process_simulado_image(image, questions_per_subject=questions_per_subject,
+                                                        adaptive=adaptive, debug=debug)
+                    if sim_result is not None:
+                        result = sim_result
+                        template_used = "simulado"
+    elif result is None and template_used in ("sae", "colar", "saev", "herby", "simulado"):
         std_result = process_image(
             image,
             questions_per_subject=questions_per_subject,
@@ -587,6 +609,21 @@ def process_omr(
                 return ProcessResponse(success=False, error="Falha ao retificar a imagem SAEV (foto muito borrada ou escura). Tente com melhor iluminação.")
             except Exception:
                 return ProcessResponse(success=False, error="Âncoras SAEV não detectadas ou geometria inválida")
+        if template_used == "simulado":
+            try:
+                from omr.detector_simulado import detect_simulado_table as _dm_sim
+                det = _dm_sim(image)
+                if not det.found:
+                    faltam = ", ".join(det.missing) or "desconhecido"
+                    return ProcessResponse(
+                        success=False,
+                        error=(f"Réguas da tabela não detectadas ({faltam}; "
+                               f"{det.n_reguas} encontradas). Garanta a folha inteira visível, "
+                               "foto nítida e sem sombra."),
+                    )
+                return ProcessResponse(success=False, error="Falha ao retificar a imagem Simulado (foto muito borrada ou escura). Tente com melhor iluminação.")
+            except Exception:
+                return ProcessResponse(success=False, error="Réguas da tabela não detectadas ou geometria inválida")
         if template_used == "herby":
             try:
                 from omr.detector_herby import detect_herby_anchors as _dm_herby
@@ -727,7 +764,7 @@ def process_omr_multi(
         return ProcessResponse(success=False, error="Envie de 1 a 4 frames do mesmo cartão.")
 
     results: list[OMRResult] = []
-    template_used = template if template in ("padrao", "sae", "colar", "saev", "herby") else "padrao"
+    template_used = template if template in ("padrao", "sae", "colar", "saev", "herby", "simulado") else "padrao"
     first_image: np.ndarray | None = None
 
     for f in files:
@@ -746,6 +783,9 @@ def process_omr_multi(
         elif template_used == "herby":
             r = process_herby_image(image, questions_per_subject=questions_per_subject, adaptive=adaptive, debug=debug,
                                     layout_mode=layout_mode)
+        elif template_used == "simulado":
+            r = process_simulado_image(image, questions_per_subject=questions_per_subject,
+                                       adaptive=adaptive, debug=debug)
         else:
             r = process_image(image, questions_per_subject=questions_per_subject,
                               layout_mode=layout_mode, adaptive=adaptive, debug=debug)
@@ -953,9 +993,23 @@ def generate_card_endpoint(req: CardRequest, current_user: User = Depends(auth.g
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
+    if req.template == "simulado":
+        if fmt == "PDF":
+            data = generate_simulado_card_bytes("PDF")
+            media, fname = "application/pdf", "cartao-simulado.pdf"
+        else:
+            data = generate_simulado_card_bytes("PNG")
+            media, fname = "image/png", "cartao-simulado.png"
+        return StreamingResponse(
+            io.BytesIO(data),
+            media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
     kw = dict(
         questions_per_subject=req.questions_per_subject,
         layout_mode=req.layout_mode,
+        turma=req.turma,
     )
     fmt = req.format.upper()
 
@@ -1053,8 +1107,8 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     if req.layout_mode not in ("dual", "single"):
         raise HTTPException(status_code=400, detail="layout_mode deve ser 'dual' ou 'single'")
     av.layout_mode = req.layout_mode
-    if req.template not in ("padrao", "sae", "colar", "saev", "herby"):
-        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar', 'saev' ou 'herby'")
+    if req.template not in ("padrao", "sae", "colar", "saev", "herby", "simulado"):
+        raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar', 'saev', 'herby' ou 'simulado'")
     av.template = req.template
     if req.sae is not None:
         spec = req.sae.to_spec()
@@ -1290,11 +1344,15 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
             layout_mode="single" if (av.layout_mode or "dual") == "single" else "dual",
         )
         pages_drawn = build_herby_batch_pdf(registros, spec, out_buf)
+    elif (av.template or "padrao") == "simulado":
+        # Cartao Simulado: sem identificacao impressa, copia identica por aluno
+        pages_drawn = build_simulado_batch_pdf(registros, out_buf)
     else:
         pages_drawn = build_batch_pdf(
             registros, av.subject_lp, av.subject_mat, out_buf,
             questions_per_subject=av.questions_per_subject,
             layout_mode=av.layout_mode,
+            turma=(av.turma or av.titulo or "").strip(),
         )
 
     if pages_drawn != len(registros):

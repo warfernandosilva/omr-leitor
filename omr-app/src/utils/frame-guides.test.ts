@@ -23,6 +23,19 @@ function anchors(buf: Uint8Array, m = 30, s = 18): void {
   square(buf, m, H - m, s);
 }
 
+// Retângulo vazado + réguas internas — simula a tabela do Simulado
+// (sem marcador de canto: só linhas, baixa densidade de tinta).
+function table(buf: Uint8Array, x0: number, y0: number, x1: number, y1: number, rows: number): void {
+  for (let x = x0; x <= x1; x++) { buf[y0 * W + x] = 10; buf[y1 * W + x] = 10; }
+  for (let y = y0; y <= y1; y++) { buf[y * W + x0] = 10; buf[y * W + x1] = 10; }
+  for (let k = 1; k <= rows; k++) {
+    const y = y0 + Math.round((k * (y1 - y0)) / (rows + 1));
+    for (let x = x0; x <= x1; x++) buf[y * W + x] = 10;
+  }
+}
+
+const SINGLE_RECT = { ...DEFAULT_THRESHOLDS, singleRect: true, maxAreaFrac: 0.35, minFillRatio: 0.004 };
+
 // Desfoque box simples (simula foto tremida)
 function boxBlur(src: Uint8Array, w: number, h: number, r: number): Uint8Array {
   const out = new Uint8Array(w * h);
@@ -119,5 +132,41 @@ describe('frame-guides', () => {
     const g = blank();
     anchors(g);
     expect(measureSharpness(g, W, H)).toBeGreaterThanOrEqual(DEFAULT_THRESHOLDS.minSharpness);
+  });
+
+  it('singleRect: a tabela (sem marcador) vira as 4 quinas e trava', () => {
+    const g = blank();
+    // proporcional à tabela real (828.9 × 1968 ≈ 0.42)
+    const x0 = 85, y0 = 56, x1 = 235, y1 = 396;
+    table(g, x0, y0, x1, y1, 4);
+    // mancha estreita (mesmo aspecto da tabela) mas menor: nunca vence o maior
+    for (let y = 10; y < 55; y++) for (let x = 10; x < 30; x++) g[y * W + x] = 10;
+
+    const a = analyzeFrame(g, W, H, SINGLE_RECT);
+    expect(a.found).toBe(4);
+    expect(a.corners.TL!.x).toBeCloseTo(x0 / W, 2);
+    expect(a.corners.TL!.y).toBeCloseTo(y0 / H, 2);
+    expect(a.corners.BR!.x).toBeCloseTo(x1 / W, 2);
+    expect(a.corners.BR!.y).toBeCloseTo(y1 / H, 2);
+    expect(a.coverage).toBeGreaterThan(SINGLE_RECT.minCoverage);
+    expect(a.skew).toBeLessThan(SINGLE_RECT.maxSkew);
+    expect(Math.abs(a.rotationDeg)).toBeLessThan(SINGLE_RECT.maxRotationDeg);
+    expect(a.locked).toBe(true);
+  });
+
+  it('sem singleRect a mesma tabela é rejeitada (aspecto fora da faixa)', () => {
+    const g = blank();
+    table(g, 85, 56, 235, 396, 4);
+    const a = analyzeFrame(g, W, H);
+    expect(a.found).toBe(0);
+    expect(a.locked).toBe(false);
+    expect(a.hint).toContain('cart');
+  });
+
+  it('singleRect: nada na tela pede para enquadrar o cartão', () => {
+    const a = analyzeFrame(blank(), W, H, SINGLE_RECT);
+    expect(a.found).toBe(0);
+    expect(a.locked).toBe(false);
+    expect(a.hint).toContain('cart');
   });
 });

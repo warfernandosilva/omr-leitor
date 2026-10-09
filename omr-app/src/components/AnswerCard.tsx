@@ -117,6 +117,14 @@ export default function AnswerCard({
         }}
       >
         <span className="id-label" style={{ fontSize: fontPt(38) }}>{TURMA_BOX.label}</span>
+        {exam.name && (
+          <span
+            className="id-value"
+            style={{ fontSize: fontPt(38), fontWeight: 'normal', marginLeft: `${(10 * (210 / 1448)).toFixed(3)}mm` }}
+          >
+            {exam.name}
+          </span>
+        )}
       </div>
 
       {/* ArUco markers */}
