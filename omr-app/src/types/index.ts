@@ -1,6 +1,10 @@
 export interface Exam {
   id: string;
   name: string;
+  /** Nome da turma vinculada (rótulo impresso no cartão). */
+  turma?: string;
+  /** Id do catálogo da turma no backend (turmas.id). */
+  turmaId?: number;
   subjectLP: string;
   subjectMat: string;
   questionsPerSubject: number;
@@ -129,10 +133,26 @@ export interface StudentResult {
   reviewed?: boolean;
 }
 
+export interface TurmaAluno {
+  id: number;
+  turma_id: number;
+  nome: string;
+  matricula: string | null;
+  identificador_externo: string | null;
+}
+
+export interface Turma {
+  id: number;
+  nome: string;
+  total_alunos: number;
+  alunos?: TurmaAluno[];
+}
+
 export type AppView =
   | 'home'
   | 'new-exam'
   | 'generate-card'
+  | 'turmas'
   | 'import-students'
   | 'manage-exam'
   | 'register-key'

@@ -41,6 +41,13 @@ export default function HomePage({ onNavigate }: Props) {
       icon: 'M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z',
     },
     {
+      title: 'Turmas',
+      desc: 'Catálogo de alunos reutilizável entre provas (sem reenviar planilha)',
+      view: 'turmas' as AppView,
+      color: 'bg-sky-600',
+      icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z',
+    },
+    {
       title: 'Importar Alunos',
       desc: 'Um gabarito personalizado por aluno a partir de XLSX/CSV',
       view: 'import-students' as AppView,

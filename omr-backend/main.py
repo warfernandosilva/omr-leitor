@@ -38,7 +38,7 @@ import json as _json
 import time as _time
 
 from database import DB_LABEL, SessionLocal, get_db, init_db
-from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
+from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, Turma, TurmaAluno, User
 import auth
 
 logger = logging.getLogger("omr")
@@ -231,6 +231,7 @@ class ExamSyncRequest(BaseModel):
     external_id: str
     titulo: str
     turma: str | None = None
+    turma_id: int | None = None  # vínculo com o catálogo (turmas.id); sobrepõe `turma` com o nome oficial
     subject_lp: str = "PORTUGUÊS"
     subject_mat: str = "MATEMÁTICA"
     questions_per_subject: int = 22
@@ -426,6 +427,10 @@ app.include_router(_admin_router)
 # Laboratório OMR (banco de testes/validação/calibração) — reusa o motor de produção
 from routers.lab import router as _lab_router
 app.include_router(_lab_router)
+
+# Catálogo de turmas (lista de alunos reutilizável entre provas)
+from routers.turmas import router as _turmas_router
+app.include_router(_turmas_router)
 
 
 def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
@@ -1100,7 +1105,16 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
         elif av.owner_id is None:
             av.owner_id = current_user.id
         av.titulo = req.titulo
-    av.turma = req.turma
+    if req.turma_id is not None:
+        turma = db.get(Turma, req.turma_id)
+        if turma is None:
+            raise HTTPException(status_code=404, detail="Turma não encontrada")
+        auth.require_turma_owner_or_admin(turma, current_user)
+        av.turma_id = turma.id
+        av.turma = turma.nome
+    else:
+        av.turma_id = None
+        av.turma = req.turma
     av.subject_lp = req.subject_lp
     av.subject_mat = req.subject_mat
     av.questions_per_subject = max(1, int(req.questions_per_subject))
@@ -1141,6 +1155,7 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
         "external_id": av.external_id,
         "titulo": av.titulo,
         "turma": av.turma,
+        "turma_id": av.turma_id,
         "questions_per_subject": av.questions_per_subject,
         "layout_mode": av.layout_mode,
         "template": av.template,
@@ -1190,6 +1205,81 @@ def import_students(external_id: str, req: ImportStudentsRequest, db: Session = 
         "external_id": av.external_id,
         "total_importados": len(criados),
         "alunos": criados,
+    }
+
+
+class FromTurmaRequest(BaseModel):
+    turma_id: int
+
+
+@app.post("/api/exams/{external_id}/students/from-turma")
+def materialize_from_turma(external_id: str, req: FromTurmaRequest, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    """
+    Materializa o catálogo da turma em Alunos da avaliação (cópia, não vínculo).
+
+    Idempotente: aluno do catálogo já materializado (proveniência), ou cuja
+    matrícula (ou identificador_externo) já existe na prova, é reaproveitado,
+    não duplicado. Vincula a prova à turma (turma_id) e carimba o rótulo
+    impresso (turma = nome da turma).
+    """
+    av = _get_avaliacao(db, external_id)
+    auth.require_owner_or_admin(av, current_user)
+    turma = db.get(Turma, req.turma_id)
+    if turma is None:
+        raise HTTPException(status_code=404, detail="Turma não encontrada")
+    auth.require_turma_owner_or_admin(turma, current_user)
+
+    catalogo = db.scalars(
+        select(TurmaAluno).where(TurmaAluno.turma_id == turma.id).order_by(TurmaAluno.id)
+    ).all()
+    if not catalogo:
+        raise HTTPException(status_code=400, detail="Turma sem alunos no catálogo")
+
+    ja_na_prova = db.scalars(
+        select(Aluno).where(Aluno.avaliacao_id == av.id)
+    ).all()
+    matriculas = {a.matricula for a in ja_na_prova if a.matricula}
+    identifs = {a.identificador_externo for a in ja_na_prova if a.identificador_externo}
+    origens = {a.origem_turma_aluno_id for a in ja_na_prova if a.origem_turma_aluno_id}
+
+    materializados = 0
+    reaproveitados = 0
+    for item in catalogo:
+        if (
+            item.id in origens
+            or (item.matricula and item.matricula in matriculas)
+            or (item.identificador_externo and item.identificador_externo in identifs)
+        ):
+            reaproveitados += 1
+            continue
+        db.add(Aluno(
+            avaliacao_id=av.id,
+            nome=item.nome,
+            matricula=item.matricula,
+            identificador_externo=item.identificador_externo,
+            origem_turma_aluno_id=item.id,
+        ))
+        origens.add(item.id)
+        if item.matricula:
+            matriculas.add(item.matricula)
+        if item.identificador_externo:
+            identifs.add(item.identificador_externo)
+        materializados += 1
+
+    av.turma_id = turma.id
+    av.turma = turma.nome
+    db.commit()
+
+    total = db.scalar(
+        select(func.count()).select_from(Aluno).where(Aluno.avaliacao_id == av.id)
+    ) or 0
+    return {
+        "avaliacao_id": av.id,
+        "external_id": av.external_id,
+        "turma": {"id": turma.id, "nome": turma.nome},
+        "materializados": materializados,
+        "reaproveitados": reaproveitados,
+        "total_alunos": total,
     }
 
 
@@ -1398,6 +1488,7 @@ def list_gabaritos(external_id: str, db: Session = Depends(get_db), current_user
             "external_id": av.external_id,
             "titulo": av.titulo,
             "turma": av.turma,
+            "turma_id": av.turma_id,
             "layout_mode": av.layout_mode,
         },
         "stats": {
@@ -1431,6 +1522,7 @@ def list_exams(limit: int = 100, offset: int = 0, db: Session = Depends(get_db),
             "external_id": av.external_id,
             "titulo": av.titulo,
             "turma": av.turma,
+            "turma_id": av.turma_id,
             "subject_lp": av.subject_lp,
             "subject_mat": av.subject_mat,
             "questions_per_subject": av.questions_per_subject,
@@ -1471,6 +1563,7 @@ def get_exam(external_id: str, db: Session = Depends(get_db), current_user: User
         "external_id": av.external_id,
         "titulo": av.titulo,
         "turma": av.turma,
+        "turma_id": av.turma_id,
         "subject_lp": av.subject_lp,
         "subject_mat": av.subject_mat,
         "questions_per_subject": av.questions_per_subject,

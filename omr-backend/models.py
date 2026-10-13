@@ -5,6 +5,8 @@ Entidades:
 - Avaliacao: prova/turma (espelha a prova criada no frontend via external_id)
 - Aluno: aluno importado por XLSX/CSV, vinculado a uma avaliação
 - GabaritoNomeado: gabarito individual — codigo_unico (QR) → aluno_id
+- Turma: catálogo reutilizável de alunos de uma turma real (ex.: "9º A")
+- TurmaAluno: aluno do catálogo (fonte; materializado em Aluno por prova)
 
 Regra fundamental: o QR Code é apenas a chave de identificação do
 GabaritoNomeado; quem resolve codigo_unico → aluno é o banco de dados.
@@ -48,6 +50,9 @@ class Avaliacao(Base, TimestampMixin):
     external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # id da prova no frontend
     titulo: Mapped[str] = mapped_column(String(200), nullable=False)
     turma: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # vínculo com o catálogo (turmas.id); inteiro simples (sem FK) para a
+    # migração aditiva funcionar igual no SQLite (ALTER TABLE) e no Postgres
+    turma_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     modelo_omr: Mapped[str] = mapped_column(String(50), nullable=False, default="GABARITO_01")
     subject_lp: Mapped[str] = mapped_column(String(120), nullable=False, default="PORTUGUÊS")
     subject_mat: Mapped[str] = mapped_column(String(120), nullable=False, default="MATEMÁTICA")
@@ -78,9 +83,49 @@ class Aluno(Base, TimestampMixin):
     nome: Mapped[str] = mapped_column(String(200), nullable=False)
     matricula: Mapped[str | None] = mapped_column(String(60), nullable=True)
     identificador_externo: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # proveniência: id do TurmaAluno que originou esta cópia (None = importado
+    # por XLSX). Garante idempotência exata da materialização, inclusive para
+    # alunos sem matrícula. Inteiro simples (sem FK) pela migração aditiva.
+    origem_turma_aluno_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     avaliacao: Mapped["Avaliacao"] = relationship(back_populates="alunos")
     gabaritos: Mapped[list["GabaritoNomeado"]] = relationship(back_populates="aluno")
+
+
+class Turma(Base, TimestampMixin):
+    """Catálogo reutilizável de alunos de uma turma real (ex.: "9º A").
+
+    Os alunos do catálogo (TurmaAluno) são a FONTE da lista; ao vincular a
+    turma a uma prova, o catálogo é MATERIALIZADO em registros Aluno da
+    avaliação — preservando a invariante 1 aluno = 1 gabarito = 1 código
+    por prova. Apagar a turma NÃO apaga os alunos/gabaritos já gerados
+    nas provas (só zera o vínculo avaliacao.turma_id).
+    """
+
+    __tablename__ = "turmas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+    owner: Mapped["User | None"] = relationship()
+    alunos: Mapped[list["TurmaAluno"]] = relationship(
+        back_populates="turma", cascade="all, delete-orphan"
+    )
+
+
+class TurmaAluno(Base, TimestampMixin):
+    """Um aluno do catálogo (não vinculado a prova alguma)."""
+
+    __tablename__ = "turma_alunos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    turma_id: Mapped[int] = mapped_column(ForeignKey("turmas.id"), index=True)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    matricula: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
+    identificador_externo: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+    turma: Mapped["Turma"] = relationship(back_populates="alunos")
 
 
 class GabaritoNomeado(Base, TimestampMixin):

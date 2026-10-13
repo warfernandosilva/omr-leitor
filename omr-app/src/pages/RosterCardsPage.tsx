@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { AppView, Exam } from '../types';
-import { getExams } from '../utils/storage';
+import { getExams, saveExam } from '../utils/storage';
 import {
   importStudents, countPdfPages,
   ImportResult,
@@ -9,7 +9,9 @@ import {
   syncExam, importStudentsAPI,
   generateGabaritos, generateGabaritosPDF,
   fetchGabaritos, checkHealth,
+  listTurmas, getTurma, materializeFromTurma,
   PersistedAluno, ImportStudentsResult,
+  TurmaDTO, TurmaDetail,
 } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
 import { useAuth } from '../context/AuthContext';
@@ -39,6 +41,11 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
   const [genError, setGenError] = useState<string | null>(null);
   const [importingOnly, setImportingOnly] = useState(false);
   const [importedPersisted, setImportedPersisted] = useState<ImportStudentsResult | null>(null);
+  const [source, setSource] = useState<'file' | 'turma'>('file');
+  const [turmas, setTurmas] = useState<TurmaDTO[]>([]);
+  const [turmaSelId, setTurmaSelId] = useState<number | ''>('');
+  const [turmaDetail, setTurmaDetail] = useState<TurmaDetail | null>(null);
+  const [loadingTurma, setLoadingTurma] = useState(false);
   const [doneInfo, setDoneInfo] = useState<{
     pages: number;
     alunos: PersistedAluno[];
@@ -56,6 +63,10 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
     checkHealth().then(setBackendAvailable);
   }, []);
 
+  useEffect(() => {
+    listTurmas().then(setTurmas).catch(() => setTurmas([]));
+  }, []);
+
   const activeExam: Exam | undefined = selectedExamId
     ? exams.find(e => e.id === selectedExamId)
     : undefined;
@@ -68,6 +79,29 @@ const isSimuladoExam = activeExam?.templateType === 'simulado';
 const SIMULADO_BLOCK_MSG = 'Provas "Simulado" são avulsas (sem QR/nome/turma): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
   const COLAR_BLOCK_MSG = 'Provas "Colar em Avaliação" são avulsas (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
 const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Gerenciar Avaliação (com QR duplo + código único por aluno).';
+
+  const switchSource = (s: 'file' | 'turma') => {
+    setSource(s);
+    setGenError(null);
+    if (s === 'turma' && turmaSelId === '' && activeExam?.turmaId) {
+      void pickTurma(activeExam.turmaId);
+    }
+  };
+
+  const pickTurma = async (id: number | '') => {
+    setTurmaSelId(id);
+    setTurmaDetail(null);
+    setGenError(null);
+    if (id === '') return;
+    setLoadingTurma(true);
+    try {
+      setTurmaDetail(await getTurma(id));
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Falha ao carregar a turma.');
+    } finally {
+      setLoadingTurma(false);
+    }
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -100,6 +134,9 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
     setDoneInfo(null);
     setStage('');
     setStep('form');
+    setSource('file');
+    setTurmaSelId('');
+    setTurmaDetail(null);
   };
 
   const handleImportOnly = async () => {
@@ -188,6 +225,61 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       } catch { /* painel de detalhe opcional */ }
       const codigos = lista?.gabaritos.map(g => g.codigo_unico) ?? [];
       const alunosPersistidos = importedForPdf?.alunos ?? importedPersisted?.alunos ?? [];
+      setDoneInfo({
+        pages,
+        alunos: alunosPersistidos,
+        primeiroCodigo: codigos[0] ?? '—',
+        ultimoCodigo: codigos[codigos.length - 1] ?? '—',
+      });
+      setStep('done');
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Erro ao gerar os gabaritos.');
+      setStep('form');
+    }
+  };
+
+  const handleGenerateFromTurma = async () => {
+    if (!activeExam || !turmaDetail || turmaDetail.alunos.length === 0) return;
+    if (isColarExam) { setGenError(COLAR_BLOCK_MSG); return; }
+    if (isHerbyExam) { setGenError(HERBY_BLOCK_MSG); return; }
+    if (isSimuladoExam) { setGenError(SIMULADO_BLOCK_MSG); return; }
+    setGenError(null);
+    setStep('generating');
+    try {
+      if (!(await checkHealth())) {
+        throw new Error('O backend Python é obrigatório para gabaritos nomeados: os alunos e os códigos QR precisam ser gravados no banco de dados antes da geração do PDF. Inicie o servidor (start-omr.bat) e tente novamente.');
+      }
+      // Vincula a prova à turma (rótulo impresso + turma_id) antes de materializar
+      const examToSync: Exam = { ...activeExam, turma: turmaDetail.nome, turmaId: turmaDetail.id };
+      setStage('Sincronizando a prova com o banco de dados...');
+      const sync = await syncExam(examToSync);
+      saveExam(examToSync, userId);
+      setStage(`Materializando ${turmaDetail.alunos.length} aluno(s) da turma "${turmaDetail.nome}"...`);
+      const mat = await materializeFromTurma(sync.external_id, turmaDetail.id);
+      setStage('Gerando gabaritos e códigos únicos...');
+      await generateGabaritos(sync.external_id);
+      setStage(`Gerando PDF com ${mat.total_alunos} páginas a partir do banco...`);
+      const blob = await generateGabaritosPDF(sync.external_id);
+      const pdfText = await blob.text();
+      const pages = countPdfPages(pdfText);
+      if (pages !== mat.total_alunos) {
+        throw new Error(`Validação falhou: ${mat.total_alunos} alunos na prova, ${pages} páginas no PDF. O arquivo NÃO foi disponibilizado.`);
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const slug = activeExam.name.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '');
+      a.href = url;
+      a.download = `gabaritos_${slug || 'prova'}_${pages}_paginas.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      let lista: Awaited<ReturnType<typeof fetchGabaritos>> | null = null;
+      try {
+        lista = await fetchGabaritos(sync.external_id);
+      } catch { /* painel de detalhe opcional */ }
+      const alunosPersistidos = lista?.gabaritos.map(g => ({ id: g.aluno.id, nome: g.aluno.nome, matricula: g.aluno.matricula })) ?? [];
+      const codigos = lista?.gabaritos.map(g => g.codigo_unico) ?? [];
       setDoneInfo({
         pages,
         alunos: alunosPersistidos,
@@ -302,27 +394,91 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
 
             {activeExam && (
               <div>
-                <label className="label">Lista de Alunos (XLSX ou CSV) *</label>
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-colors"
-                >
-                  <svg className="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span className="text-sm font-medium text-gray-600">
-                    Clique para importar o arquivo com os nomes dos alunos
-                  </span>
-                  <p className="text-xs text-gray-400 mt-1">.xlsx, .xls ou .csv</p>
-                </button>
-                {fileName && <p className="text-xs text-gray-400 mt-1">Arquivo: {fileName}</p>}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx,.xls,.csv,text/csv"
-                  className="hidden"
-                  onChange={handleFile}
-                />
+                <label className="label">Origem da lista de alunos *</label>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => switchSource('file')}
+                    className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                      source === 'file'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Arquivo XLSX/CSV
+                    <span className="block text-xs font-normal text-gray-400">enviar a planilha de novo</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchSource('turma')}
+                    className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                      source === 'turma'
+                        ? 'border-blue-500 bg-blue-50 text-blue-700'
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Turma cadastrada
+                    <span className="block text-xs font-normal text-gray-400">reutilizar o catálogo, sem planilha</span>
+                  </button>
+                </div>
+
+                {source === 'file' ? (
+                  <>
+                    <label className="label">Lista de Alunos (XLSX ou CSV) *</label>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-colors"
+                    >
+                      <svg className="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <span className="text-sm font-medium text-gray-600">
+                        Clique para importar o arquivo com os nomes dos alunos
+                      </span>
+                      <p className="text-xs text-gray-400 mt-1">.xlsx, .xls ou .csv</p>
+                    </button>
+                    {fileName && <p className="text-xs text-gray-400 mt-1">Arquivo: {fileName}</p>}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv,text/csv"
+                      className="hidden"
+                      onChange={handleFile}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="label">Turma *</label>
+                    {turmas.length === 0 ? (
+                      <div className="text-sm text-gray-500">
+                        <p>Nenhuma turma cadastrada.</p>
+                        <button onClick={() => onNavigate('turmas')} className="btn btn-primary btn-sm mt-2">
+                          Cadastrar Turma
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        className="input"
+                        value={turmaSelId}
+                        onChange={(e) => pickTurma(e.target.value === '' ? '' : Number(e.target.value))}
+                      >
+                        <option value="">Selecione...</option>
+                        {turmas.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.nome} ({t.total_alunos} aluno{t.total_alunos === 1 ? '' : 's'})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {loadingTurma && <p className="text-sm text-gray-500 mt-2">Carregando turma...</p>}
+                    {turmaDetail && (
+                      <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+                        {turmaDetail.alunos.length} aluno(s) no catálogo de "{turmaDetail.nome}".
+                        A prova será vinculada a esta turma e o nome impresso no cartão.
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
@@ -459,6 +615,28 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   &quot;Apenas importar&quot; deixa os gabaritos pendentes — use depois o
                   {' '}<button onClick={() => onNavigate('manage-exam', activeExam!.id)} className="underline">Gerenciar Avaliação</button>
                   {' '}ou este mesmo botão para gerar o PDF.
+                </p>
+                <button onClick={reset} className="btn btn-secondary">
+                  Limpar
+                </button>
+              </div>
+            )}
+
+            {source === 'turma' && turmaDetail && turmaDetail.alunos.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleGenerateFromTurma}
+                  disabled={!selectedExamId || backendAvailable === false}
+                  className="btn btn-primary"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  Gerar gabaritos da turma "{turmaDetail.nome}" em PDF
+                </button>
+                <p className="text-xs text-gray-400 text-center">
+                  Materializa o catálogo na prova (sem duplicar quem já está nela), vincula a turma
+                  e gera o PDF. Alunos novos no catálogo entram na próxima geração.
                 </p>
                 <button onClick={reset} className="btn btn-secondary">
                   Limpar

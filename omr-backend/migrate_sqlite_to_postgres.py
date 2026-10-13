@@ -47,6 +47,24 @@ with pg_engine.begin() as pg:
             INSERT INTO alunos (id, avaliacao_id, nome, matricula, identificador_externo, created_at, updated_at)
             VALUES (:id, :avaliacao_id, :nome, :matricula, :identificador_externo, :created_at, :updated_at)
         """), dict(r))
+    # 2b. turmas + turma_alunos (só existem em SQLite criado após a feature)
+    sqlite_tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "turmas" in sqlite_tables:
+        rows = conn.execute("SELECT * FROM turmas").fetchall()
+        print(f"Migrando {len(rows)} turmas...")
+        for r in rows:
+            pg.execute(text("""
+                INSERT INTO turmas (id, nome, owner_id, created_at, updated_at)
+                VALUES (:id, :nome, :owner_id, :created_at, :updated_at)
+            """), dict(r))
+    if "turma_alunos" in sqlite_tables:
+        rows = conn.execute("SELECT * FROM turma_alunos").fetchall()
+        print(f"Migrando {len(rows)} turma_alunos...")
+        for r in rows:
+            pg.execute(text("""
+                INSERT INTO turma_alunos (id, turma_id, nome, matricula, identificador_externo, created_at, updated_at)
+                VALUES (:id, :turma_id, :nome, :matricula, :identificador_externo, :created_at, :updated_at)
+            """), dict(r))
     # 3. gabaritos
     rows = conn.execute("SELECT * FROM gabaritos_nomeados").fetchall()
     print(f"Migrando {len(rows)} gabaritos...")
@@ -58,8 +76,10 @@ with pg_engine.begin() as pg:
             VALUES (:id, :avaliacao_id, :aluno_id, :codigo_unico, :qr_code_payload, :numero_pagina, :status, CAST(:respostas AS JSON), :acertos, :erros, :brancos, :nota, :observacoes, :data_geracao, :data_leitura, :data_correcao, :created_at, :updated_at)
         """), d)
     # Ajusta sequences
-    for tbl, col in [("avaliacoes","id"), ("alunos","id"), ("gabaritos_nomeados","id")]:
-        pg.execute(text(f"SELECT setval(pg_get_serial_sequence('{tbl}','{col}'), COALESCE((SELECT MAX({col}) FROM {tbl}), 1))"))
+    for tbl, col in [("avaliacoes","id"), ("alunos","id"), ("gabaritos_nomeados","id"),
+                     ("turmas","id"), ("turma_alunos","id")]:
+        if pg.execute(t(f"SELECT to_regclass('public.{tbl}')")).scalar() is not None:
+            pg.execute(text(f"SELECT setval(pg_get_serial_sequence('{tbl}','{col}'), COALESCE((SELECT MAX({col}) FROM {tbl}), 1))"))
 
 print("Migração concluída.")
 with pg_engine.connect() as c:

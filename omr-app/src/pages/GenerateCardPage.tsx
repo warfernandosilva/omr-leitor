@@ -92,7 +92,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
           activeExam.subjectLP,
           activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
           'PNG',
-          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined, turma: activeExam.name },
+          { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined, turma: activeExam.turma || activeExam.name },
         );
         if (cancelled) return;
         urlRef.current = URL.createObjectURL(blob);
@@ -119,7 +119,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         activeExam.subjectLP,
         activeExam.layoutMode === 'single' ? '' : activeExam.subjectMat,
         'PDF',
-        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined, turma: activeExam.name },
+        { questionsPerSubject: activeExam.questionsPerSubject, layoutMode: activeExam.layoutMode, template: activeExam.templateType ?? 'padrao', sae: isSae ? saeSpec : undefined, herby: isHerby ? herbySpec : undefined, turma: activeExam.turma || activeExam.name },
       );
     } catch {
       return null;

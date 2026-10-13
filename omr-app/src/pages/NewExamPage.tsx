@@ -8,7 +8,8 @@ import {
   getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
 } from '../utils/storage';
 import { MAX_QUESTIONS_PER_SUBJECT, MAX_QUESTIONS_SINGLE } from '../utils/card-template';
-import { syncExam, getExamsFromDB, getDeletedExamsFromDB, isGoneError, deleteExamFromDB, checkHealth } from '../utils/api';
+import { syncExam, getExamsFromDB, getDeletedExamsFromDB, isGoneError, deleteExamFromDB, checkHealth, listTurmas } from '../utils/api';
+import type { TurmaDTO } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -29,6 +30,8 @@ export default function NewExamPage({ onNavigate }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [turmas, setTurmas] = useState<TurmaDTO[]>([]);
+  const [turmaId, setTurmaId] = useState<number | ''>('');
 
   const isSae = templateType === 'sae';
   const isColar = templateType === 'colar';
@@ -106,6 +109,7 @@ export default function NewExamPage({ onNavigate }: Props) {
 
   useEffect(() => {
     refreshFromServer(true).catch(() => {});
+    listTurmas().then(setTurmas).catch(() => setTurmas([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -152,9 +156,12 @@ export default function NewExamPage({ onNavigate }: Props) {
     if (questionsPerSubject < 1) return;
     setSaving(true);
 
+    const turmaSel = turmaId === '' ? undefined : turmas.find(t => t.id === turmaId);
     const exam: Exam = {
       id: editingId || uuidv4(),
       name: name.trim(),
+      turma: turmaSel?.nome,
+      turmaId: turmaSel?.id,
       subjectLP: subjectLP.trim(),
       subjectMat: isCustom || layoutMode === 'single' ? subjectLP.trim() : subjectMat.trim(),
       questionsPerSubject,
@@ -206,6 +213,7 @@ export default function NewExamPage({ onNavigate }: Props) {
     setExams(getExams(user?.id));
     setEditingId(null);
     setName('');
+    setTurmaId('');
     setTemplateType('padrao');
     setSubjectLP('LÍNGUA PORTUGUESA');
     setSubjectMat('MATEMÁTICA');
@@ -220,6 +228,7 @@ export default function NewExamPage({ onNavigate }: Props) {
     setSubjectMat(exam.subjectMat);
     setQuestionsPerSubject(exam.questionsPerSubject);
     setGradeScale(exam.gradeScale);
+    setTurmaId(exam.turmaId ?? '');
     window.scrollTo(0, 0);
   };
 
@@ -247,6 +256,28 @@ export default function NewExamPage({ onNavigate }: Props) {
               onChange={(e) => setName(e.target.value)}
             />
           </div>
+
+          {!isSimulado && (
+          <div>
+            <label className="label">Turma (opcional)</label>
+            <select
+              className="input"
+              value={turmaId}
+              onChange={(e) => setTurmaId(e.target.value === '' ? '' : Number(e.target.value))}
+            >
+              <option value="">Sem turma vinculada</option>
+              {turmas.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.nome} ({t.total_alunos} aluno{t.total_alunos === 1 ? '' : 's'})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-400 mt-1">
+              A turma imprime o nome no cartão e permite gerar os gabaritos sem reenviar a lista.
+              Gerencie as turmas em <button type="button" className="text-blue-600 hover:text-blue-800" onClick={() => onNavigate('turmas')}>Turmas</button>.
+            </p>
+          </div>
+          )}
 
           <div>
             <label className="label">Modelo do Cartão *</label>
@@ -435,12 +466,12 @@ export default function NewExamPage({ onNavigate }: Props) {
               {editingId ? 'Salvar Alterações' : 'Criar Prova'}
             </button>
             {editingId && (
-              <button
-                onClick={() => { setEditingId(null); setName(''); setTemplateType('padrao'); setSubjectLP('LÍNGUA PORTUGUESA'); setSubjectMat('MATEMÁTICA'); }}
-                className="btn btn-secondary"
-              >
-                Cancelar
-              </button>
+                <button
+                  onClick={() => { setEditingId(null); setName(''); setTurmaId(''); setTemplateType('padrao'); setSubjectLP('LÍNGUA PORTUGUESA'); setSubjectMat('MATEMÁTICA'); }}
+                  className="btn btn-secondary"
+                >
+                  Cancelar
+                </button>
             )}
           </div>
         </div>
@@ -466,6 +497,9 @@ export default function NewExamPage({ onNavigate }: Props) {
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-gray-900 truncate">{exam.name}</p>
                   <p className="text-sm text-gray-500">
+                    {exam.turma && (
+                      <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-100 text-emerald-700">{exam.turma}</span>
+                    )}
                     {exam.templateType && exam.templateType !== 'padrao' && (
                       <span className="inline-block mr-1 px-1.5 py-0.5 text-xs font-medium rounded bg-violet-100 text-violet-700">{templateLabel(exam.templateType)}</span>
                     )}

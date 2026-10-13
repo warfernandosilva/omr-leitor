@@ -8,7 +8,7 @@ import type { Exam, StudentResult } from '../types';
 
 function dbExam(patch: Partial<DBExam> = {}): DBExam {
   return {
-    id: 1, external_id: 'E1', titulo: 'Prova', turma: null,
+    id: 1, external_id: 'E1', titulo: 'Prova', turma: null, turma_id: null,
     subject_lp: 'LÍNGUA PORTUGUESA', subject_mat: 'MATEMÁTICA',
     questions_per_subject: 22, layout_mode: 'dual', template: 'padrao',
     sae_spec: null, herby_spec: null, grade_scale: '0-10', answer_key: null,
@@ -91,6 +91,22 @@ describe('mergeRemoteExams (servidor vence)', () => {
     const got = merged.find(e => e.id === 'QR-EXAM');
     expect(got?.templateType).toBe('saev');
     expect(got?.totalQuestions).toBe(44);
+  });
+
+  it('traz turma/turmaId do servidor no merge', () => {
+    const { merged } = mergeRemoteExams([], [
+      dbExam({ turma: '9º A', turma_id: 7 }),
+    ]);
+    expect(merged[0].turma).toBe('9º A');
+    expect(merged[0].turmaId).toBe(7);
+  });
+
+  it('turma ausente no servidor vira indefinida (sem falso "atualizado")', () => {
+    const first = mergeRemoteExams([], [dbExam()]);
+    expect(first.merged[0].turma).toBeUndefined();
+    expect(first.merged[0].turmaId).toBeUndefined();
+    const second = mergeRemoteExams(first.merged, [dbExam()]);
+    expect(second.stats).toEqual({ added: 0, updated: 0 });
   });
 
   it('preserva templateType herby + herbySpec no merge (correção mobile)', () => {

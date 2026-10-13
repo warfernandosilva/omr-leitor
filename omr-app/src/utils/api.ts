@@ -362,6 +362,7 @@ export interface SyncExamResult {
   external_id: string;
   titulo: string;
   turma: string | null;
+  turma_id: number | null;
 }
 
 export interface ImportStudentsResult {
@@ -388,7 +389,7 @@ export interface GabaritoInfo {
 }
 
 export interface GabaritosListResult {
-  avaliacao: { id: number; external_id: string; titulo: string; turma: string | null };
+  avaliacao: { id: number; external_id: string; titulo: string; turma: string | null; turma_id: number | null };
   stats: {
     alunos_cadastrados: number;
     gabaritos_gerados: number;
@@ -427,6 +428,8 @@ export class AlreadyGradedError extends Error {
 export async function syncExam(exam: {
   id: string;
   name: string;
+  turma?: string;
+  turmaId?: number;
   subjectLP: string;
   subjectMat: string;
   questionsPerSubject?: number;
@@ -441,6 +444,8 @@ export async function syncExam(exam: {
     body: JSON.stringify({
       external_id: exam.id,
       titulo: exam.name,
+      turma: exam.turma ?? null,
+      turma_id: exam.turmaId ?? null,
       subject_lp: exam.subjectLP,
       subject_mat: exam.subjectMat,
       questions_per_subject: exam.questionsPerSubject ?? 22,
@@ -491,6 +496,122 @@ export async function importStudentsAPI(
     let detail = `HTTP ${res.status}`;
     try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
     throw new Error(`Falha ao importar alunos: ${detail}`);
+  }
+  return res.json();
+}
+
+// ─── Turmas: catálogo reutilizável de alunos ───
+
+export interface TurmaAlunoDTO {
+  id: number;
+  turma_id: number;
+  nome: string;
+  matricula: string | null;
+  identificador_externo: string | null;
+}
+
+export interface TurmaDTO {
+  id: number;
+  nome: string;
+  total_alunos: number;
+}
+
+export interface TurmaDetail extends TurmaDTO {
+  alunos: TurmaAlunoDTO[];
+}
+
+export interface TurmaImportResult {
+  turma_id: number;
+  criados: number;
+  atualizados: number;
+  ignorados: number;
+  total_alunos: number;
+}
+
+export interface FromTurmaResult {
+  avaliacao_id: number;
+  external_id: string;
+  turma: { id: number; nome: string };
+  materializados: number;
+  reaproveitados: number;
+  total_alunos: number;
+}
+
+async function turmaFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetchTimeout(`${API_BASE}${path}`, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers || {}) },
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+export async function listTurmas(): Promise<TurmaDTO[]> {
+  const j = await turmaFetch<{ turmas: TurmaDTO[] }>('/api/turmas');
+  return j.turmas;
+}
+
+export async function createTurma(nome: string): Promise<TurmaDTO> {
+  return turmaFetch<TurmaDTO>('/api/turmas', { method: 'POST', body: JSON.stringify({ nome }) });
+}
+
+export async function getTurma(id: number): Promise<TurmaDetail> {
+  return turmaFetch<TurmaDetail>(`/api/turmas/${id}`);
+}
+
+export async function renameTurma(id: number, nome: string): Promise<TurmaDTO> {
+  return turmaFetch<TurmaDTO>(`/api/turmas/${id}`, { method: 'PATCH', body: JSON.stringify({ nome }) });
+}
+
+export async function deleteTurma(id: number): Promise<{ deleted: number; alunos_removidos: number }> {
+  return turmaFetch(`/api/turmas/${id}`, { method: 'DELETE' });
+}
+
+export async function importTurmaAlunos(
+  id: number,
+  alunos: { nome: string; matricula?: string | null; identificador_externo?: string | null }[],
+): Promise<TurmaImportResult> {
+  return turmaFetch<TurmaImportResult>(`/api/turmas/${id}/alunos/import`, {
+    method: 'POST',
+    body: JSON.stringify({
+      alunos: alunos.map(a => ({
+        nome: a.nome,
+        matricula: a.matricula ?? null,
+        identificador_externo: a.identificador_externo ?? null,
+      })),
+    }),
+  });
+}
+
+export async function addTurmaAluno(
+  id: number,
+  aluno: { nome: string; matricula?: string | null },
+): Promise<TurmaAlunoDTO> {
+  return turmaFetch<TurmaAlunoDTO>(`/api/turmas/${id}/alunos`, {
+    method: 'POST',
+    body: JSON.stringify({ nome: aluno.nome, matricula: aluno.matricula ?? null }),
+  });
+}
+
+export async function removeTurmaAluno(id: number, alunoId: number): Promise<{ deleted: number }> {
+  return turmaFetch(`/api/turmas/${id}/alunos/${alunoId}`, { method: 'DELETE' });
+}
+
+/** Materializa o catálogo da turma em alunos da prova (idempotente). */
+export async function materializeFromTurma(examExternalId: string, turmaId: number): Promise<FromTurmaResult> {
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/students/from-turma`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ turma_id: turmaId }),
+  });
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try { const j = await res.json(); if (j?.detail) detail = String(j.detail); } catch { /* ignore */ }
+    throw new Error(detail);
   }
   return res.json();
 }
@@ -619,6 +740,7 @@ export interface DBExam {
   external_id: string;
   titulo: string;
   turma: string | null;
+  turma_id: number | null;
   subject_lp: string;
   subject_mat: string;
   questions_per_subject: number;

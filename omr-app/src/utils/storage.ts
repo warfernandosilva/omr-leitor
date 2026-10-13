@@ -145,6 +145,8 @@ export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exa
     const exam: Exam = {
       id: db.external_id,
       name: db.titulo,
+      turma: db.turma ?? undefined,
+      turmaId: db.turma_id ?? undefined,
       subjectLP: db.subject_lp,
       subjectMat: db.subject_mat,
       questionsPerSubject: qps,

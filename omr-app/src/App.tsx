@@ -8,6 +8,7 @@ import { saveNav, loadNav } from './utils/nav-persist';
 import { initPwa, applyPwaUpdate, PWA_UPDATE_EVENT } from './pwa';
 import HomePage from './pages/HomePage';
 import NewExamPage from './pages/NewExamPage';
+import TurmasPage from './pages/TurmasPage';
 import GenerateCardPage from './pages/GenerateCardPage';
 import RosterCardsPage from './pages/RosterCardsPage';
 import ManageExamPage from './pages/ManageExamPage';
@@ -79,6 +80,8 @@ function AppInner() {
         return <HomePage onNavigate={navigate} />;
       case 'new-exam':
         return <NewExamPage onNavigate={navigate} />;
+      case 'turmas':
+        return <TurmasPage onNavigate={navigate} />;
       case 'generate-card':
         return <GenerateCardPage examId={selectedExamId} onNavigate={navigate} />;
       case 'import-students':

@@ -101,8 +101,10 @@ def init_db() -> None:
     _ensure_column("avaliacoes", "answer_key", "JSON")
     _ensure_column("avaliacoes", "owner_id", "INTEGER REFERENCES users(id)")
     _ensure_column("avaliacoes", "herby_spec", "JSON")
+    _ensure_column("avaliacoes", "turma_id", "INTEGER")
     _ensure_column("gabaritos_nomeados", "magic_link", "VARCHAR(255)")
     _ensure_column("gabaritos_nomeados", "photo_status", "VARCHAR(30)")
+    _ensure_column("alunos", "origem_turma_aluno_id", "INTEGER")
 
 
 def _ensure_column(table: str, column: str, ddl_type: str) -> None:

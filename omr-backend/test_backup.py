@@ -32,7 +32,8 @@ def test_backup_roundtrip(db_session, tmp_path):
     from backup import export_all, backup_to_file, restore_all
 
     data = export_all()
-    assert data["counts"] == {"users": 1, "avaliacoes": 1, "alunos": 1, "gabaritos": 1, "tombstones": 1}, \
+    assert data["counts"] == {"users": 1, "turmas": 0, "turma_alunos": 0,
+                              "avaliacoes": 1, "alunos": 1, "gabaritos": 1, "tombstones": 1}, \
         f"export: contagens corretas: {data['counts']}"
 
     # roundtrip via arquivo: grava, restaura por cima (upsert)
@@ -42,7 +43,8 @@ def test_backup_roundtrip(db_session, tmp_path):
         "arquivo: JSON fiel (answer_key preservada)"
 
     n = restore_all(raw)
-    assert n == {"users": 1, "avaliacoes": 1, "alunos": 1, "gabaritos": 1, "tombstones": 1}, \
+    assert n == {"users": 1, "turmas": 0, "turma_alunos": 0,
+                 "avaliacoes": 1, "alunos": 1, "gabaritos": 1, "tombstones": 1}, \
         f"restore: upsert sem duplicar: {n}"
 
     # upsert de novo (idempotente)

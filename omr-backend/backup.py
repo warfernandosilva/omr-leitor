@@ -12,8 +12,8 @@ from pathlib import Path
 
 from sqlalchemy import select
 
-from database import SessionLocal
-from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, User
+import database
+from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, Turma, TurmaAluno, User
 
 BACKUP_VERSION = 1
 
@@ -28,7 +28,9 @@ def _dt(v: datetime | None) -> str | None:
 
 def export_all() -> dict:
     """Serializa todas as tabelas para um dict JSON portátil."""
-    db = SessionLocal()
+    # SessionLocal resolvido na hora (não no import): o pytest religa
+    # database.SessionLocal para o DB isolado de cada módulo.
+    db = database.SessionLocal()
     try:
         users = []
         for u in db.scalars(select(User)).all():
@@ -37,11 +39,25 @@ def export_all() -> dict:
                 "hashed_password": u.hashed_password, "role": u.role,
                 "is_active": bool(u.is_active), "created_at": _dt(u.created_at),
             })
+        turmas = []
+        for t in db.scalars(select(Turma)).all():
+            turmas.append({
+                "id": t.id, "nome": t.nome, "owner_id": t.owner_id,
+                "created_at": _dt(t.created_at), "updated_at": _dt(t.updated_at),
+            })
+        turma_alunos = []
+        for ta in db.scalars(select(TurmaAluno)).all():
+            turma_alunos.append({
+                "id": ta.id, "turma_id": ta.turma_id, "nome": ta.nome,
+                "matricula": ta.matricula,
+                "identificador_externo": ta.identificador_externo,
+                "created_at": _dt(ta.created_at), "updated_at": _dt(ta.updated_at),
+            })
         avaliacoes = []
         for a in db.scalars(select(Avaliacao)).all():
             avaliacoes.append({
                 "id": a.id, "external_id": a.external_id, "titulo": a.titulo,
-                "turma": a.turma, "modelo_omr": a.modelo_omr,
+                "turma": a.turma, "turma_id": a.turma_id, "modelo_omr": a.modelo_omr,
                 "subject_lp": a.subject_lp, "subject_mat": a.subject_mat,
                 "questions_per_subject": a.questions_per_subject,
                 "layout_mode": a.layout_mode, "template": a.template,
@@ -56,6 +72,7 @@ def export_all() -> dict:
                 "id": al.id, "avaliacao_id": al.avaliacao_id, "nome": al.nome,
                 "matricula": al.matricula,
                 "identificador_externo": al.identificador_externo,
+                "origem_turma_aluno_id": al.origem_turma_aluno_id,
                 "created_at": _dt(al.created_at), "updated_at": _dt(al.updated_at),
             })
         gabaritos = []
@@ -81,11 +98,14 @@ def export_all() -> dict:
             "backup_version": BACKUP_VERSION,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "counts": {
-                "users": len(users), "avaliacoes": len(avaliacoes),
+                "users": len(users), "turmas": len(turmas),
+                "turma_alunos": len(turma_alunos), "avaliacoes": len(avaliacoes),
                 "alunos": len(alunos), "gabaritos": len(gabaritos),
                 "tombstones": len(tombstones),
             },
             "users": users,
+            "turmas": turmas,
+            "turma_alunos": turma_alunos,
             "avaliacoes": avaliacoes,
             "alunos": alunos,
             "gabaritos": gabaritos,
@@ -125,8 +145,9 @@ def restore_all(data: dict) -> dict:
     """
     if int(data.get("backup_version", 0)) > BACKUP_VERSION:
         raise ValueError("Backup de versão mais nova que o sistema")
-    db = SessionLocal()
-    n = {"users": 0, "avaliacoes": 0, "alunos": 0, "gabaritos": 0, "tombstones": 0}
+    db = database.SessionLocal()  # resolvido na hora (ver export_all)
+    n = {"users": 0, "turmas": 0, "turma_alunos": 0,
+         "avaliacoes": 0, "alunos": 0, "gabaritos": 0, "tombstones": 0}
     try:
         for u in data.get("users", []):
             obj = db.get(User, u["id"])
@@ -140,6 +161,26 @@ def restore_all(data: dict) -> dict:
             obj.is_active = bool(u.get("is_active", True))
             n["users"] += 1
         db.flush()
+        for t in data.get("turmas", []):
+            obj = db.get(Turma, t["id"])
+            if obj is None:
+                obj = Turma(id=t["id"])
+                db.add(obj)
+            obj.nome = t["nome"]
+            obj.owner_id = t.get("owner_id")
+            n["turmas"] += 1
+        db.flush()
+        for ta in data.get("turma_alunos", []):
+            obj = db.get(TurmaAluno, ta["id"])
+            if obj is None:
+                obj = TurmaAluno(id=ta["id"])
+                db.add(obj)
+            obj.turma_id = ta["turma_id"]
+            obj.nome = ta["nome"]
+            obj.matricula = ta.get("matricula")
+            obj.identificador_externo = ta.get("identificador_externo")
+            n["turma_alunos"] += 1
+        db.flush()
         for a in data.get("avaliacoes", []):
             obj = db.get(Avaliacao, a["id"])
             if obj is None:
@@ -148,6 +189,7 @@ def restore_all(data: dict) -> dict:
             obj.external_id = a["external_id"]
             obj.titulo = a["titulo"]
             obj.turma = a.get("turma")
+            obj.turma_id = a.get("turma_id")
             obj.modelo_omr = a.get("modelo_omr", "GABARITO_01")
             obj.subject_lp = a.get("subject_lp", "PORTUGUÊS")
             obj.subject_mat = a.get("subject_mat", "MATEMÁTICA")
@@ -180,6 +222,7 @@ def restore_all(data: dict) -> dict:
             obj.nome = al["nome"]
             obj.matricula = al.get("matricula")
             obj.identificador_externo = al.get("identificador_externo")
+            obj.origem_turma_aluno_id = al.get("origem_turma_aluno_id")
             n["alunos"] += 1
         db.flush()
         for g in data.get("gabaritos", []):
