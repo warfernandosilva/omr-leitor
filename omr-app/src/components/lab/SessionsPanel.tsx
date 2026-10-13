@@ -1,6 +1,12 @@
 import { useState } from 'react';
+import { Play, Trash2 } from 'lucide-react';
 import DataTable from '../ui/DataTable';
 import EmptyState from '../ui/EmptyState';
+import Field from '../ui/Field';
+import Input from '../ui/Input';
+import Select from '../ui/Select';
+import Button from '../ui/Button';
+import Badge from '../ui/Badge';
 import {
   LAB_TEMPLATES, LabSessionCreated, LabSessionSummary, LabTemplate, labTotalQuestions,
   labCreateSession, labDeleteSession,
@@ -72,80 +78,80 @@ export default function SessionsPanel({ sessions, loading, selectedId, onSelect,
   return (
     <div className="space-y-6">
       <form onSubmit={create} className="card">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Nova sessão de teste</h3>
+        <h3 className="text-lg font-semibold text-ink dark:text-white mb-1">Nova sessão de teste</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
           Uma sessão agrupa fotos do mesmo cartão + um gabarito. As fotos passam pelo mesmo motor de produção.
         </p>
         <div className="grid md:grid-cols-2 gap-4">
           <div className="md:col-span-2">
-            <label className="label" htmlFor="lab-nome">Nome</label>
-            <input
-              id="lab-nome"
-              className="input"
-              value={nome}
-              onChange={e => setNome(e.target.value)}
-              placeholder="Ex.: Turma B — foto de mesa — 12/05"
-            />
+            <Field label="Nome" htmlFor="lab-nome">
+              <Input
+                id="lab-nome"
+                value={nome}
+                onChange={e => setNome(e.target.value)}
+                placeholder="Ex.: Turma B — foto de mesa — 12/05"
+              />
+            </Field>
           </div>
           <div>
-            <label className="label" htmlFor="lab-descricao">Descrição (opcional)</label>
-            <input
-              id="lab-descricao"
-              className="input"
-              value={descricao}
-              onChange={e => setDescricao(e.target.value)}
-              placeholder="Condições da foto, câmera, iluminação…"
-            />
+            <Field label="Descrição (opcional)" htmlFor="lab-descricao">
+              <Input
+                id="lab-descricao"
+                value={descricao}
+                onChange={e => setDescricao(e.target.value)}
+                placeholder="Condições da foto, câmera, iluminação…"
+              />
+            </Field>
           </div>
           <div>
-            <label className="label" htmlFor="lab-template">Modelo do cartão</label>
-            <select
-              id="lab-template"
-              className="input"
-              value={template}
-              onChange={e => pickTemplate(e.target.value as LabTemplate)}
-            >
-              {LAB_TEMPLATES.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </select>
+            <Field label="Modelo do cartão" htmlFor="lab-template">
+              <Select
+                id="lab-template"
+                value={template}
+                onChange={e => pickTemplate(e.target.value as LabTemplate)}
+              >
+                {LAB_TEMPLATES.map(t => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </Select>
+            </Field>
           </div>
           <div>
-            <label className="label" htmlFor="lab-qps">Questões por disciplina</label>
-            <input
-              id="lab-qps"
-              type="number"
-              min={1}
-              max={30}
-              className="input"
-              value={qps}
-              onChange={e => setQps(Math.max(1, Number(e.target.value) || 1))}
-            />
+            <Field label="Questões por disciplina" htmlFor="lab-qps">
+              <Input
+                id="lab-qps"
+                type="number"
+                min={1}
+                max={30}
+                value={qps}
+                onChange={e => setQps(Math.max(1, Number(e.target.value) || 1))}
+              />
+            </Field>
           </div>
           <div>
-            <label className="label" htmlFor="lab-layout">Layout</label>
-            <select
-              id="lab-layout"
-              className="input"
-              value={layoutMode}
-              onChange={e => setLayoutMode(e.target.value as 'dual' | 'single')}
-            >
-              <option value="dual">Dual ({qps * 2} questões)</option>
-              <option value="single">Simples ({qps} questões)</option>
-            </select>
+            <Field label="Layout" htmlFor="lab-layout">
+              <Select
+                id="lab-layout"
+                value={layoutMode}
+                onChange={e => setLayoutMode(e.target.value as 'dual' | 'single')}
+              >
+                <option value="dual">Dual ({qps * 2} questões)</option>
+                <option value="single">Simples ({qps} questões)</option>
+              </Select>
+            </Field>
           </div>
         </div>
-        <label className="flex items-center gap-2 mt-4 text-sm text-gray-700 dark:text-gray-300">
-          <input type="checkbox" checked={adaptive} onChange={e => setAdaptive(e.target.checked)} className="w-4 h-4" />
+        <label className="flex items-center gap-2 mt-4 text-sm text-gray-600 dark:text-gray-300 min-h-[44px]">
+          <input type="checkbox" checked={adaptive} onChange={e => setAdaptive(e.target.checked)} className="w-4 h-4 accent-brand-500" />
           Usar limiar adaptativo (floor calculado por imagem)
         </label>
         {error && <div className="callout-danger mt-4">{error}</div>}
-        <button type="submit" disabled={busy} className="btn btn-primary mt-4 min-h-[44px]">
-          {busy ? 'Criando…' : 'Criar sessão'}
-        </button>
+        <Button type="submit" loading={busy} className="mt-4">
+          Criar sessão
+        </Button>
       </form>
 
-      {loading && <div className="card text-center py-10 text-gray-500">Carregando sessões…</div>}
+      {loading && <div className="card text-center py-10 text-gray-500 dark:text-gray-400" role="status">Carregando sessões…</div>}
 
       {!loading && sessions.length === 0 && (
         <EmptyState
@@ -156,7 +162,7 @@ export default function SessionsPanel({ sessions, loading, selectedId, onSelect,
 
       {!loading && sessions.length > 0 && (
         <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Sessões</h3>
+          <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">Sessões</h3>
           <DataTable<LabSessionSummary>
             minWidth={760}
             rows={sessions}
@@ -167,7 +173,7 @@ export default function SessionsPanel({ sessions, loading, selectedId, onSelect,
                 header: 'Sessão',
                 render: s => (
                   <div className="min-w-[180px]">
-                    <p className="font-medium text-gray-900 dark:text-white">{s.nome}</p>
+                    <p className="font-medium text-ink dark:text-white">{s.nome}</p>
                     {s.descricao && <p className="text-xs text-gray-500 dark:text-gray-400">{s.descricao}</p>}
                   </div>
                 ),
@@ -175,21 +181,21 @@ export default function SessionsPanel({ sessions, loading, selectedId, onSelect,
               {
                 key: 'template',
                 header: 'Modelo',
-                render: s => <span className="text-xs">{templateLabel(s.template)}</span>,
+                render: s => <span className="text-xs text-gray-600 dark:text-gray-300">{templateLabel(s.template)}</span>,
               },
               {
                 key: 'q',
                 header: 'Questões',
-                render: s => <span className="text-xs">{labTotalQuestions(s)}</span>,
+                render: s => <span className="text-xs text-gray-600 dark:text-gray-300 tabular-nums">{labTotalQuestions(s)}</span>,
               },
               {
                 key: 'fotos',
                 header: 'Fotos',
                 render: s => (
-                  <span className="text-xs">
+                  <span className="text-xs text-gray-600 dark:text-gray-300 tabular-nums">
                     {s.n_images}
                     {s.n_erro > 0 && (
-                      <span className="ml-1 text-red-600 dark:text-red-400">({s.n_erro} erro)</span>
+                      <Badge tone="danger" className="ml-1">{s.n_erro} erro</Badge>
                     )}
                   </span>
                 ),
@@ -200,13 +206,15 @@ export default function SessionsPanel({ sessions, loading, selectedId, onSelect,
                 className: 'text-right',
                 render: s => (
                   <div className="flex justify-end gap-1">
-                    <button
+                    <Button
+                      size="sm"
+                      variant={selectedId === s.id ? 'primary' : 'secondary'}
                       onClick={() => onSelect(s.id)}
-                      className={`btn btn-sm ${selectedId === s.id ? 'btn-primary' : 'btn-secondary'}`}
+                      icon={<Play size={14} aria-hidden />}
                     >
                       {selectedId === s.id ? 'Selecionada' : 'Abrir'}
-                    </button>
-                    <button onClick={() => remove(s)} className="btn btn-sm btn-danger">Excluir</button>
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={() => remove(s)} icon={<Trash2 size={14} aria-hidden />}>Excluir</Button>
                   </div>
                 ),
               },

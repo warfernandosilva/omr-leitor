@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppView } from '../types';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import Button from '../components/ui/Button';
 import LabTabs, { LabTab } from '../components/lab/LabTabs';
 import SessionsPanel from '../components/lab/SessionsPanel';
 import UploadPanel from '../components/lab/UploadPanel';
@@ -96,7 +98,11 @@ export default function LabPage({ onNavigate }: Props) {
   const needsSession = tab !== 'sessoes' && tab !== 'calibracao';
 
   return (
-    <div>
+    <div className="space-y-4 animate-fade-in">
+      <PageHeader
+        title="Banco de testes OMR"
+        subtitle="Valide a leitura com gabarito e calibre thresholds"
+      />
       <LabTabs
         active={tab}
         onChange={setTab}
@@ -127,12 +133,12 @@ export default function LabPage({ onNavigate }: Props) {
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Abra uma sessão na aba <strong>Sessões</strong> (ou crie uma nova) para continuar.
           </p>
-          <button onClick={() => setTab('sessoes')} className="btn btn-primary mt-4 min-h-[44px]">Ir para Sessões</button>
+          <Button onClick={() => setTab('sessoes')} className="mt-4">Ir para Sessões</Button>
         </div>
       )}
 
       {needsSession && selectedId && detailLoading && !detail && (
-        <div className="card text-center py-10 text-gray-500">Abrindo sessão…</div>
+        <div className="card text-center py-10 text-gray-500 dark:text-gray-400" role="status">Abrindo sessão…</div>
       )}
 
       {needsSession && summary && (
@@ -141,12 +147,12 @@ export default function LabPage({ onNavigate }: Props) {
             <div className="space-y-6">
               <div className="card flex flex-wrap items-center justify-between gap-3 py-4">
                 <div>
-                  <p className="font-semibold text-gray-900 dark:text-white">{summary.nome}</p>
+                  <p className="font-semibold text-ink dark:text-white">{summary.nome}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {summary.template} · {summary.n_images} foto(s) · {detail?.ground_truth ? 'gabarito ok' : 'sem gabarito'}
                   </p>
                 </div>
-                <button onClick={refreshSelected} className="btn btn-sm btn-secondary min-h-[44px]">Atualizar</button>
+                <Button variant="secondary" size="sm" onClick={refreshSelected}>Atualizar</Button>
               </div>
               <UploadPanel session={summary} onUploaded={refreshSelected} />
               <TruthPanel
@@ -158,7 +164,7 @@ export default function LabPage({ onNavigate }: Props) {
           )}
 
           {tab === 'revisao' && detail && <ReviewPanel images={detail.images} />}
-          {tab === 'revisao' && !detail && detailLoading && <div className="card text-center py-10 text-gray-500">Carregando fotos…</div>}
+          {tab === 'revisao' && !detail && detailLoading && <div className="card text-center py-10 text-gray-500 dark:text-gray-400" role="status">Carregando fotos…</div>}
 
           {tab === 'metricas' && <MetricsPanel session={summary} />}
         </>
@@ -173,7 +179,7 @@ export default function LabPage({ onNavigate }: Props) {
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               A calibração usa as questões e o gabarito de uma sessão.
             </p>
-            <button onClick={() => setTab('sessoes')} className="btn btn-primary mt-4 min-h-[44px]">Ir para Sessões</button>
+            <Button onClick={() => setTab('sessoes')} className="mt-4">Ir para Sessões</Button>
           </div>
         )
       )}

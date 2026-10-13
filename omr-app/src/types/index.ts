@@ -153,15 +153,20 @@ export type AppView =
   | 'new-exam'
   | 'generate-card'
   | 'turmas'
+  | 'alunos'
   | 'import-students'
   | 'manage-exam'
   | 'register-key'
   | 'correct-card'
   | 'results'
+  | 'pending'
   | 'dashboard'
+  | 'reports'
   | 'export'
   | 'lab'
   | 'view-result'
+  | 'settings'
+  | 'help'
   | 'admin-users';
 
 export const SUBJECT_IDS = ['lp', 'mat'] as const;

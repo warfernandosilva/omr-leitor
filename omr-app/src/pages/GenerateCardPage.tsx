@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
+import { ArrowLeft, Download, Eye, Printer, Users } from 'lucide-react';
 import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, HerbySpec, isSaeExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { generateBlankCard, checkHealth, syncExam } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
 import CardPdfDocument from '../components/pdf/CardPdfDocument';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import Field from '../components/ui/Field';
+import Input from '../components/ui/Input';
+import Select from '../components/ui/Select';
+import Button from '../components/ui/Button';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   examId: string | null;
@@ -179,31 +186,30 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
   };
 
   return (
-    <div>
+    <div className="space-y-6 animate-fade-in">
       <div className="no-print">
-        <div className="flex items-center justify-between mb-2">
-          <h1 className="text-2xl font-bold text-gray-900">Gerar Cartão-Resposta</h1>
-          <button onClick={() => onNavigate('import-students')} className="btn btn-secondary btn-sm">
-            Gerar por Lista de Alunos →
-          </button>
-        </div>
-        <p className="text-gray-500 mb-6">Gere o cartão em formato A4 para impressão</p>
+        <PageHeader
+          title="Gerar cartão-resposta"
+          subtitle="Gere o cartão em formato A4 para impressão"
+          actions={
+            <Button variant="secondary" size="sm" onClick={() => onNavigate('import-students')} icon={<Users size={15} aria-hidden />}>
+              Gerar por lista de alunos
+            </Button>
+          }
+        />
 
         {!showPreview && (
-          <div className="card max-w-2xl mb-8">
+          <div className="card max-w-2xl">
             <div className="space-y-4">
-              <div>
-                <label className="label">Selecione a Prova</label>
+              <Field label="Selecione a prova" htmlFor="card-exam-select">
                 {exams.length === 0 ? (
-                  <div className="text-sm text-gray-500">
-                    <p>Nenhuma prova cadastrada.</p>
-                    <button onClick={() => onNavigate('new-exam')} className="btn btn-primary btn-sm mt-2">
-                      Criar Nova Prova
-                    </button>
-                  </div>
+                  <EmptyState
+                    title="Nenhuma prova cadastrada"
+                    action={<Button size="sm" onClick={() => onNavigate('new-exam')}>Criar nova prova</Button>}
+                  />
                 ) : (
-                  <select
-                    className="input"
+                  <Select
+                    id="card-exam-select"
                     value={selectedExamId}
                     onChange={(e) => setSelectedExamId(e.target.value)}
                   >
@@ -211,132 +217,114 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                     {exams.map((e) => (
                       <option key={e.id} value={e.id}>{e.name}</option>
                     ))}
-                  </select>
+                  </Select>
                 )}
-              </div>
+              </Field>
 
               {activeExam && (
-                <div className="bg-gray-50 rounded-lg p-4 text-sm">
-                  <p><strong>Prova:</strong> {activeExam.name}</p>
+                <div className="bg-surface dark:bg-gray-800/60 rounded-lg p-4 text-sm">
+                  <p className="text-ink dark:text-gray-100"><strong>Prova:</strong> {activeExam.name}</p>
                   {isColar ? (
                     <>
-                      <p><strong>Modelo:</strong> Colar em Avaliação (só o gabarito, sem cabeçalho)</p>
-                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Colar em Avaliação (só o gabarito, sem cabeçalho)</p>
+                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
                     </>
                   ) : isSimulado ? (
                     <>
-                      <p><strong>Modelo:</strong> Simulado (só a tabela · réguas como âncora · sem QR/nome/turma)</p>
-                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject} fixas</p>
+                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Simulado (só a tabela · réguas como âncora · sem QR/nome/turma)</p>
+                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject} fixas</p>
                     </>
                   ) : isSae ? (
                     <>
-                      <p><strong>Modelo:</strong> Avaliação Contínua (cabeçalho editável abaixo)</p>
-                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Avaliação Contínua (cabeçalho editável abaixo)</p>
+                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
                     </>
                   ) : activeExam.layoutMode === 'single' ? (
                     <>
-                      <p><strong>Disciplina:</strong> {activeExam.subjectLP}{isHerby ? ' (Herby 1 disciplina — metade esquerda)' : ''}</p>
-                      <p><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Disciplina:</strong> {activeExam.subjectLP}{isHerby ? ' (Herby 1 disciplina — metade esquerda)' : ''}</p>
+                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
                     </>
                   ) : (
                     <>
-                      <p><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>
-                      <p><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
+                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>
+                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
                     </>
                   )}
-                  <p className="text-xs text-gray-400 mt-2">ID do cartão: {cardId}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">ID do cartão: {cardId}</p>
                 </div>
               )}
 
               {activeExam && isSae && (
-                <div className="border border-violet-200 rounded-lg p-4 space-y-3 bg-violet-50/50">
-                  <p className="text-sm font-medium text-violet-800">Cabeçalho do cartão — Avaliação Contínua</p>
+                <div className="border border-brand-500/30 rounded-lg p-4 space-y-3 bg-brand-50/50 dark:bg-brand-700/10">
+                  <p className="text-sm font-medium text-brand-800 dark:text-brand-200">Cabeçalho do cartão — Avaliação Contínua</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">Ano</label>
-                      <input className="input" value={saeSpec.ano} onChange={(e) => setSae({ ano: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="label">Caderno</label>
-                      <input className="input" value={saeSpec.caderno} onChange={(e) => setSae({ caderno: e.target.value })} />
-                    </div>
+                    <Field label="Ano" htmlFor="sae-ano">
+                      <Input id="sae-ano" value={saeSpec.ano} onChange={(e) => setSae({ ano: e.target.value })} />
+                    </Field>
+                    <Field label="Caderno" htmlFor="sae-caderno">
+                      <Input id="sae-caderno" value={saeSpec.caderno} onChange={(e) => setSae({ caderno: e.target.value })} />
+                    </Field>
                   </div>
+                  <Field label="Programa (linha 1)" htmlFor="sae-prog1">
+                    <Input id="sae-prog1" value={saeSpec.programa_linha1} onChange={(e) => setSae({ programa_linha1: e.target.value })} />
+                  </Field>
+                  <Field label="Programa (linha 2)" htmlFor="sae-prog2">
+                    <Input id="sae-prog2" value={saeSpec.programa_linha2} onChange={(e) => setSae({ programa_linha2: e.target.value })} />
+                  </Field>
                   <div>
-                    <label className="label">Programa (linha 1)</label>
-                    <input className="input" value={saeSpec.programa_linha1} onChange={(e) => setSae({ programa_linha1: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="label">Programa (linha 2)</label>
-                    <input className="input" value={saeSpec.programa_linha2} onChange={(e) => setSae({ programa_linha2: e.target.value })} />
-                  </div>
-                  <div>
-                    <label className="label">Título (4 linhas)</label>
+                    <span className="label">Título (4 linhas)</span>
                     <div className="space-y-2">
                       {saeSpec.titulo.map((t, i) => (
-                        <input key={i} className="input" value={t} onChange={(e) => setSaeTitulo(i, e.target.value)} />
+                        <Input key={i} aria-label={`Título linha ${i + 1}`} value={t} onChange={(e) => setSaeTitulo(i, e.target.value)} />
                       ))}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">Disciplina</label>
-                      <input className="input" value={saeSpec.disciplina} onChange={(e) => setSae({ disciplina: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="label">Série</label>
-                      <input className="input" value={saeSpec.serie} onChange={(e) => setSae({ serie: e.target.value })} />
-                    </div>
+                    <Field label="Disciplina" htmlFor="sae-disc">
+                      <Input id="sae-disc" value={saeSpec.disciplina} onChange={(e) => setSae({ disciplina: e.target.value })} />
+                    </Field>
+                    <Field label="Série" htmlFor="sae-serie">
+                      <Input id="sae-serie" value={saeSpec.serie} onChange={(e) => setSae({ serie: e.target.value })} />
+                    </Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">QR Code (texto)</label>
-                      <input className="input font-mono" value={saeSpec.qr_payload} onChange={(e) => setSae({ qr_payload: e.target.value })} />
-                    </div>
-                    <div>
-                      <label className="label">Código de barras (texto)</label>
-                      <input className="input font-mono" value={saeSpec.codigo_barras} onChange={(e) => setSae({ codigo_barras: e.target.value })} />
-                    </div>
+                    <Field label="QR Code (texto)" htmlFor="sae-qr">
+                      <Input id="sae-qr" className="font-mono" value={saeSpec.qr_payload} onChange={(e) => setSae({ qr_payload: e.target.value })} />
+                    </Field>
+                    <Field label="Código de barras (texto)" htmlFor="sae-bar">
+                      <Input id="sae-bar" className="font-mono" value={saeSpec.codigo_barras} onChange={(e) => setSae({ codigo_barras: e.target.value })} />
+                    </Field>
                   </div>
                 </div>
               )}
 
-              <button
+              <Button
                 onClick={() => { if (isSae) persistSae(); if (isHerby) persistHerby(); setShowPreview(true); }}
                 disabled={!selectedExamId}
-                className="btn btn-primary"
+                icon={<Eye size={16} aria-hidden />}
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                Visualizar Cartão
-              </button>
+                Visualizar cartão
+              </Button>
             </div>
           </div>
         )}
 
         {showPreview && activeExam && (
-          <div className="flex gap-3 mb-4">
-            <button onClick={handlePrint} className="btn btn-success">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-              </svg>
+          <div className="flex flex-wrap gap-2 mb-4">
+            <Button variant="success" onClick={handlePrint} icon={<Printer size={16} aria-hidden />}>
               Imprimir
-            </button>
-            <button onClick={handleDownloadPdf} disabled={downloading} className="btn btn-primary">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              {downloading ? 'Gerando...' : 'Baixar PDF'}
-            </button>
-            <button onClick={() => setShowPreview(false)} className="btn btn-secondary">
+            </Button>
+            <Button onClick={handleDownloadPdf} loading={downloading} icon={<Download size={16} aria-hidden />}>
+              Baixar PDF
+            </Button>
+            <Button variant="secondary" onClick={() => setShowPreview(false)} icon={<ArrowLeft size={16} aria-hidden />}>
               Voltar
-            </button>
+            </Button>
           </div>
         )}
 
         {showPreview && activeExam && (
-          <p className="text-xs text-gray-400 mt-2">
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
             {sourceNote ?? 'O PDF é gerado pelo servidor com o mesmo desenho dos gabaritos oficiais (sem QR/nome de aluno).'}
           </p>
         )}
@@ -359,7 +347,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                 </div>
               </div>
             ) : isSae || isColar || isSimulado ? (
-              <div className="print-answer-card shadow-2xl flex items-center justify-center p-8 text-center text-sm text-gray-500">
+              <div className="print-answer-card shadow-2xl flex items-center justify-center p-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 {loadingPng
                   ? 'Carregando prévia do servidor...'
                   : `A prévia do cartão "${templateLabel(activeExam.templateType)}" é gerada pelo backend Python. Verifique se o backend está rodando e recarregue a página.`}
@@ -367,7 +355,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
             ) : (
               <div className="print-answer-card shadow-2xl" style={{ position: 'relative' }}>
                 {loadingPng ? (
-                  <div className="flex items-center justify-center h-full text-sm text-gray-500">Carregando prévia do servidor...</div>
+                  <div className="flex items-center justify-center h-full text-sm text-gray-500 dark:text-gray-400">Carregando prévia do servidor...</div>
                 ) : (
                   <AnswerCard exam={activeExam} cardId={cardId} />
                 )}

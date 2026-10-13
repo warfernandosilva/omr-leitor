@@ -40,3 +40,22 @@ export function clearNav(): void {
     /* ignora */
   }
 }
+
+const SIDEBAR_KEY = 'omr-sidebar-collapsed';
+
+/** Estado colapsado da sidebar (persistente entre sessões). */
+export function saveSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+  } catch {
+    /* armazenamento indisponível — segue sem persistir */
+  }
+}
+
+export function loadSidebarCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1';
+  } catch {
+    return false;
+  }
+}

@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { Download, FileUp, RefreshCw, ScanLine, Trash2, TriangleAlert } from 'lucide-react';
 import { AppView } from '../types';
 import { getExams } from '../utils/storage';
 import {
@@ -9,16 +10,24 @@ import {
 } from '../utils/api';
 import { countPdfPages } from '../utils/students';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import Field from '../components/ui/Field';
+import Select from '../components/ui/Select';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import StatCard from '../components/ui/StatCard';
+import DataTable from '../components/ui/DataTable';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   examId: string | null;
   onNavigate: (view: AppView, examId?: string) => void;
 }
 
-const STATUS_LABEL: Record<GabaritosListResult['gabaritos'][number]['status'], { label: string; cls: string }> = {
-  gerado: { label: 'Pendente', cls: 'bg-gray-100 text-gray-600' },
-  lido: { label: 'Lido', cls: 'bg-blue-50 text-blue-700' },
-  corrigido: { label: 'Corrigido', cls: 'bg-emerald-50 text-emerald-700' },
+const STATUS_TONE: Record<GabaritosListResult['gabaritos'][number]['status'], { label: string; tone: 'neutral' | 'info' | 'success' }> = {
+  gerado: { label: 'Pendente', tone: 'neutral' },
+  lido: { label: 'Lido', tone: 'info' },
+  corrigido: { label: 'Corrigido', tone: 'success' },
 };
 
 export default function ManageExamPage({ examId, onNavigate }: Props) {
@@ -103,174 +112,141 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Gerenciar Avaliação</h1>
-      <p className="text-gray-500 mb-6">
-        Alunos persistidos, gabaritos gerados e status de correção — dados do banco do servidor
-      </p>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Gerenciar avaliação"
+        subtitle="Alunos persistidos, gabaritos gerados e status de correção — dados do banco do servidor"
+      />
 
-      <div className="card max-w-3xl mb-6">
-        <label className="label">Selecione a Prova</label>
-        {exams.length === 0 ? (
-          <div className="text-sm text-gray-500">
-            <p>Nenhuma prova cadastrada.</p>
-            <button onClick={() => onNavigate('new-exam')} className="btn btn-primary btn-sm mt-2">Criar Prova</button>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <select
-              className="input"
-              value={selectedExamId}
-              onChange={(e) => handleSelect(e.target.value)}
-            >
-              <option value="">Selecione...</option>
-              {exams.map(x => (
-                <option key={x.id} value={x.id}>{x.name}</option>
-              ))}
-            </select>
-            {selectedExamId && (
-              <button onClick={load} disabled={loading} className="btn btn-secondary whitespace-nowrap">
-                Atualizar
-              </button>
-            )}
-          </div>
-        )}
+      <div className="card max-w-3xl">
+        <Field label="Selecione a prova" htmlFor="manage-exam-select">
+          {exams.length === 0 ? (
+            <EmptyState
+              title="Nenhuma prova cadastrada"
+              action={<Button size="sm" onClick={() => onNavigate('new-exam')}>Criar prova</Button>}
+            />
+          ) : (
+            <div className="flex gap-2">
+              <Select
+                id="manage-exam-select"
+                value={selectedExamId}
+                onChange={(e) => handleSelect(e.target.value)}
+              >
+                <option value="">Selecione...</option>
+                {exams.map(x => (
+                  <option key={x.id} value={x.id}>{x.name}</option>
+                ))}
+              </Select>
+              {selectedExamId && (
+                <Button variant="secondary" onClick={load} loading={loading} icon={<RefreshCw size={15} aria-hidden />} className="whitespace-nowrap">
+                  Atualizar
+                </Button>
+              )}
+            </div>
+          )}
+        </Field>
 
-        {loading && <p className="text-sm text-gray-400 mt-3">Consultando o banco de dados...</p>}
-        {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mt-3">{error}</div>
-        )}
+        {loading && <p className="text-sm text-gray-400 dark:text-gray-500 mt-3" role="status">Consultando o banco de dados...</p>}
+        {error && <div className="callout-danger mt-3">{error}</div>}
       </div>
 
       {data && (
         <>
-          <div className="card max-w-3xl mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">{data.avaliacao.titulo}</h2>
-            {data.avaliacao.turma && <p className="text-sm text-gray-500">Turma: {data.avaliacao.turma}</p>}
+          <div className="card max-w-3xl">
+            <h2 className="text-lg font-semibold text-ink dark:text-white">{data.avaliacao.titulo}</h2>
+            {data.avaliacao.turma && (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                Turma: <Badge tone="success">{data.avaliacao.turma}</Badge>
+              </p>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6 max-w-5xl">
-            <div className="card p-4 text-center !p-4">
-              <p className="text-2xl font-bold text-blue-600">{data.stats.alunos_cadastrados}</p>
-              <p className="text-xs text-gray-500 mt-1">Alunos cadastrados</p>
-            </div>
-            <div className="card p-4 text-center !p-4">
-              <p className="text-2xl font-bold text-indigo-600">{data.stats.gabaritos_gerados}</p>
-              <p className="text-xs text-gray-500 mt-1">Gabaritos gerados</p>
-            </div>
-            <div className="card p-4 text-center !p-4">
-              <p className="text-2xl font-bold text-sky-600">{data.stats.gabaritos_lidos}</p>
-              <p className="text-xs text-gray-500 mt-1">Lidos</p>
-            </div>
-            <div className="card p-4 text-center !p-4">
-              <p className="text-2xl font-bold text-emerald-600">{data.stats.gabaritos_corrigidos}</p>
-              <p className="text-xs text-gray-500 mt-1">Corrigidos</p>
-            </div>
-            <div className="card p-4 text-center !p-4">
-              <p className="text-2xl font-bold text-amber-600">{data.stats.pendentes}</p>
-              <p className="text-xs text-gray-500 mt-1">Pendentes</p>
-            </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 max-w-5xl">
+            <StatCard label="Alunos cadastrados" value={data.stats.alunos_cadastrados} tone="info" />
+            <StatCard label="Gabaritos gerados" value={data.stats.gabaritos_gerados} />
+            <StatCard label="Lidos" value={data.stats.gabaritos_lidos} tone="info" />
+            <StatCard label="Corrigidos" value={data.stats.gabaritos_corrigidos} tone="success" />
+            <StatCard label="Pendentes" value={data.stats.pendentes} tone={data.stats.pendentes > 0 ? 'warning' : 'default'} />
           </div>
 
           {data.stats.alunos_cadastrados > data.stats.gabaritos_gerados && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm mb-4 max-w-5xl">
+            <div className="callout-warning max-w-5xl">
               {data.stats.alunos_cadastrados - data.stats.gabaritos_gerados} aluno(s) ainda
-              {' '}não possuem gabarito gerado. Use <strong>&quot;Gerar Gabaritos em PDF&quot;</strong> abaixo.
+              {' '}não possuem gabarito gerado. Use <strong>&quot;Gerar gabaritos em PDF&quot;</strong> abaixo.
             </div>
           )}
 
-          <div className="card max-w-5xl overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="py-2 px-3 text-left font-medium text-gray-500">Aluno</th>
-                  <th className="py-2 px-3 text-left font-medium text-gray-500">Matrícula</th>
-                  <th className="py-2 px-3 text-left font-medium text-gray-500">ID interno</th>
-                  <th className="py-2 px-3 text-left font-medium text-gray-500">Gabarito (QR)</th>
-                  <th className="py-2 px-3 text-center font-medium text-gray-500">Pág.</th>
-                  <th className="py-2 px-3 text-center font-medium text-gray-500">QR Code</th>
-                  <th className="py-2 px-3 text-center font-medium text-gray-500">Status</th>
-                  <th className="py-2 px-3 text-center font-medium text-gray-500">Nota</th>
-                  <th className="py-2 px-3 text-center font-medium text-gray-500">Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.gabaritos.map(g => {
-                  const st = STATUS_LABEL[g.status];
-                  return (
-                    <tr key={g.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="py-2 px-3 font-medium text-gray-900">{g.aluno.nome}</td>
-                      <td className="py-2 px-3 text-gray-500">{g.aluno.matricula ?? '—'}</td>
-                      <td className="py-2 px-3 text-gray-400">#{g.aluno.id}</td>
-                      <td className="py-2 px-3 font-mono text-xs text-blue-600">{g.codigo_unico}</td>
-                      <td className="py-2 px-3 text-center text-gray-400">{g.numero_pagina}</td>
-                      <td className="py-2 px-3 text-center">
-                        <span className="text-emerald-600" title={`Payload: ${g.qr_code_payload}`}>✓</span>
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>{st.label}</span>
-                      </td>
-                      <td className="py-2 px-3 text-center font-bold text-gray-700">
-                        {g.nota != null ? g.nota : '—'}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <button
-                          onClick={() => handleDeleteAluno(g)}
-                          className="btn btn-sm btn-danger"
-                          title="Apagar este aluno e seu gabarito do banco"
-                        >
-                          Apagar
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-                {data.gabaritos.length === 0 && (
-                  <tr>
-                    <td colSpan={9} className="py-6 text-center text-gray-400 text-sm">
-                      Nenhum gabarito gerado para esta avaliação ainda.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <div className="card max-w-5xl">
+            <DataTable
+              rows={data.gabaritos}
+              rowKey={(g) => String(g.id)}
+              empty="Nenhum gabarito gerado para esta avaliação ainda."
+              columns={[
+                { key: 'aluno', header: 'Aluno', render: (g) => <span className="font-medium text-ink dark:text-gray-100">{g.aluno.nome}</span> },
+                { key: 'mat', header: 'Matrícula', render: (g) => <span className="text-gray-500 dark:text-gray-400">{g.aluno.matricula ?? '—'}</span> },
+                { key: 'id', header: 'ID interno', render: (g) => <span className="text-gray-400 dark:text-gray-500">#{g.aluno.id}</span> },
+                { key: 'qr', header: 'Gabarito (QR)', render: (g) => <span className="font-mono text-xs text-brand-600 dark:text-brand-200">{g.codigo_unico}</span> },
+                { key: 'pag', header: 'Pág.', className: 'text-center', render: (g) => <span className="text-gray-400 dark:text-gray-500">{g.numero_pagina}</span> },
+                {
+                  key: 'qrok', header: 'QR Code', className: 'text-center',
+                  render: (g) => <span className="text-success-600 dark:text-success-100 font-bold" title={`Payload: ${g.qr_code_payload}`} aria-label="QR válido">✓</span>,
+                },
+                {
+                  key: 'status', header: 'Status', className: 'text-center',
+                  render: (g) => { const st = STATUS_TONE[g.status]; return <Badge tone={st.tone}>{st.label}</Badge>; },
+                },
+                {
+                  key: 'nota', header: 'Nota', className: 'text-center',
+                  render: (g) => <span className="font-bold text-ink dark:text-gray-100">{g.nota != null ? g.nota : '—'}</span>,
+                },
+                {
+                  key: 'act', header: 'Ações', className: 'text-center',
+                  render: (g) => (
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleDeleteAluno(g)}
+                      icon={<Trash2 size={14} aria-hidden />}
+                      title="Apagar este aluno e seu gabarito do banco"
+                    >
+                      Apagar
+                    </Button>
+                  ),
+                },
+              ]}
+            />
           </div>
 
-          <div className="flex flex-wrap gap-3 mt-4 max-w-5xl">
-            <button onClick={() => onNavigate('correct-card', data.avaliacao.external_id)} className="btn btn-primary">
-              Corrigir Cartões
-            </button>
-            <button onClick={() => onNavigate('import-students', data.avaliacao.external_id)} className="btn btn-secondary">
-              Importar Mais Alunos
-            </button>
-            <button
+          <div className="flex flex-wrap gap-2 max-w-5xl">
+            <Button onClick={() => onNavigate('correct-card', data.avaliacao.external_id)} icon={<ScanLine size={16} aria-hidden />}>
+              Corrigir cartões
+            </Button>
+            <Button variant="secondary" onClick={() => onNavigate('import-students', data.avaliacao.external_id)} icon={<FileUp size={16} aria-hidden />}>
+              Importar mais alunos
+            </Button>
+            <Button
+              variant="success"
               onClick={handleGeneratePdf}
-              disabled={generatingPdf || data.stats.alunos_cadastrados === 0}
-              className="btn btn-success"
+              loading={generatingPdf}
+              disabled={data.stats.alunos_cadastrados === 0}
+              icon={<Download size={16} aria-hidden />}
               title={
                 data.stats.alunos_cadastrados === 0
                   ? 'Importe alunos primeiro'
                   : 'Gera gabaritos para alunos sem gabarito e baixa o PDF completo (reimpressão mantém os mesmos QR Codes)'
               }
             >
-              {generatingPdf ? (
-                <>
-                  <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                  Gerando...
-                </>
-              ) : (
-                <>
-                  Gerar {data.stats.alunos_cadastrados} Gabarito{data.stats.alunos_cadastrados !== 1 ? 's' : ''} em PDF
-                </>
-              )}
-            </button>
-            <button
+              Gerar {data.stats.alunos_cadastrados} gabarito{data.stats.alunos_cadastrados !== 1 ? 's' : ''} em PDF
+            </Button>
+            <Button
+              variant="danger"
               onClick={handleReset}
               disabled={data.stats.alunos_cadastrados === 0}
-              className="btn btn-danger ml-auto"
+              icon={<TriangleAlert size={16} aria-hidden />}
+              className="sm:ml-auto"
             >
-              Resetar Avaliação
-            </button>
+              Resetar avaliação
+            </Button>
           </div>
         </>
       )}

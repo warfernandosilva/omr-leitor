@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { FilePlus2, Pencil, Plus, RefreshCw, Trash2, Upload, UserPlus } from 'lucide-react';
 import { AppView } from '../types';
 import { importStudents } from '../utils/students';
 import {
@@ -6,6 +7,11 @@ import {
   importTurmaAlunos, addTurmaAluno, removeTurmaAluno,
   TurmaDTO, TurmaDetail,
 } from '../utils/api';
+import PageHeader from '../components/ui/PageHeader';
+import Field from '../components/ui/Field';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   onNavigate: (view: AppView) => void;
@@ -174,64 +180,73 @@ export default function TurmasPage({ onNavigate }: Props) {
   };
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Turmas</h1>
-      <p className="text-gray-500 mb-6">
-        Catálogo reutilizável: cadastre a lista uma vez e gere os gabaritos de qualquer prova sem reenviar planilha.
-      </p>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Turmas"
+        subtitle="Catálogo reutilizável: cadastre a lista uma vez e gere os gabaritos de qualquer prova sem reenviar planilha"
+      />
 
-      <div className="card max-w-3xl mb-6">
-        <label className="label">Nova turma</label>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            className="input flex-1"
-            placeholder="Ex: 9º A"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
-          />
-          <button onClick={handleCreate} disabled={creating || !newName.trim()} className="btn btn-primary">
-            {creating ? 'Criando...' : 'Criar'}
-          </button>
-        </div>
+      <div className="card max-w-3xl">
+        <Field label="Nova turma" htmlFor="turma-new-name">
+          <div className="flex gap-2">
+            <Input
+              id="turma-new-name"
+              type="text"
+              placeholder="Ex: 9º A"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCreate(); }}
+            />
+            <Button onClick={handleCreate} loading={creating} disabled={!newName.trim()} icon={<Plus size={16} aria-hidden />}>
+              Criar
+            </Button>
+          </div>
+        </Field>
       </div>
 
-      {loading && <p className="text-gray-500">Carregando turmas...</p>}
+      {loading && <p className="text-gray-500 dark:text-gray-400" role="status">Carregando turmas...</p>}
       {loadError && (
-        <div className="card max-w-3xl p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-6">
+        <div className="card max-w-3xl callout-danger">
           {loadError}
           <div className="mt-2">
-            <button onClick={refresh} className="btn btn-sm btn-secondary">Tentar de novo</button>
+            <Button variant="secondary" size="sm" onClick={refresh} icon={<RefreshCw size={14} aria-hidden />}>Tentar de novo</Button>
           </div>
         </div>
       )}
 
       {!loading && !loadError && turmas.length === 0 && (
-        <div className="card max-w-3xl text-sm text-gray-500">
-          Nenhuma turma cadastrada. Crie a primeira acima e importe a lista de alunos.
+        <div className="max-w-3xl">
+          <EmptyState
+            title="Nenhuma turma cadastrada"
+            description="Crie a primeira acima e importe a lista de alunos."
+          />
         </div>
       )}
 
       {turmas.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl" role="listbox" aria-label="Turmas">
           {turmas.map((t) => (
             <button
               key={t.id}
+              type="button"
+              role="option"
+              aria-selected={selectedId === t.id}
               onClick={() => select(t.id)}
-              className={`card text-left p-4 transition-colors ${
-                selectedId === t.id ? 'border-blue-500 bg-blue-50/40' : 'hover:border-blue-300'
+              className={`card text-left p-4 transition-colors min-h-[44px] ${
+                selectedId === t.id
+                  ? 'border-brand-500 bg-brand-50/40 dark:bg-brand-700/15 dark:border-brand-400'
+                  : 'card-hover'
               }`}
             >
-              <p className="font-medium text-gray-900">{t.nome}</p>
-              <p className="text-sm text-gray-500">{t.total_alunos} aluno{t.total_alunos === 1 ? '' : 's'}</p>
+              <p className="font-medium text-ink dark:text-gray-100">{t.nome}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{t.total_alunos} aluno{t.total_alunos === 1 ? '' : 's'}</p>
             </button>
           ))}
         </div>
       )}
 
       {detailError && (
-        <div className="card max-w-3xl p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm mb-6">{detailError}</div>
+        <div className="card max-w-3xl callout-danger">{detailError}</div>
       )}
 
       {detail && (
@@ -239,86 +254,85 @@ export default function TurmasPage({ onNavigate }: Props) {
           <div className="flex items-center justify-between gap-3">
             {renaming ? (
               <div className="flex gap-2 flex-1">
-                <input
+                <Input
                   type="text"
-                  className="input flex-1"
+                  aria-label="Novo nome da turma"
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                 />
-                <button onClick={handleRename} disabled={busy || !renameValue.trim()} className="btn btn-sm btn-primary">Salvar</button>
-                <button onClick={() => setRenaming(false)} className="btn btn-sm btn-secondary">Cancelar</button>
+                <Button size="sm" onClick={handleRename} loading={busy} disabled={!renameValue.trim()}>Salvar</Button>
+                <Button size="sm" variant="secondary" onClick={() => setRenaming(false)}>Cancelar</Button>
               </div>
             ) : (
               <>
-                <h2 className="text-lg font-semibold text-gray-900">{detail.nome}</h2>
+                <h2 className="text-lg font-semibold text-ink dark:text-white">{detail.nome}</h2>
                 <div className="flex gap-2 flex-shrink-0">
-                  <button onClick={() => setRenaming(true)} className="btn btn-sm btn-secondary">Renomear</button>
-                  <button onClick={handleDelete} disabled={busy} className="btn btn-sm btn-danger">Apagar turma</button>
+                  <Button size="sm" variant="secondary" onClick={() => setRenaming(true)} icon={<Pencil size={14} aria-hidden />}>Renomear</Button>
+                  <Button size="sm" variant="danger" onClick={handleDelete} loading={busy} icon={<Trash2 size={14} aria-hidden />}>Apagar turma</Button>
                 </div>
               </>
             )}
           </div>
 
-          {msg && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm">{msg}</div>
-          )}
-          {msgError && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{msgError}</div>
-          )}
+          {msg && <div className="callout-success">{msg}</div>}
+          {msgError && <div className="callout-danger">{msgError}</div>}
 
-          <div>
-            <label className="label">Importar lista (XLSX ou CSV)</label>
-            <p className="text-xs text-gray-400 mb-2">
-              Reimportar atualiza quem já tem matrícula e adiciona os novos — sem duplicar.
-            </p>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv,text/csv"
-              className="text-sm text-gray-600"
-              disabled={busy}
-              onChange={handleFile}
-            />
-          </div>
-
-          <div>
-            <label className="label">Adicionar aluno manualmente</label>
-            <div className="flex gap-2">
+          <Field
+            label="Importar lista (XLSX ou CSV)"
+            helper="Reimportar atualiza quem já tem matrícula e adiciona os novos — sem duplicar."
+          >
+            <label className="inline-flex items-center gap-2 btn btn-secondary cursor-pointer">
+              <Upload size={15} aria-hidden />
+              Escolher arquivo
               <input
+                type="file"
+                accept=".xlsx,.xls,.csv,text/csv"
+                className="sr-only"
+                disabled={busy}
+                onChange={handleFile}
+              />
+            </label>
+          </Field>
+
+          <Field label="Adicionar aluno manualmente">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
                 type="text"
-                className="input flex-1"
+                aria-label="Nome do aluno"
                 placeholder="Nome do aluno"
                 value={manualName}
                 onChange={(e) => setManualName(e.target.value)}
               />
-              <input
+              <Input
                 type="text"
-                className="input w-32"
+                aria-label="Matrícula"
                 placeholder="Matrícula"
                 value={manualMat}
                 onChange={(e) => setManualMat(e.target.value)}
+                className="sm:w-36"
               />
-              <button onClick={handleAddManual} disabled={busy || !manualName.trim()} className="btn btn-secondary">
+              <Button variant="secondary" onClick={handleAddManual} loading={busy} disabled={!manualName.trim()} icon={<UserPlus size={15} aria-hidden />} className="whitespace-nowrap">
                 Adicionar
-              </button>
+              </Button>
             </div>
-          </div>
+          </Field>
 
           <div>
-            <label className="label">Alunos no catálogo ({detail.alunos.length})</label>
+            <span className="label">Alunos no catálogo ({detail.alunos.length})</span>
             {detail.alunos.length === 0 ? (
-              <p className="text-sm text-gray-500">Nenhum aluno ainda. Importe a planilha ou adicione manualmente.</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">Nenhum aluno ainda. Importe a planilha ou adicione manualmente.</p>
             ) : (
-              <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg max-h-80 overflow-y-auto">
+              <ul className="divide-y divide-line dark:divide-gray-800 border border-line dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
                 {detail.alunos.map((a) => (
                   <li key={a.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span className="text-gray-800 truncate">
+                    <span className="text-gray-700 dark:text-gray-200 truncate">
                       {a.nome}
-                      {a.matricula && <span className="text-gray-400"> — {a.matricula}</span>}
+                      {a.matricula && <span className="text-gray-400 dark:text-gray-500"> — {a.matricula}</span>}
                     </span>
                     <button
                       onClick={() => handleRemoveAluno(a.id, a.nome)}
                       disabled={busy}
-                      className="text-xs text-red-600 hover:text-red-800 disabled:text-gray-300 ml-3 flex-shrink-0"
+                      className="text-xs text-danger-600 hover:text-danger-700 dark:text-danger-100 disabled:text-gray-300 dark:disabled:text-gray-600 ml-3 flex-shrink-0 min-h-[44px] px-2"
                     >
                       Remover
                     </button>
@@ -329,9 +343,9 @@ export default function TurmasPage({ onNavigate }: Props) {
           </div>
 
           <div className="pt-1">
-            <button onClick={() => onNavigate('new-exam')} className="btn btn-primary btn-sm">
+            <Button size="sm" onClick={() => onNavigate('new-exam')} icon={<FilePlus2 size={15} aria-hidden />}>
               Criar prova usando esta turma
-            </button>
+            </Button>
           </div>
         </div>
       )}

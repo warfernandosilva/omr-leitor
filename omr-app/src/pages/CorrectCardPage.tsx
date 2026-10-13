@@ -27,6 +27,17 @@ import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
+import {
+  ArrowRight, Camera, CheckCircle2, Eye, Flashlight, FlashlightOff,
+  ImagePlus, ImageUp, Play, RefreshCw, RotateCcw, Save, SwitchCamera, Trash2, ZoomIn,
+} from 'lucide-react';
+import PageHeader from '../components/ui/PageHeader';
+import Field from '../components/ui/Field';
+import Select from '../components/ui/Select';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   examId: string | null;
@@ -1092,13 +1103,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   return (
-    <div>
+    <div className="animate-fade-in">
       {/* Visor imersivo: sem título/subtítulo no passo da câmera */}
       {step !== 'capture' && (
-        <>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Corrigir Cartão-Resposta</h1>
-          <p className="text-gray-500 mb-4">Capture ou envie a foto do cartão preenchido pelo aluno</p>
-        </>
+        <PageHeader
+          title="Corrigir cartão-resposta"
+          subtitle="Capture ou envie a foto do cartão preenchido pelo aluno"
+        />
       )}
 
       {step === 'form' && (
@@ -1110,8 +1121,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               disabled={batchRunning}
               className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
                 mode === m
-                  ? 'border-blue-500 bg-blue-50 text-blue-700'
-                  : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                  ? 'border-brand-500 bg-brand-50 dark:bg-brand-700/15 text-brand-800 dark:text-brand-200'
+                  : 'border-line dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-surface dark:bg-gray-800/60'
               }`}
             >
               {m === 'individual' ? 'Individual' : 'Em lote (várias fotos)'}
@@ -1120,26 +1131,28 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           <button
             onClick={handleAdaptiveToggle}
             disabled={batchRunning}
+            aria-pressed={adaptive}
             title="Calcula o divisor marcado/vazio a partir da própria foto (experimental)"
             className={`ml-auto px-4 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${
               adaptive
-                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                ? 'border-brand-500 bg-brand-50 dark:bg-brand-700/15 text-brand-700 dark:text-brand-200'
+                : 'border-line dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-surface dark:hover:bg-gray-800'
             }`}
           >
-            {adaptive ? '◉ Limiar adaptativo' : '○ Limiar adaptativo'}
+            Limiar adaptativo
           </button>
           <button
             onClick={handleDebugToggle}
             disabled={batchRunning}
+            aria-pressed={debugMode}
             title="Retorna o heatmap de scores por bolha (diagnóstico)"
             className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${
               debugMode
-                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
-                : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                ? 'border-brand-500 bg-brand-50 dark:bg-brand-700/15 text-brand-700 dark:text-brand-200'
+                : 'border-line dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-surface dark:hover:bg-gray-800'
             }`}
           >
-            {debugMode ? '◉ Diagnóstico' : '○ Diagnóstico'}
+            Diagnóstico
           </button>
         </div>
       )}
@@ -1164,30 +1177,31 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       {mode === 'individual' && step === 'form' && (
         <div className="card max-w-2xl space-y-4">
           <div>
-              <div className="flex items-center justify-between">
-                <label className="label">Selecione a Prova *</label>
-                <button
+              <div className="flex items-center justify-between gap-2">
+                <span className="label">Selecione a prova *</span>
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="sm"
                   onClick={() => refreshExamsFromServer(false)}
-                  disabled={syncing}
-                  className="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                  loading={syncing}
+                  icon={<RefreshCw size={14} aria-hidden />}
                 >
-                  {syncing ? 'Atualizando...' : '⟳ Atualizar do servidor'}
-                </button>
+                  Atualizar do servidor
+                </Button>
               </div>
               {syncMsg && (
-                <p className="text-xs text-gray-500 mb-1">{syncMsg}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{syncMsg}</p>
               )}
               {exams.length === 0 ? (
-                <div className="text-sm text-gray-500">
-                  <p>Nenhuma prova cadastrada neste aparelho.</p>
-                  <p className="text-xs mt-1">No celular, recarregue a página logado com o mesmo usuário do PC — as provas vêm do servidor.</p>
-                  <button onClick={() => window.location.reload()} className="btn btn-secondary btn-sm mt-2">Recarregar</button>
-                  <button onClick={() => onNavigate('new-exam')} className="btn btn-primary btn-sm mt-2 ml-2">Criar Prova</button>
-                </div>
+                <EmptyState
+                  title="Nenhuma prova cadastrada neste aparelho"
+                  description="No celular, recarregue a página logado com o mesmo usuário do PC — as provas vêm do servidor."
+                  action={<><Button variant="secondary" size="sm" onClick={() => window.location.reload()}>Recarregar</Button>{' '}<Button size="sm" onClick={() => onNavigate('new-exam')}>Criar prova</Button></>}
+                />
               ) : (
-              <select
-                className="input"
+              <Select
+                aria-label="Selecione a prova"
                 value={selectedExamId}
                 onChange={(e) => setSelectedExamId(e.target.value)}
               >
@@ -1198,12 +1212,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     {e.answerKey ? ' (Gabarito OK)' : ' (Sem gabarito!)'}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
           </div>
 
           {activeExam && (
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+            <div className="p-3 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg text-brand-800 dark:text-brand-200 text-sm">
               <strong>Identificação automática:</strong> o aluno será reconhecido pelo QR Code impresso no cartão
               (lista importada em &quot;Importar Alunos&quot;). Não é preciso digitar o nome.
               Cartões sem QR cadastrado pedirão o nome na conferência.
@@ -1211,7 +1225,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {activeExam && !activeExam.answerKey && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+            <div className="p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg text-warning-600 dark:text-warning-100 text-sm">
               Esta prova ainda não possui gabarito.
               <button onClick={() => onNavigate('register-key', activeExam.id)} className="underline ml-1 font-medium">
                 Cadastrar gabarito
@@ -1220,7 +1234,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
+            <div className="p-3 bg-danger-50 dark:bg-danger-700/15 border border-danger-500/30 rounded-lg text-danger-600 dark:text-danger-100 text-sm">{error}</div>
           )}
 
           <button
@@ -1230,39 +1244,35 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             onClick={() => setContinuous(c => !c)}
             className="inline-flex items-center gap-3 min-h-[48px] cursor-pointer"
           >
-            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${continuous ? 'bg-blue-600' : 'bg-gray-300'}`}>
+            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${continuous ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
               <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${continuous ? 'translate-x-6' : 'translate-x-1'}`} />
             </span>
-            <span className="text-sm text-gray-700 text-left">Correção contínua <span className="text-gray-400">(vários cartões em sequência)</span></span>
+            <span className="text-sm text-gray-700 dark:text-gray-300 text-left">Correção contínua <span className="text-gray-400 dark:text-gray-500">(vários cartões em sequência)</span></span>
           </button>
           {sessionCount > 0 && (
-            <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+            <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1">
               {sessionCount} cartão(ões) corrigido(s) nesta sessão
             </p>
           )}
 
-          <div className="flex gap-3">
-            <button
+          <div className="flex gap-2">
+            <Button
               onClick={() => startCamera()}
               disabled={!selectedExamId}
-              className="btn btn-primary flex-1"
+              icon={<Camera size={16} aria-hidden />}
+              className="flex-1"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-              Capturar com Câmera
-            </button>
-            <button
+              Capturar com câmera
+            </Button>
+            <Button
+              variant="secondary"
               onClick={() => fileInputRef.current?.click()}
               disabled={!selectedExamId}
-              className="btn btn-secondary flex-1"
+              icon={<ImageUp size={16} aria-hidden />}
+              className="flex-1"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              {window.isSecureContext ? 'Enviar Imagem' : 'Câmera do Sistema'}
-            </button>
+              {window.isSecureContext ? 'Enviar imagem' : 'Câmera do sistema'}
+            </Button>
           </div>
           <input
             ref={fileInputRef}
@@ -1272,7 +1282,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             onChange={handleFileUpload}
           />
           {!window.isSecureContext && (
-            <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded-lg p-2">
+            <p className="text-xs text-brand-600 dark:text-brand-200 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg p-2">
               Acesso via IP — ao clicar em “Capturar com Câmera” ou “Enviar Imagem” o sistema abre a câmera ou a galeria do celular.
             </p>
           )}
@@ -1282,19 +1292,19 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       {step === 'capture' && (
         <div className="card max-w-2xl">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
               {autoMode && !confirmUrl
                 ? 'Aponte para o cartão — a captura é automática ao travar.'
                 : 'Enquadre o cartão-resposta na moldura.'}
             </p>
             {sessionCount > 0 && (
-              <span className="shrink-0 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+              <span className="shrink-0 text-xs font-medium text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-full px-2 py-0.5">
                 {sessionCount} corrigido(s)
               </span>
             )}
           </div>
           {(!autoMode || confirmUrl) && (
-            <ul className="text-xs text-gray-500 list-disc list-inside space-y-1 mb-3">
+            <ul className="text-xs text-gray-500 dark:text-gray-400 list-disc list-inside space-y-1 mb-3">
               <li>Bem iluminado (sem sombras sobre os círculos)</li>
               <li>Plano e sem dobraduras</li>
               <li>Totalmente visível dentro da moldura</li>
@@ -1307,10 +1317,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             onClick={() => { setAutoMode(a => !a); setConfirmUrl(null); setSharpRetry(null); }}
             className="mb-3 inline-flex items-center gap-3 min-h-[48px] cursor-pointer"
           >
-            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${autoMode ? 'bg-blue-600' : 'bg-gray-300'}`}>
+            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${autoMode ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
               <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${autoMode ? 'translate-x-6' : 'translate-x-1'}`} />
             </span>
-            <span className="text-sm text-gray-700 text-left">Captura automática por enquadramento</span>
+            <span className="text-sm text-gray-700 dark:text-gray-300 text-left">Captura automática por enquadramento</span>
           </button>
 
           <div ref={viewRef} className="relative bg-black overflow-hidden mb-4 -mx-6 rounded-none sm:mx-0 sm:rounded-xl">
@@ -1398,17 +1408,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           {autoMode && !confirmUrl && (
             <div className="mb-4">
               <div className="flex items-center justify-between text-sm mb-1">
-                <span className={frameAnalysis?.locked ? 'text-emerald-600 font-medium' : 'text-gray-600'}>
+                <span className={frameAnalysis?.locked ? 'text-success-600 dark:text-success-100 font-medium' : 'text-gray-600 dark:text-gray-300'}>
                   {sharpRetry ?? (frameAnalysis ? frameAnalysis.hint : 'Apontando a câmera...')}
                 </span>
-                <span className="text-xs text-gray-400">{frameAnalysis ? `${frameAnalysis.found}/4 cantos` : ''}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{frameAnalysis ? `${frameAnalysis.found}/4 cantos` : ''}</span>
               </div>
-              <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
-                <div className="bg-emerald-500 h-2 rounded-full transition-all duration-150" style={{ width: `${Math.round(lockProgress * 100)}%` }} />
+              <div className="w-full bg-line dark:bg-gray-700 rounded-full h-2 overflow-hidden">
+                <div className="bg-success-500 h-2 rounded-full transition-all duration-150" style={{ width: `${Math.round(lockProgress * 100)}%` }} />
               </div>
               {/* fallback manual: trava não engata há ~8s */}
               {searchSecs >= 8 && !frameAnalysis?.locked && (
-                <p className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                <p className="mt-2 text-xs text-warning-600 dark:text-warning-100 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg px-2 py-1.5">
                   Enquadramento difícil? Toque em <strong>Capturar agora</strong> para forçar a captura.
                 </p>
               )}
@@ -1418,7 +1428,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           {/* zoom óptico/digital (só onde o aparelho expõe — Android/Chrome) */}
           {autoMode && !confirmUrl && zoomSupported && (
             <div className="flex items-center gap-2 mb-4">
-              <span aria-hidden>🔍</span>
+              <ZoomIn size={15} className="text-gray-400 dark:text-gray-500 shrink-0" aria-hidden />
               <input
                 type="range"
                 min={1}
@@ -1426,57 +1436,66 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 step={0.1}
                 value={zoom}
                 onChange={(e) => setZoomLevel(Number(e.target.value))}
-                className="flex-1 accent-blue-600"
+                className="flex-1 accent-brand-500"
                 aria-label="Zoom da câmera"
               />
-              <span className="text-xs text-gray-500 w-9 text-right">{zoom.toFixed(1)}x</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400 w-9 text-right tabular-nums">{zoom.toFixed(1)}x</span>
             </div>
           )}
 
           <canvas ref={canvasRef} className="hidden" />
 
           {confirmUrl ? (
-            <div className="flex gap-3 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
-              <button onClick={confirmAutoCapture} className="btn btn-success flex-1 min-h-[48px]">
+            <div className="flex gap-2 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
+              <Button variant="success" onClick={confirmAutoCapture} className="flex-1 min-h-[48px]">
                 Enviar para correção
-              </button>
-              <button onClick={retryAutoCapture} className="btn btn-secondary min-h-[48px]">
+              </Button>
+              <Button variant="secondary" onClick={retryAutoCapture} className="min-h-[48px]">
                 Repetir
-              </button>
+              </Button>
             </div>
           ) : (
-            <div className="flex gap-3 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
+            <div className="flex gap-2 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
               {!autoMode && (
-                <button onClick={captureFrame} className="btn btn-primary flex-1 min-h-[48px]">
+                <Button onClick={captureFrame} className="flex-1 min-h-[48px]">
                   Capturar
-                </button>
+                </Button>
               )}
               {autoMode && (
                 <button
                   onClick={captureFrame}
-                  className={`btn btn-secondary flex-1 min-h-[48px] ${searchSecs >= 8 && !frameAnalysis?.locked ? 'animate-pulse border-amber-400' : ''}`}
+                  className={`btn btn-secondary flex-1 min-h-[48px] ${searchSecs >= 8 && !frameAnalysis?.locked ? 'animate-pulse border-warning-500' : ''}`}
                 >
                   Capturar agora
                 </button>
               )}
               {autoMode && torchSupported && (
-                <button onClick={toggleTorch} className={`btn min-h-[48px] ${torchOn ? 'btn-success' : 'btn-secondary'}`}>
-                  {torchOn ? '🔦 Ligada' : '🔦'}
-                </button>
+                <Button
+                  variant={torchOn ? 'success' : 'secondary'}
+                  onClick={toggleTorch}
+                  className="min-h-[48px]"
+                  icon={torchOn ? <Flashlight size={16} aria-hidden /> : <FlashlightOff size={16} aria-hidden />}
+                  aria-pressed={torchOn}
+                  title="Lanterna"
+                >
+                  {torchOn ? 'Ligada' : 'Luz'}
+                </Button>
               )}
               {videoDevices.length > 1 && (
-                <button
+                <Button
+                  variant="secondary"
+                  size="icon"
                   onClick={switchCamera}
-                  className="btn btn-secondary min-h-[48px]"
+                  className="min-h-[48px] min-w-[48px]"
                   title="Trocar câmera (frontal/traseira)"
                   aria-label="Trocar câmera"
                 >
-                  🔄
-                </button>
+                  <SwitchCamera size={18} aria-hidden />
+                </Button>
               )}
-              <button onClick={() => { stopCamera(); setConfirmUrl(null); setSharpRetry(null); setStep('form'); }} className="btn btn-secondary min-h-[48px]">
+              <Button variant="secondary" onClick={() => { stopCamera(); setConfirmUrl(null); setSharpRetry(null); setStep('form'); }} className="min-h-[48px]">
                 Cancelar
-              </button>
+              </Button>
             </div>
           )}
         </div>
@@ -1484,14 +1503,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       {step === 'processing' && (
         <div className="card max-w-2xl text-center py-12">
-          <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">Processando imagem...</p>
-          <p className="text-sm text-gray-400 mt-1">
+          <div className="animate-spin w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-gray-600 dark:text-gray-300 font-medium">Processando imagem...</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
             Lendo as marcações do cartão ({Math.round(processingProgress)}%)
           </p>
-          <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2 mt-4 overflow-hidden">
+          <div className="w-full max-w-xs mx-auto bg-line dark:bg-gray-700 rounded-full h-2 mt-4 overflow-hidden">
             <div
-              className="bg-blue-500 h-2 rounded-full transition-all duration-200"
+              className="bg-brand-500 h-2 rounded-full transition-all duration-200"
               style={{ width: `${processingProgress}%` }}
             />
           </div>
@@ -1501,7 +1520,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       {step === 'review' && omrResult && activeExam && (
         <div className="space-y-4 max-w-4xl">
           {identified?.kind === 'ok' && (
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm">
+            <div className="p-3 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg text-success-600 dark:text-success-100 text-sm">
               <strong>Aluno identificado pelo banco de dados:</strong> {identified.name}{' '}
               <span className="font-mono">({identified.cardId})</span>
               {identified.examTitle && <> — prova: {identified.examTitle}</>}
@@ -1509,7 +1528,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {identified?.kind === 'unknown' && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+            <div className="p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg text-warning-600 dark:text-warning-100 text-sm">
               QR Code identificado, porém o código{' '}
               <span className="font-mono">{identified.cardId}</span> não pertence a nenhum gabarito
               registrado. <strong>Identificação pendente</strong> — selecione o aluno manualmente abaixo.
@@ -1517,7 +1536,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {identified?.kind === 'wrong_exam' && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+            <div className="p-3 bg-danger-50 dark:bg-danger-700/15 border border-danger-500/30 rounded-lg text-danger-600 dark:text-danger-100 text-sm">
               <strong>ERRO — GABARITO DE OUTRA AVALIAÇÃO:</strong> o código{' '}
               <span className="font-mono">{identified.cardId}</span> pertence ao aluno{' '}
               {identified.name} na prova <strong>{identified.examTitle}</strong>. Selecione a prova
@@ -1527,7 +1546,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
           {capturedImage && (
             <div className="card">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Imagem Capturada</h3>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Imagem Capturada</h3>
               <img src={capturedImage} alt="Cartão capturado" className="max-h-48 rounded-lg object-contain mx-auto" />
             </div>
           )}
@@ -1535,8 +1554,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           {/* Overlay gabarito na captura — verde=correto, vermelho=incorreto */}
           {capturedImage && activeExam?.answerKey && (
             <div className="card">
-              <h3 className="text-sm font-medium text-gray-700 mb-2">Gabarito recortado</h3>
-              <p className="text-xs text-gray-500 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada</p>
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Gabarito recortado</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada</p>
               <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: cropBox ? `${cropBox.w}/${cropBox.h}` : `${CARD_WIDTH}/${CARD_HEIGHT}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
                 {/* fundo retificado do backend (alinhado 1:1 com template) — fallback para foto crua */}
                 {cropBox ? (
@@ -1701,7 +1720,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {templateMismatch && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+            <div className="p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg text-warning-600 dark:text-warning-100 text-sm">
               <strong>Atenção:</strong> o cartão fotografado é do modelo{' '}
               <strong>{templateLabel(omrResult?.templateUsed)}</strong>,
               mas a prova selecionada usa o modelo{' '}
@@ -1711,7 +1730,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {omrResult.thresholdsUsed && (
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
               Limiar: {omrResult.thresholdsUsed.source === 'adaptive'
                 ? `adaptativo (${omrResult.thresholdsUsed.floor.toFixed(3)}, calculado desta foto)`
                 : `fixo (${omrResult.thresholdsUsed.floor.toFixed(3)})`}
@@ -1720,7 +1739,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {(omrResult.warnings ?? []).length > 0 && (
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm space-y-1">
+            <div className="p-3 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg text-brand-800 dark:text-brand-200 text-sm space-y-1">
               {(omrResult.warnings ?? []).map((w, i) => (
                 <div key={i}>{w}</div>
               ))}
@@ -1728,23 +1747,23 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {omrResult.debugImages?.heatmap && (
-            <details className="p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm">
-              <summary className="cursor-pointer font-medium text-gray-700 min-h-[44px]">
+            <details className="p-3 bg-surface dark:bg-gray-800/60 border border-line dark:border-gray-700 rounded-lg text-sm">
+              <summary className="cursor-pointer font-medium text-gray-700 dark:text-gray-300 min-h-[44px]">
                 Diagnóstico: heatmap de scores por bolha
               </summary>
               <img src={omrResult.debugImages.heatmap} alt="Heatmap de scores" className="mt-2 rounded-lg mx-auto" />
-              <p className="text-xs text-gray-500 mt-2">Preenchimento = score (verde marcado → vermelho vazio) · contorno = verdict (verde ok, âmbar incerta, laranja duplicada, cinza em branco).</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">Preenchimento = score (verde marcado → vermelho vazio) · contorno = verdict (verde ok, âmbar incerta, laranja duplicada, cinza em branco).</p>
             </details>
           )}
 
-          {(omrResult.lowConfidence ?? []).length > 0 && (            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+          {(omrResult.lowConfidence ?? []).length > 0 && (            <div className="p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg text-warning-600 dark:text-warning-100 text-sm">
               <strong>Atenção:</strong> As questões {(omrResult.lowConfidence ?? []).join(', ')} foram identificadas com baixa confiança.
               Verifique manualmente abaixo.
             </div>
           )}
 
           {(omrResult.duplicateQuestions ?? []).length > 0 && (
-            <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-orange-700 text-sm">
+            <div className="p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg text-warning-600 dark:text-warning-100 text-sm">
               <strong>Duas marcações detectadas:</strong>{' '}
               {(omrResult.duplicateQuestions ?? []).map((q) => {
                 const marks = omrResult.duplicateMarks?.[q];
@@ -1755,45 +1774,47 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           <div className="card">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">
               Conferência
             </h3>
 
             <div className="mb-4">
-              <label className="label">
-                Aluno {identified?.kind === 'ok' ? '(identificado pelo banco de dados)' : '*'}
-              </label>
-              <input
-                type="text"
-                className={`input ${!studentName.trim() ? 'border-amber-300 focus:ring-amber-400' : ''}`}
-                placeholder={identified?.kind === 'ok' ? identified.name : 'Digite o nome do aluno (cartão sem QR cadastrado)'}
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                list={canMatchByName && examStudents.length > 0 ? 'exam-student-names' : undefined}
-                autoComplete="off"
-              />
+              <Field
+                label="Aluno"
+                required={identified?.kind !== 'ok'}
+                helper={identified?.kind === 'ok'
+                  ? 'Identificado pelo banco de dados.'
+                  : canMatchByName && examStudents.length > 0
+                    ? `Digite para buscar entre os ${examStudents.length} alunos da prova — se o nome for igual, o resultado vai para o aluno já cadastrado. Alunos marcados “sem cartão gerado” terão o resultado criado e vinculado a eles.`
+                    : (!studentName.trim()
+                      ? 'Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.'
+                      : undefined)}
+              >
+                <Input
+                  type="text"
+                  invalid={!studentName.trim()}
+                  placeholder={identified?.kind === 'ok' ? identified.name : 'Digite o nome do aluno (cartão sem QR cadastrado)'}
+                  value={studentName}
+                  onChange={(e) => setStudentName(e.target.value)}
+                  list={canMatchByName && examStudents.length > 0 ? 'exam-student-names' : undefined}
+                  autoComplete="off"
+                />
+              </Field>
               {canMatchByName && examStudents.length > 0 && (
-                <>
-                  <datalist id="exam-student-names">
-                    {examStudents.map(s => (
-                      <option key={s.aluno_id} value={s.nome} label={studentHint(s)} />
-                    ))}
-                  </datalist>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Digite para buscar entre os {examStudents.length} alunos da prova — se o nome for igual,
-                    o resultado vai para o aluno já cadastrado. Alunos marcados “sem cartão gerado” terão o
-                    resultado criado e vinculado a eles.
-                  </p>
-                </>
+                <datalist id="exam-student-names">
+                  {examStudents.map(s => (
+                    <option key={s.aluno_id} value={s.nome} label={studentHint(s)} />
+                  ))}
+                </datalist>
               )}
               {manualInfo && (
-                <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mt-2">
+                <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1 mt-2">
                   {manualInfo}
                 </p>
               )}
               {candidates && candidates.length > 0 && (
-                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                  <p className="text-sm text-amber-800 font-medium mb-2">
+                <div className="mt-3 p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg">
+                  <p className="text-sm text-warning-600 dark:text-warning-100 font-medium mb-2">
                     Mais de um aluno com esse nome — escolha para quem vai o resultado:
                   </p>
                   <div className="flex flex-col gap-1.5">
@@ -1802,25 +1823,20 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         key={c.aluno_id}
                         type="button"
                         onClick={() => chooseNameCandidate(c)}
-                        className="text-left px-3 py-2 rounded-lg border border-amber-300 bg-white hover:bg-amber-100 text-sm min-h-[44px]"
+                        className="text-left px-3 py-2 rounded-lg border border-warning-500/40 bg-white dark:bg-gray-900 hover:bg-warning-100 dark:hover:bg-warning-500/20 text-sm min-h-[44px]"
                       >
                         <span className="font-medium">{c.nome}</span>
-                        {c.matricula && <span className="text-gray-500"> · {c.matricula}</span>}
-                        <span className={`ml-2 text-xs ${c.tem_gabarito ? 'text-gray-500' : 'text-amber-700 font-medium'}`}>
+                        {c.matricula && <span className="text-gray-500 dark:text-gray-400"> · {c.matricula}</span>}
+                        <span className={`ml-2 text-xs ${c.tem_gabarito ? 'text-gray-500 dark:text-gray-400' : 'text-warning-600 dark:text-warning-100 font-medium'}`}>
                           {c.tem_gabarito ? `cartão ${c.codigo_unico}` : 'sem cartão gerado'}
                         </span>
                       </button>
                     ))}
                   </div>
-                  <button type="button" onClick={() => setCandidates(null)} className="mt-2 text-xs text-gray-500 underline">
+                  <button type="button" onClick={() => setCandidates(null)} className="mt-2 text-xs text-gray-500 dark:text-gray-400 underline">
                     Cancelar escolha
                   </button>
                 </div>
-              )}
-              {!studentName.trim() && (
-                <p className="text-xs text-amber-600 mt-1">
-                  Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.
-                </p>
               )}
             </div>
 
@@ -1829,21 +1845,21 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 const [start, end] = getSubjectRange(sid, activeExam.questionsPerSubject, activeExam.layoutMode);
                 return (
                   <div key={sid}>
-                    <h4 className="text-sm font-bold text-gray-700 mb-2">
+                    <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">
                       {getSubjectName(activeExam, sid)} (1–{end - start + 1})
                     </h4>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="border-b border-gray-200">
-                            <th className="py-2 px-3 text-left font-medium text-gray-500">Q</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500">A</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500">B</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500">C</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500">D</th>
-                            <th className="py-2 px-3 text-left font-medium text-gray-500">Resposta</th>
-                            <th className="py-2 px-3 text-left font-medium text-gray-500">Gabarito</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500">Resultado</th>
+                          <tr className="border-b border-line dark:border-gray-700">
+                            <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Q</th>
+                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">A</th>
+                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">B</th>
+                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">C</th>
+                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">D</th>
+                            <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Resposta</th>
+                            <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Gabarito</th>
+                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Resultado</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1857,8 +1873,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                             const isLowConf = (omrResult.lowConfidence ?? []).includes(q);
 
                             return (
-                              <tr key={q} className={`border-b border-gray-100 ${isLowConf ? 'bg-amber-50' : isDuplicate ? 'bg-orange-50' : ''}`}>
-                                <td className="py-2 px-3 font-bold text-gray-700">{String(q - start + 1).padStart(2, '0')}</td>
+                              <tr key={q} className={`border-b border-line/60 dark:border-gray-800 ${isLowConf ? 'bg-warning-50 dark:bg-warning-500/10' : isDuplicate ? 'bg-warning-50 dark:bg-warning-500/10' : ''}`}>
+                                <td className="py-2 px-3 font-bold text-gray-700 dark:text-gray-300">{String(q - start + 1).padStart(2, '0')}</td>
                                 {['A', 'B', 'C', 'D'].map((opt) => (
                                   <td key={opt} className="py-2 px-3 text-center">
                                     <button
@@ -1882,30 +1898,30 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                                 ))}
                                 <td className="py-2 px-3 font-medium">
                                   {!selected && isDuplicate && qMarks?.length ? (
-                                    <span className="text-red-600">{qMarks.join(' + ')}</span>
+                                    <span className="text-danger-600 dark:text-danger-100">{qMarks.join(' + ')}</span>
                                   ) : selected ? (
                                     selected
                                   ) : (
-                                    <span className="text-gray-300">—</span>
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
                                   )}
                                 </td>
-                                <td className="py-2 px-3 text-gray-600">{correctAnswer || '—'}</td>
+                                <td className="py-2 px-3 text-gray-600 dark:text-gray-300">{correctAnswer || '—'}</td>
                                 <td className="py-2 px-3 text-center">
                                   {selected ? (
                                     isCorrect ? (
-                                      <span className="text-emerald-600 font-medium">✓ Correta</span>
+                                      <span className="text-success-600 dark:text-success-100 font-medium">✓ Correta</span>
                                     ) : (
-                                      <span className="text-red-600 font-medium">✗ Incorreta</span>
+                                      <span className="text-danger-600 dark:text-danger-100 font-medium">✗ Incorreta</span>
                                     )
                                   ) : isDuplicate ? (
-                                    <span className="text-red-600 font-medium">
+                                    <span className="text-danger-600 dark:text-danger-100 font-medium">
                                       ✗ Incorreta{' '}
                                       <span className="text-xs">
                                         (marcou {qMarks?.length ? qMarks.join(' e ') : 'duas alternativas'})
                                       </span>
                                     </span>
                                   ) : (
-                                    <span className="text-xs text-gray-400">Em branco</span>
+                                    <span className="text-xs text-gray-400 dark:text-gray-500">Em branco</span>
                                   )}
                                 </td>
                               </tr>
@@ -1921,7 +1937,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           </div>
 
           <div className="card">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Resumo</h3>
+            <h3 className="text-lg font-semibold text-ink dark:text-white mb-3">Resumo</h3>
             {(() => {
               const dupList = omrResult.duplicateQuestions ?? [];
               let correct = 0, incorrect = 0, blank = 0;
@@ -1939,27 +1955,27 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               return (
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-                    <div className="bg-emerald-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-emerald-600">{correct}</p>
-                      <p className="text-xs text-emerald-600/70">Acertos</p>
+                    <div className="bg-success-50 dark:bg-success-700/15 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-success-600 dark:text-success-100">{correct}</p>
+                      <p className="text-xs text-success-600 dark:text-success-100/70">Acertos</p>
                     </div>
-                    <div className="bg-red-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-red-600">{incorrect}</p>
-                      <p className="text-xs text-red-600/70">Erros</p>
+                    <div className="bg-danger-50 dark:bg-danger-700/15 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-danger-600 dark:text-danger-100">{incorrect}</p>
+                      <p className="text-xs text-danger-600 dark:text-danger-100/70">Erros</p>
                     </div>
-                    <div className="bg-gray-100 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-gray-500">{blank}</p>
-                      <p className="text-xs text-gray-500/70">Em branco</p>
+                    <div className="bg-surface dark:bg-gray-800 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-gray-500 dark:text-gray-400">{blank}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400/70">Em branco</p>
                     </div>
-                    <div className="bg-orange-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-orange-600">{(omrResult.duplicateQuestions ?? []).length}</p>
-                      <p className="text-xs text-orange-600/70">Duplicadas (erros)</p>
+                    <div className="bg-warning-50 dark:bg-warning-500/10 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-warning-600 dark:text-warning-100">{(omrResult.duplicateQuestions ?? []).length}</p>
+                      <p className="text-xs text-warning-600 dark:text-warning-100/70">Duplicadas (erros)</p>
                     </div>
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-blue-600">
+                    <div className="bg-brand-50 dark:bg-brand-700/15 rounded-lg p-3 text-center">
+                      <p className="text-2xl font-bold text-brand-600 dark:text-brand-200">
                         {activeExam.gradeScale === 'count' ? correct : grade}
                       </p>
-                      <p className="text-xs text-blue-600/70">{getGradeLabel(activeExam.gradeScale)}</p>
+                      <p className="text-xs text-brand-600 dark:text-brand-200/70">{getGradeLabel(activeExam.gradeScale)}</p>
                     </div>
                   </div>
                   <div className={`grid gap-4 ${getSubjectIds(activeExam).length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
@@ -1967,15 +1983,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                       const st = subjectStats[sid];
                       const [sStart, sEnd] = getSubjectRange(sid, activeExam.questionsPerSubject, activeExam.layoutMode);
                       return (
-                        <div key={sid} className="rounded-lg border border-gray-200 p-3">
-                          <p className="text-sm font-semibold text-gray-700 mb-2 truncate">
+                        <div key={sid} className="rounded-lg border border-line dark:border-gray-700 p-3">
+                          <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 truncate">
                             {getSubjectName(activeExam, sid)}
                           </p>
                           <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-500">
+                            <span className="text-sm text-gray-500 dark:text-gray-400">
                               {st.correctCount}/{sEnd - sStart + 1} acertos
                             </span>
-                            <span className="text-xl font-bold text-blue-600">
+                            <span className="text-xl font-bold text-brand-600 dark:text-brand-200">
                               {activeExam.gradeScale === 'count' ? st.correctCount : st.grade}
                             </span>
                           </div>
@@ -1988,42 +2004,38 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             })()}
           </div>
 
-          <div className="flex gap-3">
-            <button
+          <div className="flex gap-2">
+            <Button
+              variant="success"
               onClick={handleSaveResult}
               disabled={!studentName.trim() || identified?.kind === 'wrong_exam'}
-              className="btn btn-success"
+              icon={<Save size={16} aria-hidden />}
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              Salvar Resultado
-            </button>
-            <button onClick={resetForm} className="btn btn-secondary">
-              Corrigir Outro Cartão
-            </button>
+              Salvar resultado
+            </Button>
+            <Button variant="secondary" onClick={resetForm} icon={<RotateCcw size={16} aria-hidden />}>
+              Corrigir outro cartão
+            </Button>
           </div>
         </div>
       )}
 
       {step === 'saved' && (
         <div className="card max-w-md text-center py-12">
-          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+          <div className="w-16 h-16 bg-success-50 dark:bg-success-700/20 rounded-full flex items-center justify-center mx-auto mb-4 text-success-600 dark:text-success-100" aria-hidden>
+            <CheckCircle2 size={32} strokeWidth={1.8} />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Resultado Salvo!</h3>
-          <p className="text-gray-500 mb-6">
+          <h3 className="text-xl font-bold text-ink dark:text-white mb-2">Resultado salvo!</h3>
+          <p className="text-gray-500 dark:text-gray-400 mb-6">
             O cartão de <strong>{studentName}</strong> foi corrigido e salvo com sucesso.
           </p>
-          <div className="flex gap-3 justify-center">
-            <button onClick={resetForm} className="btn btn-primary">
-              Corrigir Outro Cartão
-            </button>
-            <button onClick={() => onNavigate('results')} className="btn btn-secondary">
-              Ver Resultados
-            </button>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={resetForm} icon={<RotateCcw size={16} aria-hidden />}>
+              Corrigir outro cartão
+            </Button>
+            <Button variant="secondary" onClick={() => onNavigate('results')} icon={<ArrowRight size={16} aria-hidden />}>
+              Ver resultados
+            </Button>
           </div>
         </div>
       )}
@@ -2033,15 +2045,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
 // ═══════════════════════ Painel de correção em lote ═══════════════════════
 
-const BATCH_STATUS_META: Record<BatchStatus, { label: string; cls: string }> = {
-  pending: { label: 'Na fila', cls: 'bg-gray-100 text-gray-500' },
-  processing: { label: 'Processando…', cls: 'bg-blue-50 text-blue-600' },
-  saved: { label: 'Corrigido', cls: 'bg-emerald-50 text-emerald-700' },
-  pending_id: { label: 'QR ilegível', cls: 'bg-amber-50 text-amber-700' },
-  unknown_code: { label: 'Código não registrado', cls: 'bg-amber-50 text-amber-700' },
-  wrong_exam: { label: 'Prova divergente', cls: 'bg-red-50 text-red-700' },
-  conflict: { label: 'Já corrigido', cls: 'bg-orange-50 text-orange-700' },
-  error: { label: 'Falhou', cls: 'bg-red-50 text-red-700' },
+const BATCH_STATUS_META: Record<BatchStatus, { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
+  pending: { label: 'Na fila', tone: 'neutral' },
+  processing: { label: 'Processando…', tone: 'info' },
+  saved: { label: 'Corrigido', tone: 'success' },
+  pending_id: { label: 'QR ilegível', tone: 'warning' },
+  unknown_code: { label: 'Código não registrado', tone: 'warning' },
+  wrong_exam: { label: 'Prova divergente', tone: 'danger' },
+  conflict: { label: 'Já corrigido', tone: 'warning' },
+  error: { label: 'Falhou', tone: 'danger' },
 };
 
 interface BatchPanelProps {
@@ -2073,19 +2085,18 @@ function BatchPanel({
   return (
     <div className="space-y-4">
       <div className="card max-w-3xl space-y-4">
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+        <div className="p-3 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg text-brand-800 dark:text-brand-200 text-sm">
           <strong>Correção em lote:</strong> cada foto é identificada pelo QR Code do cartão — a ordem
           das fotos não importa. Fotos com QR válido são corrigidas e salvas automaticamente; problemas
           ficam na fila abaixo para revisão manual.
         </div>
 
-        <div>
-          <label className="label">Selecione a Prova *</label>
+        <Field label="Selecione a prova" required>
           {exams.length === 0 ? (
-            <p className="text-sm text-gray-500">Nenhuma prova cadastrada.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Nenhuma prova cadastrada.</p>
           ) : (
-            <select
-              className="input"
+            <Select
+              aria-label="Selecione a prova"
               value={selectedExamId}
               onChange={(e) => onExamChange(e.target.value)}
               disabled={running}
@@ -2097,27 +2108,26 @@ function BatchPanel({
                   {x.answerKey ? '' : ' (sem gabarito!)'}
                 </option>
               ))}
-            </select>
+            </Select>
           )}
           {exam && !exam.answerKey && (
-            <p className="text-xs text-red-600 mt-1">
+            <p className="text-xs text-danger-600 dark:text-danger-100 mt-1">
               O lote exige gabarito cadastrado para corrigir automaticamente.
             </p>
           )}
-        </div>
+        </Field>
 
         <div>
-          <label className="label">Fotos dos Cartões *</label>
+          <span className="label">Fotos dos cartões *</span>
           <button
+            type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={!selectedExamId || running}
-            className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-colors disabled:opacity-50"
+            className="w-full border-2 border-dashed border-line dark:border-gray-600 rounded-lg p-6 text-center hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-700/10 transition-colors disabled:opacity-50 min-h-[44px]"
           >
-            <svg className="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-            <span className="text-sm font-medium text-gray-600">Selecione uma ou várias fotos</span>
-            <p className="text-xs text-gray-400 mt-1">.jpg, .png — quantas quiser</p>
+            <ImagePlus size={28} strokeWidth={1.5} className="text-gray-400 dark:text-gray-500 mx-auto mb-2" aria-hidden />
+            <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Selecione uma ou várias fotos</span>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">.jpg, .png — quantas quiser</p>
           </button>
           <input
             ref={fileInputRef}
@@ -2130,28 +2140,29 @@ function BatchPanel({
         </div>
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{error}</div>
+          <div className="p-3 bg-danger-50 dark:bg-danger-700/15 border border-danger-500/30 rounded-lg text-danger-600 dark:text-danger-100 text-sm">{error}</div>
         )}
 
         {items.length > 0 && (
           <div className="flex flex-wrap gap-3 items-center">
-            <span className="text-sm text-gray-600">{items.length} foto(s) na fila</span>
+            <span className="text-sm text-gray-600 dark:text-gray-300">{items.length} foto(s) na fila</span>
             {running && (
-              <span className="inline-flex items-center gap-2 text-sm text-blue-600">
-                <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              <span className="inline-flex items-center gap-2 text-sm text-brand-600 dark:text-brand-200">
+                <div className="animate-spin w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full" />
                 {processed}/{items.length} processadas…
               </span>
             )}
             {!running && (
               <>
-                <button
+                <Button
                   onClick={onStart}
                   disabled={!exam || !exam.answerKey}
-                  className="btn btn-primary ml-auto"
+                  icon={<Play size={16} aria-hidden />}
+                  className="ml-auto"
                 >
                   Corrigir {items.length} foto{items.length > 1 ? 's' : ''}
-                </button>
-                <button onClick={onClear} className="btn btn-secondary">Limpar</button>
+                </Button>
+                <Button variant="secondary" onClick={onClear} icon={<Trash2 size={15} aria-hidden />}>Limpar</Button>
               </>
             )}
           </div>
@@ -2161,15 +2172,11 @@ function BatchPanel({
       {items.length > 0 && !running && (
         <div className="card max-w-4xl">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-gray-900">Resultado do Lote</h3>
+            <h3 className="text-lg font-semibold text-ink dark:text-white">Resultado do Lote</h3>
             <div className="flex gap-2 text-xs">
-              <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 font-medium">
-                {savedCount} corrigida(s)
-              </span>
+              <Badge tone="success">{savedCount} corrigida(s)</Badge>
               {problemCount > 0 && (
-                <span className="px-2 py-1 rounded-full bg-amber-50 text-amber-700 font-medium">
-                  {problemCount} para revisar
-                </span>
+                <Badge tone="warning">{problemCount} para revisar</Badge>
               )}
             </div>
           </div>
@@ -2181,19 +2188,19 @@ function BatchPanel({
                 <div
                   key={item.fileName}
                   className={`border rounded-lg p-3 flex items-start gap-3 ${
-                    item.status === 'saved' ? 'border-emerald-100'
-                    : ['pending_id', 'unknown_code', 'conflict'].includes(item.status) ? 'border-amber-200'
-                    : item.status === 'error' || item.status === 'wrong_exam' ? 'border-red-200'
-                    : 'border-gray-200'
+                    item.status === 'saved' ? 'border-success-500/25'
+                    : ['pending_id', 'unknown_code', 'conflict'].includes(item.status) ? 'border-warning-500/30'
+                    : item.status === 'error' || item.status === 'wrong_exam' ? 'border-danger-500/30'
+                    : 'border-line dark:border-gray-700'
                   }`}
                 >
-                  <img src={item.dataUrl} alt="" className="w-12 h-12 object-cover rounded-md border border-gray-200" />
+                  <img src={item.dataUrl} alt="" className="w-12 h-12 object-cover rounded-md border border-line dark:border-gray-700" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-gray-900 truncate max-w-[240px]">{item.fileName}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${meta.cls}`}>{meta.label}</span>
+                      <span className="text-sm font-medium text-ink dark:text-white truncate max-w-[240px]">{item.fileName}</span>
+                      <Badge tone={meta.tone}>{meta.label}</Badge>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                       {item.status === 'saved' && (
                         <>
                           <strong>{item.studentName}</strong>{' '}
@@ -2216,14 +2223,14 @@ function BatchPanel({
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
                     {item.status === 'conflict' && (
-                      <button onClick={() => onResolveConflict(item)} className="btn btn-sm btn-primary">
+                      <Button size="sm" onClick={() => onResolveConflict(item)}>
                         Sobrescrever
-                      </button>
+                      </Button>
                     )}
                     {(item.status === 'pending_id' || item.status === 'unknown_code') && (
-                      <button onClick={() => onReviewManually(item)} className="btn btn-sm btn-secondary">
+                      <Button size="sm" variant="secondary" onClick={() => onReviewManually(item)} icon={<Eye size={14} aria-hidden />}>
                         Revisar
-                      </button>
+                      </Button>
                     )}
                   </div>
                 </div>

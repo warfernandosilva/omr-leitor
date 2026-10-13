@@ -1,9 +1,15 @@
 import { useState, useEffect } from 'react';
+import { ArrowLeft, BadgeCheck } from 'lucide-react';
 import { AppView } from '../types';
 import { getResult, getExam, saveResult } from '../utils/storage';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { getResultadosFromDB } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import StatCard from '../components/ui/StatCard';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   resultId: string | null;
@@ -61,17 +67,15 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
   };
 
   if (loading) {
-    return <div className="card text-center py-12"><p className="text-gray-500">Carregando...</p></div>;
+    return <div className="card text-center py-12"><p className="text-gray-500 dark:text-gray-400" role="status">Carregando...</p></div>;
   }
 
   if (!result || !exam) {
     return (
-      <div className="card text-center py-12">
-        <p className="text-gray-500">Resultado não encontrado.</p>
-        <button onClick={() => onNavigate('results')} className="btn btn-primary mt-4">
-          Voltar aos Resultados
-        </button>
-      </div>
+      <EmptyState
+        title="Resultado não encontrado"
+        action={<Button onClick={() => onNavigate('results')}>Voltar aos resultados</Button>}
+      />
     );
   }
 
@@ -83,18 +87,18 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
   const subjectStats = computeSubjectStats(exam, result.answers, result.duplicateQuestions ?? []);
 
   const renderSubjectTable = (sid: 'lp' | 'mat', start: number, end: number) => (
-    <div key={sid} className="mb-6">
-      <h4 className="text-sm font-bold text-gray-700 mb-2">
+    <div key={sid} className="mb-6 last:mb-0">
+      <h4 className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-2">
         {getSubjectName(exam, sid)} (1–{end - start + 1})
       </h4>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200">
-              <th className="py-2 px-3 text-left font-medium text-gray-500">Questão</th>
-              <th className="py-2 px-3 text-left font-medium text-gray-500">Resposta</th>
-              <th className="py-2 px-3 text-left font-medium text-gray-500">Gabarito</th>
-              <th className="py-2 px-3 text-center font-medium text-gray-500">Resultado</th>
+            <tr className="border-b border-line dark:border-gray-700">
+              <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Questão</th>
+              <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Resposta</th>
+              <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Gabarito</th>
+              <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Resultado</th>
             </tr>
           </thead>
           <tbody>
@@ -106,40 +110,40 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
               const dupMarksQ = result.duplicateMarks?.[q];
 
               return (
-                <tr key={q} className="border-b border-gray-50">
-                  <td className="py-2 px-3 font-bold text-gray-700">{String(q - start + 1).padStart(2, '0')}</td>
+                <tr key={q} className="border-b border-line/60 dark:border-gray-800">
+                  <td className="py-2 px-3 font-bold text-gray-600 dark:text-gray-300 tabular-nums">{String(q - start + 1).padStart(2, '0')}</td>
                   <td className="py-2 px-3">
                     {answer ? (
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-sm">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-50 text-brand-700 font-bold text-sm dark:bg-brand-700/20 dark:text-brand-200">
                         {answer}
                       </span>
                     ) : (
-                      <span className="text-gray-300">—</span>
+                      <span className="text-gray-300 dark:text-gray-600">—</span>
                     )}
                   </td>
                   <td className="py-2 px-3">
                     {correct ? (
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 text-gray-700 font-bold text-sm">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-surface text-gray-600 font-bold text-sm dark:bg-gray-800 dark:text-gray-300">
                         {correct}
                       </span>
                     ) : (
-                      <span className="text-gray-300">—</span>
+                      <span className="text-gray-300 dark:text-gray-600">—</span>
                     )}
                   </td>
                   <td className="py-2 px-3 text-center">
                     {isCorrect ? (
-                      <span className="text-emerald-600 font-medium">✓ Correta</span>
+                      <span className="text-success-600 dark:text-success-100 font-medium">✓ Correta</span>
                     ) : isDupUnresolved ? (
-                      <span className="text-red-600 font-medium">
+                      <span className="text-danger-600 dark:text-danger-100 font-medium">
                         ✗ Incorreta{' '}
                         <span className="text-xs">
                           (marcou {dupMarksQ?.length ? dupMarksQ.join(' e ') : 'duas alternativas'})
                         </span>
                       </span>
                     ) : !answer ? (
-                      <span className="text-xs text-gray-400">Em branco</span>
+                      <span className="text-xs text-gray-400 dark:text-gray-500">Em branco</span>
                     ) : (
-                      <span className="text-red-600 font-medium">✗ Incorreta</span>
+                      <span className="text-danger-600 dark:text-danger-100 font-medium">✗ Incorreta</span>
                     )}
                   </td>
                 </tr>
@@ -152,95 +156,74 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
   );
 
   return (
-    <div className="max-w-3xl mx-auto">
-      <button onClick={() => onNavigate('results')} className="btn btn-secondary mb-4">
-        ← Voltar
-      </button>
+    <div className="max-w-3xl mx-auto space-y-4 animate-fade-in">
+      <PageHeader
+        title={result.studentName}
+        subtitle={`${exam.name} — ${exam.subjectLP} + ${exam.subjectMat}`}
+        actions={
+          <Button variant="secondary" size="sm" onClick={() => onNavigate('results')} icon={<ArrowLeft size={15} aria-hidden />}>
+            Voltar
+          </Button>
+        }
+      />
 
-      <div className="card mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">{result.studentName}</h1>
-            <p className="text-gray-500">{exam.name} — {exam.subjectLP} + {exam.subjectMat}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-3xl font-bold text-blue-600">
+      <div className="card">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <p className="text-sm text-gray-400 dark:text-gray-500">
+            Corrigido em {new Date(result.timestamp).toLocaleString('pt-BR')}
+          </p>
+          <div className="text-right shrink-0">
+            <p className="text-3xl font-bold text-brand-600 dark:text-brand-200 tabular-nums">
               {exam.gradeScale === 'count' ? result.correctCount : result.grade}
             </p>
-            <p className="text-xs text-gray-500">{getGradeLabel()}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{getGradeLabel()}</p>
           </div>
         </div>
 
-        <p className="text-sm text-gray-400">
-          Corrigido em {new Date(result.timestamp).toLocaleString('pt-BR')}
-        </p>
         {(needsReview || reviewed) && (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {pendingDup.length > 0 && (
-              <span className="text-xs font-medium bg-orange-100 text-orange-700 px-2 py-1 rounded-full">
-                {pendingDup.length} duplicada(s): Q{pendingDup.join(', Q')}
-              </span>
+              <Badge tone="warning">{pendingDup.length} duplicada(s): Q{pendingDup.join(', Q')}</Badge>
             )}
             {pendingLow.length > 0 && (
-              <span className="text-xs font-medium bg-amber-100 text-amber-700 px-2 py-1 rounded-full">
-                {pendingLow.length} leitura(s) incerta(s): Q{pendingLow.join(', Q')}
-              </span>
+              <Badge tone="warning">{pendingLow.length} leitura(s) incerta(s): Q{pendingLow.join(', Q')}</Badge>
             )}
             {needsReview ? (
               local && (
-                <button onClick={handleMarkReviewed} className="btn btn-sm btn-primary min-h-[44px]">
-                  ✓ Marcar como revisado
-                </button>
+                <Button size="sm" onClick={handleMarkReviewed} icon={<BadgeCheck size={15} aria-hidden />}>
+                  Marcar como revisado
+                </Button>
               )
             ) : (
-              <span className="text-xs font-medium bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
-                ✓ Revisado
-              </span>
+              <Badge tone="success" icon={<BadgeCheck size={13} aria-hidden />}>Revisado</Badge>
             )}
           </div>
         )}
       </div>
 
-      <div className="card mb-4">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Resumo</h3>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-          <div className="bg-emerald-50 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-emerald-600">{result.correctCount}</p>
-            <p className="text-sm text-emerald-600/70">Acertos</p>
-          </div>
-          <div className="bg-red-50 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-red-600">{result.incorrectCount}</p>
-            <p className="text-sm text-red-600/70">Erros</p>
-          </div>
-          <div className="bg-gray-100 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-gray-500">{result.blankCount}</p>
-            <p className="text-sm text-gray-500/70">Em branco</p>
-          </div>
-          <div className="bg-orange-50 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-orange-600">{result.duplicateCount}</p>
-            <p className="text-sm text-orange-600/70">Duplicadas</p>
-          </div>
-          <div className="bg-blue-50 rounded-lg p-4 text-center">
-            <p className="text-3xl font-bold text-blue-600">
-              {exam.gradeScale === 'count' ? result.correctCount : result.grade}
-            </p>
-            <p className="text-sm text-blue-600/70">{getGradeLabel()}</p>
-          </div>
+      <div className="card">
+        <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">Resumo</h3>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+          <StatCard label="Acertos" value={result.correctCount} tone="success" />
+          <StatCard label="Erros" value={result.incorrectCount} tone="danger" />
+          <StatCard label="Em branco" value={result.blankCount} />
+          <StatCard label="Duplicadas" value={result.duplicateCount} tone={result.duplicateCount > 0 ? 'warning' : 'default'} />
+          <StatCard label={getGradeLabel()} value={exam.gradeScale === 'count' ? result.correctCount : result.grade} tone="info" />
         </div>
-        <div className={`grid gap-4 ${getSubjectIds(exam).length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+        <div className={`grid gap-3 ${getSubjectIds(exam).length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
           {getSubjectIds(exam).map((sid) => {
             const st = subjectStats[sid];
             const [sStart, sEnd] = getSubjectRange(sid, exam.questionsPerSubject, exam.layoutMode);
             return (
-              <div key={sid} className="rounded-lg border border-gray-200 p-4">
-                <p className="text-sm font-semibold text-gray-700 mb-2 truncate">
+              <div key={sid} className="rounded-lg border border-line dark:border-gray-700 p-4">
+                <p className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-2 truncate">
                   {getSubjectName(exam, sid)}
                 </p>
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-500">
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
                     {st.correctCount}/{sEnd - sStart + 1} acertos ({st.incorrectCount} erros, {st.blankCount} em branco)
                   </span>
-                  <span className="text-2xl font-bold text-blue-600">
+                  <span className="text-2xl font-bold text-brand-600 dark:text-brand-200 tabular-nums">
                     {exam.gradeScale === 'count' ? st.correctCount : st.grade}
                   </span>
                 </div>
@@ -251,7 +234,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
       </div>
 
       <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Respostas Detalhadas</h3>
+        <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">Respostas detalhadas</h3>
         {getSubjectIds(exam).map((sid) => {
           const [start, end] = getSubjectRange(sid, exam.questionsPerSubject, exam.layoutMode);
           return renderSubjectTable(sid, start, end);

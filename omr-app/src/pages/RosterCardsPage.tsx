@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { CheckCircle2, Download, FileUp, Upload } from 'lucide-react';
 import { AppView, Exam } from '../types';
 import { getExams, saveExam } from '../utils/storage';
 import {
@@ -15,6 +16,12 @@ import {
 } from '../utils/api';
 import AnswerCard from '../components/AnswerCard';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import Field from '../components/ui/Field';
+import Select from '../components/ui/Select';
+import Button from '../components/ui/Button';
+import StatCard from '../components/ui/StatCard';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   examId: string | null;
@@ -297,17 +304,17 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
   const ignoredOther = result ? result.ignored.filter(i => i.reason !== 'Linha vazia') : [];
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Gabaritos por Lista de Alunos</h1>
-      <p className="text-gray-500 mb-6">
-        1 nome válido importado = 1 aluno persistido = 1 gabarito com QR Code = 1 página no PDF
-      </p>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Gabaritos por lista de alunos"
+        subtitle="1 nome válido importado = 1 aluno persistido = 1 gabarito com QR Code = 1 página no PDF"
+      />
 
       {step === 'generating' && (
         <div className="card max-w-2xl text-center py-12">
-          <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">{stage || 'Processando...'}</p>
-          <p className="text-sm text-gray-400 mt-1">
+          <div className="animate-spin w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full mx-auto mb-4" role="status" aria-label="Gerando gabaritos" />
+          <p className="text-gray-600 dark:text-gray-300 font-medium">{stage || 'Processando...'}</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
             Os dados estão sendo gravados no banco de dados do servidor.
           </p>
         </div>
@@ -315,43 +322,41 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
 
       {step === 'done' && doneInfo && (
         <div className="card max-w-2xl text-center py-12">
-          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
+          <div className="w-16 h-16 bg-success-50 dark:bg-success-700/20 rounded-full flex items-center justify-center mx-auto mb-4 text-success-600 dark:text-success-100" aria-hidden>
+            <CheckCircle2 size={32} strokeWidth={1.8} />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-4">Gabaritos Gerados e Persistidos!</h3>
+          <h3 className="text-xl font-bold text-ink dark:text-white mb-4">Gabaritos gerados e persistidos!</h3>
 
           <div className="inline-grid grid-cols-3 gap-3 mb-4 text-sm">
-            <div className="bg-emerald-50 rounded-lg px-4 py-2">
-              <p className="font-bold text-emerald-700">{doneInfo.alunos.length}</p>
-              <p className="text-xs text-emerald-600">Alunos no banco</p>
+            <div className="bg-success-50 dark:bg-success-700/15 rounded-lg px-4 py-2">
+              <p className="font-bold text-success-600 dark:text-success-100">{doneInfo.alunos.length}</p>
+              <p className="text-xs text-success-600/80 dark:text-success-100/70">Alunos no banco</p>
             </div>
-            <div className="bg-emerald-50 rounded-lg px-4 py-2">
-              <p className="font-bold text-emerald-700">{doneInfo.alunos.length}</p>
-              <p className="text-xs text-emerald-600">Códigos únicos</p>
+            <div className="bg-success-50 dark:bg-success-700/15 rounded-lg px-4 py-2">
+              <p className="font-bold text-success-600 dark:text-success-100">{doneInfo.alunos.length}</p>
+              <p className="text-xs text-success-600/80 dark:text-success-100/70">Códigos únicos</p>
             </div>
-            <div className="bg-emerald-50 rounded-lg px-4 py-2">
-              <p className="font-bold text-emerald-700">{doneInfo.pages}</p>
-              <p className="text-xs text-emerald-600">Páginas do PDF</p>
+            <div className="bg-success-50 dark:bg-success-700/15 rounded-lg px-4 py-2">
+              <p className="font-bold text-success-600 dark:text-success-100">{doneInfo.pages}</p>
+              <p className="text-xs text-success-600/80 dark:text-success-100/70">Páginas do PDF</p>
             </div>
           </div>
 
-          <p className="text-sm text-gray-500 mb-1">
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">
             IDs internos #{Math.min(...doneInfo.alunos.map(a => a.id))}–#{Math.max(...doneInfo.alunos.map(a => a.id))}
             {' '}• Códigos {doneInfo.primeiroCodigo} … {doneInfo.ultimoCodigo}
           </p>
-          <p className="text-xs text-gray-400 mb-6">
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-6">
             A associação código ↔ aluno está salva no banco e sobrevive ao fechamento do sistema.
           </p>
 
-          <div className="flex gap-3 justify-center">
-            <button onClick={() => onNavigate('manage-exam', activeExam?.id)} className="btn btn-primary">
-              Ver Avaliação
-            </button>
-            <button onClick={reset} className="btn btn-secondary">
-              Importar Outra Lista
-            </button>
+          <div className="flex gap-2 justify-center">
+            <Button onClick={() => onNavigate('manage-exam', activeExam?.id)}>
+              Ver avaliação
+            </Button>
+            <Button variant="secondary" onClick={reset}>
+              Importar outra lista
+            </Button>
           </div>
         </div>
       )}
@@ -359,18 +364,15 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       {step === 'form' && (
         <>
           <div className="card max-w-3xl space-y-5">
-            <div>
-              <label className="label">Selecione a Prova *</label>
+            <Field label="Selecione a prova" htmlFor="roster-exam-select" required>
               {exams.length === 0 ? (
-                <div className="text-sm text-gray-500">
-                  <p>Nenhuma prova cadastrada.</p>
-                  <button onClick={() => onNavigate('new-exam')} className="btn btn-primary btn-sm mt-2">
-                    Criar Prova
-                  </button>
-                </div>
+                <EmptyState
+                  title="Nenhuma prova cadastrada"
+                  action={<Button size="sm" onClick={() => onNavigate('new-exam')}>Criar prova</Button>}
+                />
               ) : (
-                <select
-                  className="input"
+                <Select
+                  id="roster-exam-select"
                   value={selectedExamId}
                   onChange={(e) => setSelectedExamId(e.target.value)}
                 >
@@ -378,66 +380,65 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   {exams.map(x => (
                     <option key={x.id} value={x.id}>{x.name}</option>
                   ))}
-                </select>
+                </Select>
               )}
-              {isColarExam && (
-                <p className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
-                  {COLAR_BLOCK_MSG}
-                </p>
-              )}
-              {isSimuladoExam && (
-                <p className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
-                  {SIMULADO_BLOCK_MSG}
-                </p>
-              )}
-            </div>
+            </Field>
+            {isColarExam && (
+              <div className="callout-warning">{COLAR_BLOCK_MSG}</div>
+            )}
+            {isSimuladoExam && (
+              <div className="callout-warning">{SIMULADO_BLOCK_MSG}</div>
+            )}
 
             {activeExam && (
               <div>
-                <label className="label">Origem da lista de alunos *</label>
-                <div className="grid grid-cols-2 gap-3 mb-4">
+                <span className="label">Origem da lista de alunos *</span>
+                <div className="grid grid-cols-2 gap-3 mb-4" role="radiogroup" aria-label="Origem da lista de alunos">
                   <button
                     type="button"
+                    role="radio"
+                    aria-checked={source === 'file'}
                     onClick={() => switchSource('file')}
-                    className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                    className={`p-3 rounded-lg border text-sm font-medium text-left transition-colors min-h-[44px] ${
                       source === 'file'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                        ? 'border-brand-500 bg-brand-50 text-ink dark:bg-brand-700/15 dark:text-white dark:border-brand-400'
+                        : 'border-line text-gray-600 hover:bg-surface dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
                     }`}
                   >
                     Arquivo XLSX/CSV
-                    <span className="block text-xs font-normal text-gray-400">enviar a planilha de novo</span>
+                    <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">enviar a planilha de novo</span>
                   </button>
                   <button
                     type="button"
+                    role="radio"
+                    aria-checked={source === 'turma'}
                     onClick={() => switchSource('turma')}
-                    className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
+                    className={`p-3 rounded-lg border text-sm font-medium text-left transition-colors min-h-[44px] ${
                       source === 'turma'
-                        ? 'border-blue-500 bg-blue-50 text-blue-700'
-                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                        ? 'border-brand-500 bg-brand-50 text-ink dark:bg-brand-700/15 dark:text-white dark:border-brand-400'
+                        : 'border-line text-gray-600 hover:bg-surface dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
                     }`}
                   >
                     Turma cadastrada
-                    <span className="block text-xs font-normal text-gray-400">reutilizar o catálogo, sem planilha</span>
+                    <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">reutilizar o catálogo, sem planilha</span>
                   </button>
                 </div>
 
                 {source === 'file' ? (
                   <>
-                    <label className="label">Lista de Alunos (XLSX ou CSV) *</label>
+                    <span className="label">Lista de alunos (XLSX ou CSV) *</span>
                     <button
+                      type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="w-full border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 hover:bg-blue-50/30 transition-colors"
+                      className="w-full border-2 border-dashed border-line dark:border-gray-700 rounded-lg p-6 text-center hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-700/10 transition-colors min-h-[44px]"
                     >
-                      <svg className="w-8 h-8 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      <span className="text-sm font-medium text-gray-600">
+                      <Upload size={28} strokeWidth={1.5} className="text-gray-400 mx-auto mb-2" aria-hidden />
+                      <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
                         Clique para importar o arquivo com os nomes dos alunos
                       </span>
-                      <p className="text-xs text-gray-400 mt-1">.xlsx, .xls ou .csv</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">.xlsx, .xls ou .csv</p>
                     </button>
-                    {fileName && <p className="text-xs text-gray-400 mt-1">Arquivo: {fileName}</p>}
+                    {fileName && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Arquivo: {fileName}</p>}
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -447,18 +448,15 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                     />
                   </>
                 ) : (
-                  <>
-                    <label className="label">Turma *</label>
+                  <Field label="Turma" htmlFor="roster-turma-select" required>
                     {turmas.length === 0 ? (
-                      <div className="text-sm text-gray-500">
-                        <p>Nenhuma turma cadastrada.</p>
-                        <button onClick={() => onNavigate('turmas')} className="btn btn-primary btn-sm mt-2">
-                          Cadastrar Turma
-                        </button>
-                      </div>
+                      <EmptyState
+                        title="Nenhuma turma cadastrada"
+                        action={<Button size="sm" onClick={() => onNavigate('turmas')}>Cadastrar turma</Button>}
+                      />
                     ) : (
-                      <select
-                        className="input"
+                      <Select
+                        id="roster-turma-select"
                         value={turmaSelId}
                         onChange={(e) => pickTurma(e.target.value === '' ? '' : Number(e.target.value))}
                       >
@@ -468,55 +466,46 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                             {t.nome} ({t.total_alunos} aluno{t.total_alunos === 1 ? '' : 's'})
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     )}
-                    {loadingTurma && <p className="text-sm text-gray-500 mt-2">Carregando turma...</p>}
+                    {loadingTurma && <p className="text-sm text-gray-500 dark:text-gray-400 mt-2" role="status">Carregando turma...</p>}
                     {turmaDetail && (
-                      <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-                        {turmaDetail.alunos.length} aluno(s) no catálogo de "{turmaDetail.nome}".
+                      <div className="callout-info mt-2">
+                        {turmaDetail.alunos.length} aluno(s) no catálogo de &quot;{turmaDetail.nome}&quot;.
                         A prova será vinculada a esta turma e o nome impresso no cartão.
                       </div>
                     )}
-                  </>
+                  </Field>
                 )}
               </div>
             )}
 
             {parseError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{parseError}</div>
+              <div className="callout-danger">{parseError}</div>
             )}
 
             {result && (
               <>
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-blue-50 rounded-lg p-4 text-center">
-                    <p className="text-sm text-blue-600/80 font-medium uppercase tracking-wide">Alunos importados:</p>
-                    <p className="text-3xl font-bold text-blue-600">{n}</p>
-                  </div>
-                  <div className="bg-indigo-50 rounded-lg p-4 text-center">
-                    <p className="text-sm text-indigo-600/80 font-medium uppercase tracking-wide">Gabaritos a gerar:</p>
-                    <p className="text-3xl font-bold text-indigo-600">{n}</p>
-                  </div>
-                  <div className="bg-purple-50 rounded-lg p-4 text-center">
-                    <p className="text-sm text-purple-600/80 font-medium uppercase tracking-wide">Páginas do PDF:</p>
-                    <p className="text-3xl font-bold text-purple-600">{n}</p>
-                  </div>
+                  <StatCard label="Alunos importados" value={n} tone="info" />
+                  <StatCard label="Gabaritos a gerar" value={n} />
+                  <StatCard label="Páginas do PDF" value={n} tone="info" />
                 </div>
 
                 {n === 0 ? (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                  <div className="callout-danger">
                     Nenhum aluno válido encontrado no arquivo. Verifique se existe uma coluna de nomes.
                   </div>
                 ) : (
-                  <div className="bg-gray-50 rounded-lg p-4 text-sm space-y-1">
+                  <div className="bg-surface dark:bg-gray-800/60 rounded-lg p-4 text-sm space-y-1 text-ink dark:text-gray-200">
                     <p><strong>Coluna de nomes:</strong> {result.nameColumnLabel}</p>
                     {result.identifierColumnLabel && (
                       <p><strong>Coluna de identificação:</strong> {result.identifierColumnLabel}</p>
                     )}
                     <p><strong>Linhas lidas:</strong> {result.totalRowsRead} &nbsp;•&nbsp; <strong>Válidas:</strong> {n} &nbsp;•&nbsp; <strong>Ignoradas:</strong> {result.ignored.length}</p>
-                    {ignoredEmpty > 0 && <p className="text-gray-500">{ignoredEmpty} linha(s) vazia(s) ignorada(s).</p>}
+                    {ignoredEmpty > 0 && <p className="text-gray-500 dark:text-gray-400">{ignoredEmpty} linha(s) vazia(s) ignorada(s).</p>}
                     {ignoredOther.length > 0 && (
-                      <p className="text-amber-600">
+                      <p className="text-warning-600 dark:text-warning-100">
                         {ignoredOther.length} linha(s) sem nome válido ignorada(s).
                         <button onClick={() => setShowIgnored(v => !v)} className="underline ml-2 font-medium">
                           {showIgnored ? 'Ocultar' : 'Detalhar'}
@@ -524,20 +513,20 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                       </p>
                     )}
                     {result.duplicateNamesCount > 0 && (
-                      <p className="text-blue-600">
+                      <p className="text-brand-600 dark:text-brand-200">
                         {result.duplicateNamesCount} nome(s) duplicado(s): mantidos como alunos independentes
                         {result.identifierColumnLabel ? ' (diferenciados pela identificação)' : ''}.
                       </p>
                     )}
                     {showIgnored && (
-                      <ul className="list-disc list-inside text-xs text-amber-700 max-h-32 overflow-y-auto mt-1">
+                      <ul className="list-disc list-inside text-xs text-warning-600 dark:text-warning-100 max-h-32 overflow-y-auto mt-1">
                         {ignoredOther.map((r, i) => (
                           <li key={i}>Linha {r.row}: {r.reason}</li>
                         ))}
                       </ul>
                     )}
                     {!result.headerDetected && (
-                      <p className="text-gray-400 text-xs">Cabeçalho não detectado — primeira coluna com nomes utilizada automaticamente.</p>
+                      <p className="text-gray-400 dark:text-gray-500 text-xs">Cabeçalho não detectado — primeira coluna com nomes utilizada automaticamente.</p>
                     )}
                   </div>
                 )}
@@ -545,9 +534,9 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
             )}
 
             {importedPersisted && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm">
-                ✓ {importedPersisted.total_importados} aluno(s) já importado(s) no banco para esta prova
-                {' '}({importedPersisted.alunos.length} registro(s) com IDs internos).{' '}
+              <div className="callout-success">
+                <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={15} aria-hidden /> {importedPersisted.total_importados} aluno(s) já importado(s) no banco para esta prova
+                {' '}({importedPersisted.alunos.length} registro(s) com IDs internos).</span>{' '}
                 <button onClick={() => onNavigate('manage-exam', activeExam!.id)} className="underline font-medium ml-1">
                   Ver em Gerenciar Avaliação
                 </button>
@@ -556,91 +545,78 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
             )}
 
             {stage && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
-                <div className="inline-flex items-center gap-2">
-                  <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              <div className="callout-info">
+                <span className="inline-flex items-center gap-2">
+                  <span className="animate-spin w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full" aria-hidden />
                   {stage}
-                </div>
+                </span>
               </div>
             )}
 
             {backendAvailable === false && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+              <div className="callout-warning">
                 O backend Python não está acessível. Gabaritos nomeados exigem o banco de dados do
                 servidor — inicie-o com <strong>start-omr.bat</strong>.
               </div>
             )}
 
             {genError && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm whitespace-pre-line">{genError}</div>
+              <div className="callout-danger whitespace-pre-line">{genError}</div>
             )}
 
             {result && n > 0 && (
               <div className="flex flex-col gap-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <button
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <Button
+                    variant="secondary"
                     onClick={handleImportOnly}
-                    disabled={!selectedExamId || backendAvailable === false || importingOnly || !!importedPersisted}
-                    className="btn btn-secondary"
+                    disabled={!selectedExamId || backendAvailable === false || !!importedPersisted}
+                    loading={importingOnly}
+                    icon={<FileUp size={16} aria-hidden />}
                     title={
                       importedPersisted
                         ? 'Alunos deste arquivo já foram gravados no banco'
                         : 'Grava os alunos no banco sem gerar gabaritos (útil para revisar antes do PDF)'
                     }
                   >
-                    {importingOnly ? (
-                      <>
-                        <div className="animate-spin w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full" />
-                        Importando...
-                      </>
-                    ) : importedPersisted ? (
-                      'Importados no banco ✓'
-                    ) : (
-                      `Apenas importar ${n} aluno${n > 1 ? 's' : ''} no banco`
-                    )}
-                  </button>
+                    {importedPersisted ? 'Importados no banco' : `Apenas importar ${n} aluno${n > 1 ? 's' : ''} no banco`}
+                  </Button>
 
-                  <button
+                  <Button
                     onClick={handleGenerate}
                     disabled={!selectedExamId || backendAvailable === false}
-                    className="btn btn-primary"
+                    icon={<Download size={16} aria-hidden />}
                   >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    Gerar {n} Gabarito{n > 1 ? 's' : ''} em PDF ({n} página{n > 1 ? 's' : ''})
-                  </button>
+                    Gerar {n} gabarito{n > 1 ? 's' : ''} em PDF ({n} página{n > 1 ? 's' : ''})
+                  </Button>
                 </div>
-                <p className="text-xs text-gray-400 text-center">
+                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
                   &quot;Apenas importar&quot; deixa os gabaritos pendentes — use depois o
                   {' '}<button onClick={() => onNavigate('manage-exam', activeExam!.id)} className="underline">Gerenciar Avaliação</button>
                   {' '}ou este mesmo botão para gerar o PDF.
                 </p>
-                <button onClick={reset} className="btn btn-secondary">
+                <Button variant="secondary" onClick={reset}>
                   Limpar
-                </button>
+                </Button>
               </div>
             )}
 
             {source === 'turma' && turmaDetail && turmaDetail.alunos.length > 0 && (
               <div className="flex flex-col gap-3">
-                <button
+                <Button
                   onClick={handleGenerateFromTurma}
                   disabled={!selectedExamId || backendAvailable === false}
-                  className="btn btn-primary"
+                  icon={<Download size={16} aria-hidden />}
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Gerar gabaritos da turma "{turmaDetail.nome}" em PDF
-                </button>
-                <p className="text-xs text-gray-400 text-center">
+                  Gerar gabaritos da turma &quot;{turmaDetail.nome}&quot; em PDF
+                </Button>
+                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
                   Materializa o catálogo na prova (sem duplicar quem já está nela), vincula a turma
                   e gera o PDF. Alunos novos no catálogo entram na próxima geração.
                 </p>
-                <button onClick={reset} className="btn btn-secondary">
+                <Button variant="secondary" onClick={reset}>
                   Limpar
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -648,44 +624,44 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
           {result && n > 0 && (
             <div className="card max-w-3xl mt-6">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Alunos Importados ({n})
+                <h3 className="text-lg font-semibold text-ink dark:text-white">
+                  Alunos importados ({n})
                 </h3>
-                <button onClick={() => setShowPreview(v => !v)} className="btn btn-sm btn-secondary">
+                <Button variant="secondary" size="sm" onClick={() => setShowPreview(v => !v)}>
                   {showPreview ? 'Ocultar prévia' : 'Prévia do cartão'}
-                </button>
+                </Button>
               </div>
-              <div className="overflow-y-auto max-h-96 border border-gray-100 rounded-lg">
+              <div className="overflow-y-auto max-h-96 border border-line dark:border-gray-700 rounded-lg">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-white shadow-[0_1px_0_0_#e5e7eb]">
+                  <thead className="sticky top-0 bg-white dark:bg-gray-900 shadow-[0_1px_0_0_#E2E8F0]">
                     <tr>
-                      <th className="py-2 px-3 text-left font-medium text-gray-500 w-12">#</th>
+                      <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400 w-12">#</th>
                       {result.identifierColumnLabel && (
-                        <th className="py-2 px-3 text-left font-medium text-gray-500">Identificação</th>
+                        <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Identificação</th>
                       )}
-                      <th className="py-2 px-3 text-left font-medium text-gray-500">Nome</th>
+                      <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Nome</th>
                     </tr>
                   </thead>
                   <tbody>
                     {students.map((s) => (
-                      <tr key={s.seq} className="border-b border-gray-50 hover:bg-gray-50">
-                        <td className="py-1.5 px-3 text-gray-400">{s.seq}</td>
+                      <tr key={s.seq} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
+                        <td className="py-1.5 px-3 text-gray-400 dark:text-gray-500 tabular-nums">{s.seq}</td>
                         {result.identifierColumnLabel && (
-                          <td className="py-1.5 px-3 text-gray-500">{s.identifier ?? '—'}</td>
+                          <td className="py-1.5 px-3 text-gray-500 dark:text-gray-400">{s.identifier ?? '—'}</td>
                         )}
-                        <td className="py-1.5 px-3 text-gray-900">{s.name}</td>
+                        <td className="py-1.5 px-3 text-ink dark:text-gray-100">{s.name}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-gray-400 mt-2">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                 Os IDs internos e os códigos únicos (QR) são gerados pelo servidor durante a gravação no banco.
               </p>
 
               {showPreview && activeExam && students[0] && (
                 <>
-                  <div className="mt-4 bg-gray-200 p-4 rounded-xl overflow-auto flex justify-center">
+                  <div className="mt-4 bg-gray-200 dark:bg-gray-800 p-4 rounded-xl overflow-auto flex justify-center">
                     <div className="print-answer-card shadow-2xl" style={{ position: 'relative' }}>
                       <AnswerCard
                         exam={activeExam}
@@ -696,7 +672,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400 mt-2 text-center">
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 text-center">
                     Prévia ilustrativa — ID textual e QR Code definitivos são inseridos na geração do PDF.
                   </p>
                 </>

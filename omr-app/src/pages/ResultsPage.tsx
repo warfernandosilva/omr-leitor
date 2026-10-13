@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react';
+import { Download, RefreshCw, Trash2 } from 'lucide-react';
 import { AppView } from '../types';
 import PageHeader from '../components/ui/PageHeader';
 import EmptyState from '../components/ui/EmptyState';
+import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import Select from '../components/ui/Select';
 import { getResults, getExams, deleteResult } from '../utils/storage';
 import { downloadCSV, downloadXLSX, downloadSaevCsv } from '../utils/export';
 import { computeSubjectStats } from '../utils/exam';
@@ -109,45 +113,38 @@ export default function ResultsPage({ onNavigate }: Props) {
         title="Resultados"
         subtitle={`${filtered.length} resultado(s) encontrado(s)`}
         actions={<>
-          <button onClick={handleExportCSV} className="btn btn-secondary btn-sm min-h-[44px]" disabled={filtered.length === 0}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
+          <Button variant="secondary" size="sm" onClick={handleExportCSV} disabled={filtered.length === 0} icon={<Download size={15} aria-hidden />}>
             CSV
-          </button>
-          <button onClick={handleExportSaev} title="Lote SAEV: NOME,LP_Q1..N,MAT_Q1..N (só provas duais)" className="btn btn-secondary btn-sm min-h-[44px]" disabled={filtered.length === 0}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleExportSaev} title="Lote SAEV: NOME,LP_Q1..N,MAT_Q1..N (só provas duais)" disabled={filtered.length === 0} icon={<Download size={15} aria-hidden />}>
             CSV SAEV
-          </button>
-          <button onClick={handleExportXLSX} className="btn btn-primary btn-sm min-h-[44px]" disabled={filtered.length === 0}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
+          </Button>
+          <Button size="sm" onClick={handleExportXLSX} disabled={filtered.length === 0} icon={<Download size={15} aria-hidden />}>
             XLSX
-          </button>
+          </Button>
         </>}
       />
 
       {dbError && (
-        <div className="card mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm flex flex-wrap items-center gap-2">
+        <div className="card mb-4 callout-warning flex flex-wrap items-center gap-2">
           <span>Resultados do servidor indisponíveis ({dbError}) — mostrando só os salvos neste aparelho.</span>
-          <button onClick={reloadDbResults} className="btn btn-sm btn-secondary">Tentar de novo</button>
+          <Button size="sm" variant="secondary" onClick={reloadDbResults} icon={<RefreshCw size={14} aria-hidden />}>Tentar de novo</Button>
         </div>
       )}
 
       <div className="card mb-4">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <input
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Input
             type="text"
-            className="input flex-1"
+            aria-label="Buscar pelo nome do aluno"
+            className="flex-1"
             placeholder="Buscar pelo nome do aluno..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-          <select
-            className="input sm:w-48"
+          <Select
+            aria-label="Filtrar por prova"
+            className="sm:w-48"
             value={filterExamId}
             onChange={(e) => setFilterExamId(e.target.value)}
           >
@@ -155,16 +152,17 @@ export default function ResultsPage({ onNavigate }: Props) {
             {exams.map(e => (
               <option key={e.id} value={e.id}>{e.name}</option>
             ))}
-          </select>
-          <select
-            className="input sm:w-40"
+          </Select>
+          <Select
+            aria-label="Ordenar resultados"
+            className="sm:w-40"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
           >
             <option value="date">Mais recentes</option>
             <option value="name">Nome (A-Z)</option>
             <option value="grade">Melhor nota</option>
-          </select>
+          </Select>
         </div>
       </div>
 
@@ -177,17 +175,17 @@ export default function ResultsPage({ onNavigate }: Props) {
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
-                <th className="py-3 px-3 text-left font-medium text-gray-500">Aluno</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 hidden sm:table-cell">Prova</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 hidden md:table-cell">Data/Hora</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">✓</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">✗</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">—</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">Nota</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 hidden lg:table-cell">LP</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 hidden lg:table-cell">MAT</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">Ações</th>
+              <tr className="border-b border-line dark:border-gray-700">
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Aluno</th>
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400 hidden sm:table-cell">Prova</th>
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">Data/Hora</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">✓</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">✗</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">—</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Nota</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400 hidden lg:table-cell">LP</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400 hidden lg:table-cell">MAT</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -195,30 +193,30 @@ export default function ResultsPage({ onNavigate }: Props) {
                 const exam = exams.find(e => e.id === r.examId);
                 const subjectStats = exam ? computeSubjectStats(exam, r.answers, r.duplicateQuestions ?? []) : null;
                 return (
-                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-3 px-3 font-medium text-gray-900">{r.studentName}</td>
-                    <td className="py-3 px-3 text-gray-500 hidden sm:table-cell">{exam?.name || '—'}</td>
-                    <td className="py-3 px-3 text-gray-400 text-xs hidden md:table-cell">
+                  <tr key={r.id} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
+                    <td className="py-3 px-3 font-medium text-ink dark:text-gray-100">{r.studentName}</td>
+                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400 hidden sm:table-cell">{exam?.name || '—'}</td>
+                    <td className="py-3 px-3 text-gray-400 dark:text-gray-500 text-xs hidden md:table-cell">
                       {new Date(r.timestamp).toLocaleString('pt-BR')}
                     </td>
-                    <td className="py-3 px-3 text-center text-emerald-600 font-medium">{r.correctCount}</td>
-                    <td className="py-3 px-3 text-center text-red-600 font-medium">{r.incorrectCount}</td>
-                    <td className="py-3 px-3 text-center text-gray-400">{r.blankCount}</td>
-                    <td className="py-3 px-3 text-center font-bold text-blue-600">{r.grade}</td>
-                    <td className="py-3 px-3 text-center text-gray-600 hidden lg:table-cell">
+                    <td className="py-3 px-3 text-center text-success-600 dark:text-success-100 font-medium tabular-nums">{r.correctCount}</td>
+                    <td className="py-3 px-3 text-center text-danger-600 dark:text-danger-100 font-medium tabular-nums">{r.incorrectCount}</td>
+                    <td className="py-3 px-3 text-center text-gray-400 dark:text-gray-500 tabular-nums">{r.blankCount}</td>
+                    <td className="py-3 px-3 text-center font-bold text-brand-600 dark:text-brand-200 tabular-nums">{r.grade}</td>
+                    <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 hidden lg:table-cell">
                       {subjectStats ? `${subjectStats.lp.correctCount}/${exam?.questionsPerSubject}` : '—'}
                     </td>
-                    <td className="py-3 px-3 text-center text-gray-600 hidden lg:table-cell">
+                    <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 hidden lg:table-cell">
                       {subjectStats ? `${subjectStats.mat.correctCount}/${exam?.questionsPerSubject}` : '—'}
                     </td>
                     <td className="py-3 px-3 text-center">
                       <div className="flex gap-1 justify-center">
-                        <button onClick={() => onNavigate('view-result', r.id)} className="btn btn-sm btn-secondary">
+                        <Button size="sm" variant="secondary" onClick={() => onNavigate('view-result', r.id)}>
                           Ver
-                        </button>
-                        <button onClick={() => handleDelete(r.id)} className="btn btn-sm btn-danger">
+                        </Button>
+                        <Button size="sm" variant="danger" onClick={() => handleDelete(r.id)} icon={<Trash2 size={14} aria-hidden />}>
                           Excluir
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>

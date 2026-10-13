@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Play, RotateCcw, Save, Trash2, Upload } from 'lucide-react';
 import DataTable from '../ui/DataTable';
+import Field from '../ui/Field';
+import Input from '../ui/Input';
+import Button from '../ui/Button';
+import Badge from '../ui/Badge';
 import {
   LabCandidate, LabConfig, LabConfigList, LabSessionSummary,
   labCalibrate, labCreateConfig, labDeactivateConfig, labListConfigs, labPublishConfig, labRollbackConfig,
@@ -140,62 +145,59 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
   return (
     <div className="space-y-6">
       <div className="card">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">Calibrar thresholds</h3>
+        <h3 className="text-lg font-semibold text-ink dark:text-white mb-1">Calibrar thresholds</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
           Varre floor × margin × pesos sobre as questões com gabarito (usa os scores salvos). Devolve os melhores candidatos para publicar.
         </p>
         <div className="grid md:grid-cols-3 gap-4">
-          <div>
-            <label className="label" htmlFor="lab-floor-grid">Grid de floor</label>
-            <input id="lab-floor-grid" className="input font-mono text-xs" value={floorGrid} onChange={e => setFloorGrid(e.target.value)} />
-          </div>
-          <div>
-            <label className="label" htmlFor="lab-margin-grid">Grid de margin</label>
-            <input id="lab-margin-grid" className="input font-mono text-xs" value={marginGrid} onChange={e => setMarginGrid(e.target.value)} />
-          </div>
-          <div>
-            <label className="label" htmlFor="lab-weights-grid">Pesos (separe conjuntos com ;)</label>
-            <input id="lab-weights-grid" className="input font-mono text-xs" value={weightsText} onChange={e => setWeightsText(e.target.value)} />
-          </div>
+          <Field label="Grid de floor" htmlFor="lab-floor-grid">
+            <Input id="lab-floor-grid" className="font-mono text-xs" value={floorGrid} onChange={e => setFloorGrid(e.target.value)} />
+          </Field>
+          <Field label="Grid de margin" htmlFor="lab-margin-grid">
+            <Input id="lab-margin-grid" className="font-mono text-xs" value={marginGrid} onChange={e => setMarginGrid(e.target.value)} />
+          </Field>
+          <Field label="Pesos (separe conjuntos com ;)" htmlFor="lab-weights-grid">
+            <Input id="lab-weights-grid" className="font-mono text-xs" value={weightsText} onChange={e => setWeightsText(e.target.value)} />
+          </Field>
         </div>
-        <button onClick={run} disabled={busy} className="btn btn-primary mt-4 min-h-[44px]">
-          {busy ? 'Varrendo…' : 'Rodar calibração'}
-        </button>
+        <Button onClick={run} loading={busy} icon={<Play size={16} aria-hidden />} className="mt-4">
+          Rodar calibração
+        </Button>
         {error && <div className="callout-danger mt-4">{error}</div>}
 
         {best && (
-          <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40 p-4">
+          <div className="callout-success mt-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="font-semibold text-emerald-800 dark:text-emerald-200">
+                <p className="font-semibold">
                   Melhor: floor {best.floor} · margin {best.margin} · pesos [{best.weights.join(', ')}]
                 </p>
-                <p className="text-sm text-emerald-700 dark:text-emerald-300">
+                <p className="text-sm">
                   Acerto {pct(best.taxa_acerto)} ({best.acertos}/{best.com_gabarito}) · {best.ambiguas} ambíguas · {best.erros} erros
                 </p>
               </div>
-              <button onClick={saveConfig} disabled={cfgBusy} className="btn btn-success min-h-[44px]">
+              <Button variant="success" onClick={saveConfig} loading={cfgBusy} icon={<Save size={16} aria-hidden />}>
                 Salvar como configuração
-              </button>
+              </Button>
             </div>
           </div>
         )}
 
         {results.length > 0 && (
           <div className="mt-5">
-            <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-2">Top candidatos (até 50)</h4>
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-2">Top candidatos (até 50)</h4>
             <DataTable<LabCandidate>
               minWidth={620}
               rows={results}
               rowKey={(r, i) => `${r.floor}-${r.margin}-${i}`}
               columns={[
-                { key: 'floor', header: 'floor', render: r => <span className="font-mono text-xs">{r.floor}</span> },
-                { key: 'margin', header: 'margin', render: r => <span className="font-mono text-xs">{r.margin}</span> },
-                { key: 'weights', header: 'pesos', render: r => <span className="font-mono text-xs">[{r.weights.join(',')}]</span> },
-                { key: 'acerto', header: 'acerto', render: r => <span className="text-emerald-600 dark:text-emerald-400 font-medium">{pct(r.taxa_acerto)}</span> },
-                { key: 'acertos', header: 'acertos', render: r => <span className="text-xs">{r.acertos}/{r.com_gabarito}</span> },
-                { key: 'amb', header: 'ambíguas', render: r => <span className="text-xs text-amber-600">{r.ambiguas}</span> },
-                { key: 'erros', header: 'erros', render: r => <span className="text-xs text-red-600">{r.erros}</span> },
+                { key: 'floor', header: 'floor', render: r => <span className="font-mono text-xs text-gray-600 dark:text-gray-300">{r.floor}</span> },
+                { key: 'margin', header: 'margin', render: r => <span className="font-mono text-xs text-gray-600 dark:text-gray-300">{r.margin}</span> },
+                { key: 'weights', header: 'pesos', render: r => <span className="font-mono text-xs text-gray-600 dark:text-gray-300">[{r.weights.join(',')}]</span> },
+                { key: 'acerto', header: 'acerto', render: r => <span className="text-success-600 dark:text-success-100 font-medium tabular-nums">{pct(r.taxa_acerto)}</span> },
+                { key: 'acertos', header: 'acertos', render: r => <span className="text-xs text-gray-600 dark:text-gray-300 tabular-nums">{r.acertos}/{r.com_gabarito}</span> },
+                { key: 'amb', header: 'ambíguas', render: r => <span className="text-xs text-warning-600 dark:text-warning-100 tabular-nums">{r.ambiguas}</span> },
+                { key: 'erros', header: 'erros', render: r => <span className="text-xs text-danger-600 dark:text-danger-100 tabular-nums">{r.erros}</span> },
               ]}
             />
           </div>
@@ -205,7 +207,7 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
       <div className="card">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Configurações publicadas</h3>
+            <h3 className="text-lg font-semibold text-ink dark:text-white">Configurações publicadas</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400">
               {configs?.active_file
                 ? `Arquivo ativo: ${JSON.stringify(configs.active_file)}`
@@ -213,14 +215,14 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
             </p>
           </div>
           {isAdmin && (
-            <button onClick={doDeactivate} disabled={cfgBusy} className="btn btn-sm btn-secondary min-h-[44px]">
+            <Button variant="secondary" size="sm" onClick={doDeactivate} loading={cfgBusy} icon={<Trash2 size={15} aria-hidden />}>
               Remover config publicada
-            </button>
+            </Button>
           )}
         </div>
 
         {!configs || configs.configs.length === 0 ? (
-          <p className="text-sm text-gray-500">Nenhuma configuração salva ainda.</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Nenhuma configuração salva ainda.</p>
         ) : (
           <DataTable<LabConfig>
             minWidth={700}
@@ -232,16 +234,16 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
                 header: 'Nome',
                 render: c => (
                   <div>
-                    <span className="font-medium text-gray-900 dark:text-white">{c.nome}</span>
-                    {c.ativa && <span className="badge-success ml-2">ativa</span>}
+                    <span className="font-medium text-ink dark:text-white">{c.nome}</span>
+                    {c.ativa && <Badge tone="success" className="ml-2">ativa</Badge>}
                   </div>
                 ),
               },
-              { key: 'template', header: 'Modelo', render: c => <span className="text-xs">{c.template ?? 'global'}</span> },
+              { key: 'template', header: 'Modelo', render: c => <span className="text-xs text-gray-600 dark:text-gray-300">{c.template ?? 'global'}</span> },
               {
                 key: 'params',
                 header: 'Parâmetros',
-                render: c => <span className="font-mono text-xs text-gray-500">{JSON.stringify(c.params)}</span>,
+                render: c => <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{JSON.stringify(c.params)}</span>,
               },
               {
                 key: 'acoes',
@@ -249,12 +251,12 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
                 className: 'text-right',
                 render: c => (
                   <div className="flex justify-end gap-1">
-                    <button onClick={() => doPublish(c)} disabled={cfgBusy || c.ativa} className="btn btn-sm btn-secondary">
+                    <Button size="sm" variant="secondary" onClick={() => doPublish(c)} loading={cfgBusy} disabled={c.ativa} icon={<Upload size={14} aria-hidden />}>
                       Publicar
-                    </button>
-                    <button onClick={() => doRollback(c)} disabled={cfgBusy || c.ativa} className="btn btn-sm btn-secondary">
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => doRollback(c)} loading={cfgBusy} disabled={c.ativa} icon={<RotateCcw size={14} aria-hidden />}>
                       Rollback
-                    </button>
+                    </Button>
                   </div>
                 ),
               },

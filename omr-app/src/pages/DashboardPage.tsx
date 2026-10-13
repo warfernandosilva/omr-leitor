@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
 import { AppView } from '../types';
 import { getExams, getResults } from '../utils/storage';
 import { getResultadosFromDB, DBResultado } from '../utils/api';
@@ -8,7 +8,6 @@ import PageHeader from '../components/ui/PageHeader';
 import StatCard from '../components/ui/StatCard';
 import EmptyState from '../components/ui/EmptyState';
 import DataTable from '../components/ui/DataTable';
-import ThemeToggle from '../components/ui/ThemeToggle';
 
 interface Props { onNavigate: (view: AppView, examId?: string, resultId?: string) => void; }
 
@@ -97,11 +96,11 @@ export default function DashboardPage({ onNavigate }: Props) {
   return (
     <div className="space-y-4 animate-fade-in">
       <PageHeader
-        title="Dashboard"
+        title="Resultados"
         subtitle="Visão geral da prova selecionada"
-        actions={<><select className="input sm:w-64" value={selectedExamId} onChange={e=>setSelectedExamId(e.target.value)} aria-label="Selecionar prova">
+        actions={<select className="input sm:w-64" value={selectedExamId} onChange={e=>setSelectedExamId(e.target.value)} aria-label="Selecionar prova">
           {exams.map(e=><option key={e.id} value={e.id}>{e.name}</option>)}
-        </select><ThemeToggle /></>}
+        </select>}
       />
 
       {!exam ? null : !exam.answerKey ? (
@@ -121,14 +120,15 @@ export default function DashboardPage({ onNavigate }: Props) {
           </div>
 
           <div className="card card-hover">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Distribuição de notas ({exam.gradeScale === '0-100' ? '0-100' : exam.gradeScale === 'count' ? 'acertos' : '0-10'})</h3>
+            <h3 className="font-semibold text-ink dark:text-white mb-3">Distribuição de notas ({exam.gradeScale === '0-100' ? '0-100' : exam.gradeScale === 'count' ? 'acertos' : '0-10'})</h3>
             <div style={{ height: 140 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats.buckets}>
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
-                  <Bar dataKey="count" fill="#3b82f6" radius={[6,6,0,0]} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={{ stroke: '#E2E8F0' }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} width={28} />
+                  <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 12 }} />
+                  <Bar dataKey="count" fill="#1769FF" radius={[6,6,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -136,15 +136,16 @@ export default function DashboardPage({ onNavigate }: Props) {
           </div>
 
           <div className="card card-hover">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Acerto por questão (%)</h3>
+            <h3 className="font-semibold text-ink dark:text-white mb-3">Acerto por questão (%)</h3>
             <div style={{ height: 180 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={stats.perQuestion}>
-                  <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} />
-                  <YAxis domain={[0,100]} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: unknown)=> `${v as number}%`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b' }} interval={0} tickLine={false} axisLine={{ stroke: '#E2E8F0' }} />
+                  <YAxis domain={[0,100]} tick={{ fontSize: 11, fill: '#64748b' }} tickLine={false} axisLine={false} width={32} />
+                  <Tooltip formatter={(v: unknown)=> `${v as number}%`} contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 12 }} />
                   <Bar dataKey="pct" radius={[4,4,0,0]}>
-                    {stats.perQuestion.map((p,i)=><Cell key={i} fill={p.pct>=70 ? '#16a34a' : p.pct>=40 ? '#f59e0b' : '#dc2626'} />)}
+                    {stats.perQuestion.map((p,i)=><Cell key={i} fill={p.pct>=70 ? '#16A36A' : p.pct>=40 ? '#F59E0B' : '#DC3545'} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -152,14 +153,14 @@ export default function DashboardPage({ onNavigate }: Props) {
           </div>
 
           <div className="card card-hover">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Ranking por aluno</h3>
+            <h3 className="font-semibold text-ink dark:text-white mb-3">Ranking por aluno</h3>
             <DataTable
               rows={[...results].sort((a,b)=>b.grade-a.grade)}
               rowKey={(r) => r.id}
               columns={[
-                { key: 'name', header: 'Aluno', render: (r) => <span className="font-medium dark:text-white">{r.studentName}</span> },
-                { key: 'hits', header: 'Acertos', className: 'text-center', render: (r) => <span className="text-emerald-600">{r.correctCount}/{exam.totalQuestions}</span> },
-                { key: 'grade', header: 'Nota', className: 'text-center', render: (r) => <span className="font-bold text-blue-600">{r.grade}</span> },
+                { key: 'name', header: 'Aluno', render: (r) => <span className="font-medium text-ink dark:text-white">{r.studentName}</span> },
+                { key: 'hits', header: 'Acertos', className: 'text-center', render: (r) => <span className="text-success-600 dark:text-success-100">{r.correctCount}/{exam.totalQuestions}</span> },
+                { key: 'grade', header: 'Nota', className: 'text-center', render: (r) => <span className="font-bold text-brand-600 dark:text-brand-200">{r.grade}</span> },
                 { key: 'act', header: 'Ação', className: 'text-center', render: (r) => <button onClick={()=>onNavigate('view-result', r.id)} className="btn btn-sm btn-secondary min-h-[44px]">Ver</button> },
               ]}
             />

@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Download, Play, RefreshCw, Table2 } from 'lucide-react';
 import StatCard from '../ui/StatCard';
+import Field from '../ui/Field';
+import Input from '../ui/Input';
+import Button from '../ui/Button';
 import {
   LabMetrics, LabSessionMetrics, LabSessionSummary,
   labExportCsv, labExportJson, labReclassify, labSessionMetrics,
@@ -17,10 +21,10 @@ function pct(v: number | null | undefined): string {
 
 function chartData(m: LabMetrics) {
   return [
-    { nome: 'Acertos', valor: m.acertos, cor: '#10b981' },
-    { nome: 'Erros', valor: m.erros - m.brancos, cor: '#ef4444' },
+    { nome: 'Acertos', valor: m.acertos, cor: '#16A36A' },
+    { nome: 'Erros', valor: m.erros - m.brancos, cor: '#DC3545' },
     { nome: 'Brancos', valor: m.brancos, cor: '#9ca3af' },
-    { nome: 'Ambíguas', valor: m.ambiguas, cor: '#f59e0b' },
+    { nome: 'Ambíguas', valor: m.ambiguas, cor: '#F59E0B' },
   ];
 }
 
@@ -104,7 +108,7 @@ export default function MetricsPanel({ session }: Props) {
 
   return (
     <div className="space-y-6">
-      {loading && <div className="card text-center py-10 text-gray-500">Calculando métricas…</div>}
+      {loading && <div className="card text-center py-10 text-gray-500 dark:text-gray-400" role="status">Calculando métricas…</div>}
       {error && <div className="callout-danger">{error}</div>}
 
       {m && (
@@ -118,21 +122,21 @@ export default function MetricsPanel({ session }: Props) {
 
           <div className="grid lg:grid-cols-2 gap-6">
             <div className="card">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-4">Distribuição</h3>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-4">Distribuição</h3>
               <div style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer>
                   <BarChart data={chartData(shown ?? m)} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="nome" tick={{ fontSize: 12 }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                    <Tooltip />
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
+                    <XAxis dataKey="nome" tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={{ stroke: '#E2E8F0' }} />
+                    <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: '#64748b' }} tickLine={false} axisLine={false} />
+                    <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 12 }} />
                     <Bar dataKey="valor" radius={[4, 4, 0, 0]}>
                       {chartData(shown ?? m).map((d, i) => <Cell key={i} fill={d.cor} />)}
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 mt-3">
+              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400 mt-3">
                 <span>Brancos: {shown?.brancos ?? 0} ({pct(shown?.taxa_branco)})</span>
                 <span>Taxa de erro: {pct(shown?.taxa_erro)}</span>
                 <span>Respondidas: {shown?.respondidas ?? 0}</span>
@@ -141,48 +145,45 @@ export default function MetricsPanel({ session }: Props) {
             </div>
 
             <div className="card">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 mb-1">Simular reclassificação</h3>
+              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-1">Simular reclassificação</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
                 Usa os scores já salvos (sem reler a foto). Mudanças de CLAHE/raio exigem reprocessar.
               </p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label" htmlFor="lab-floor">floor</label>
-                  <input id="lab-floor" type="number" step="0.01" min="0" max="1" className="input" value={floor}
+                <Field label="floor" htmlFor="lab-floor">
+                  <Input id="lab-floor" type="number" step="0.01" min="0" max="1" value={floor}
                     onChange={e => setFloor(Number(e.target.value))} />
-                </div>
-                <div>
-                  <label className="label" htmlFor="lab-margin">margin</label>
-                  <input id="lab-margin" type="number" step="0.01" min="0" max="1" className="input" value={margin}
+                </Field>
+                <Field label="margin" htmlFor="lab-margin">
+                  <Input id="lab-margin" type="number" step="0.01" min="0" max="1" value={margin}
                     onChange={e => setMargin(Number(e.target.value))} />
-                </div>
+                </Field>
                 <div className="col-span-2">
-                  <label className="label">Pesos (média, razão escura, contraste)</label>
+                  <span className="label">Pesos (média, razão escura, contraste)</span>
                   <div className="grid grid-cols-3 gap-2">
-                    <input aria-label="peso média" type="number" step="0.05" className="input" value={w0} onChange={e => setW0(Number(e.target.value))} />
-                    <input aria-label="peso razão escura" type="number" step="0.05" className="input" value={w1} onChange={e => setW1(Number(e.target.value))} />
-                    <input aria-label="peso contraste" type="number" step="0.05" className="input" value={w2} onChange={e => setW2(Number(e.target.value))} />
+                    <Input aria-label="peso média" type="number" step="0.05" value={w0} onChange={e => setW0(Number(e.target.value))} />
+                    <Input aria-label="peso razão escura" type="number" step="0.05" value={w1} onChange={e => setW1(Number(e.target.value))} />
+                    <Input aria-label="peso contraste" type="number" step="0.05" value={w2} onChange={e => setW2(Number(e.target.value))} />
                   </div>
                 </div>
-                <div>
-                  <label className="label" htmlFor="lab-lowconf">low_conf_threshold</label>
-                  <input id="lab-lowconf" type="number" step="0.01" className="input" placeholder="vazio = padrão"
+                <Field label="low_conf_threshold" htmlFor="lab-lowconf">
+                  <Input id="lab-lowconf" type="number" step="0.01" placeholder="vazio = padrão"
                     value={lowConf} onChange={e => setLowConf(e.target.value)} />
-                </div>
-                <label className="flex items-end gap-2 text-sm text-gray-700 dark:text-gray-300 pb-3">
-                  <input type="checkbox" checked={persist} onChange={e => setPersist(e.target.checked)} className="w-4 h-4" />
+                </Field>
+                <label className="flex items-end gap-2 text-sm text-gray-600 dark:text-gray-300 pb-3 min-h-[44px]">
+                  <input type="checkbox" checked={persist} onChange={e => setPersist(e.target.checked)} className="w-4 h-4 accent-brand-500" />
                   Gravar no banco
                 </label>
               </div>
-              <button onClick={runReclassify} disabled={simBusy} className="btn btn-primary mt-3 min-h-[44px]">
-                {simBusy ? 'Calculando…' : 'Simular'}
-              </button>
+              <Button onClick={runReclassify} loading={simBusy} icon={<Play size={16} aria-hidden />} className="mt-3">
+                Simular
+              </Button>
               {sim && (
-                <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40 p-3 text-sm">
-                  <p className="font-medium text-blue-800 dark:text-blue-200">
+                <div className="callout-info mt-4 text-sm">
+                  <p className="font-medium">
                     {persist ? 'Aplicado e gravado' : 'Simulação'} — acerto {pct(sim.taxa_acerto)} ({sim.acertos}/{sim.com_gabarito})
                   </p>
-                  <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                  <p className="text-xs mt-1">
                     {sim.ambiguas} ambíguas · {sim.erros - sim.brancos} erros · {sim.brancos} brancos
                   </p>
                 </div>
@@ -191,13 +192,13 @@ export default function MetricsPanel({ session }: Props) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button onClick={exportXlsx} disabled={exportBusy} className="btn btn-secondary min-h-[44px]">
+            <Button variant="secondary" onClick={exportXlsx} loading={exportBusy} icon={<Table2 size={16} aria-hidden />}>
               Exportar XLSX
-            </button>
-            <button onClick={exportCsv} disabled={exportBusy} className="btn btn-secondary min-h-[44px]">
+            </Button>
+            <Button variant="secondary" onClick={exportCsv} loading={exportBusy} icon={<Download size={16} aria-hidden />}>
               Exportar CSV (questões)
-            </button>
-            <button onClick={load} className="btn btn-secondary min-h-[44px]">Recarregar</button>
+            </Button>
+            <Button variant="secondary" onClick={load} icon={<RefreshCw size={16} aria-hidden />}>Recarregar</Button>
           </div>
         </>
       )}

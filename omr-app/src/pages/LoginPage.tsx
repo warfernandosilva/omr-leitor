@@ -1,6 +1,12 @@
 import { useState } from 'react';
+import type { FormEvent } from 'react';
+import { LogIn, ScanSearch, UserPlus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getApiBase, testConnection, ConnectionTest } from '../utils/api';
+import Card from '../components/ui/Card';
+import Field from '../components/ui/Field';
+import Input from '../components/ui/Input';
+import Button from '../components/ui/Button';
 
 export default function LoginPage() {
   const { login, register } = useAuth();
@@ -13,7 +19,7 @@ export default function LoginPage() {
   const [connTest, setConnTest] = useState<ConnectionTest | null>(null);
   const [testing, setTesting] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     if (!email.trim() || !password.trim()) {
@@ -39,107 +45,117 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen flex items-center justify-center bg-surface dark:bg-navy-950 px-4 py-10 relative overflow-hidden">
+      <div aria-hidden className="absolute -top-32 left-1/2 -translate-x-1/2 w-[560px] h-[280px] bg-brand-500/10 blur-3xl rounded-full pointer-events-none" />
+      <div className="w-full max-w-md relative">
         <div className="text-center mb-6">
-          <div className="w-14 h-14 rounded-xl bg-blue-600 flex items-center justify-center mx-auto mb-3">
-            <svg className="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
+          <div className="w-14 h-14 rounded-2xl bg-brand-500 flex items-center justify-center mx-auto mb-3 shadow-card">
+            <ScanSearch size={28} strokeWidth={2} className="text-white" aria-hidden />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">OMR Correção</h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-ink dark:text-white">Gabarito+</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {mode === 'login' ? 'Entre com sua conta' : 'Crie sua conta — o primeiro usuário vira administrador'}
           </p>
         </div>
 
-        <div className="card">
-          <div className="flex gap-2 mb-5">
+        <Card>
+          <div role="tablist" aria-label="Entrar ou registrar" className="flex gap-1 p-1 mb-5 rounded-lg bg-surface dark:bg-gray-800">
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === 'login'}
               onClick={() => { setMode('login'); setError(null); }}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium border ${mode === 'login' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors min-h-[40px] ${
+                mode === 'login'
+                  ? 'bg-white text-brand-700 shadow-card dark:bg-gray-900 dark:text-brand-200'
+                  : 'text-gray-500 hover:text-ink dark:text-gray-400 dark:hover:text-white'
+              }`}
             >
+              <LogIn size={15} aria-hidden />
               Entrar
             </button>
             <button
               type="button"
+              role="tab"
+              aria-selected={mode === 'register'}
               onClick={() => { setMode('register'); setError(null); }}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium border ${mode === 'register' ? 'bg-blue-50 border-blue-500 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              className={`flex-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition-colors min-h-[40px] ${
+                mode === 'register'
+                  ? 'bg-white text-brand-700 shadow-card dark:bg-gray-900 dark:text-brand-200'
+                  : 'text-gray-500 hover:text-ink dark:text-gray-400 dark:hover:text-white'
+              }`}
             >
+              <UserPlus size={15} aria-hidden />
               Registrar
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="label">E-mail *</label>
-              <input
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+            <Field label="E-mail" htmlFor="login-email" required>
+              <Input
+                id="login-email"
                 type="email"
-                className="input"
                 placeholder="professor@escola.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 autoComplete="email"
               />
-            </div>
+            </Field>
             {mode === 'register' && (
-              <div>
-                <label className="label">Nome *</label>
-                <input
+              <Field label="Nome" htmlFor="login-nome" required>
+                <Input
+                  id="login-nome"
                   type="text"
-                  className="input"
                   placeholder="Seu nome"
                   value={nome}
                   onChange={e => setNome(e.target.value)}
                   autoComplete="name"
                 />
-              </div>
+              </Field>
             )}
-            <div>
-              <label className="label">Senha *</label>
-              <input
+            <Field label="Senha" htmlFor="login-senha" required>
+              <Input
+                id="login-senha"
                 type="password"
-                className="input"
                 placeholder="••••••••"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               />
-            </div>
+            </Field>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              <div role="alert" className="callout-danger">
                 {error}
               </div>
             )}
 
-            <button type="submit" disabled={submitting} className="btn btn-primary w-full justify-center">
-              {submitting ? 'Aguarde...' : mode === 'login' ? 'Entrar' : 'Criar conta'}
-            </button>
+            <Button type="submit" loading={submitting} className="w-full">
+              {mode === 'login' ? 'Entrar' : 'Criar conta'}
+            </Button>
           </form>
 
           <p className="text-xs text-gray-400 text-center mt-4">
             Ao registrar, o primeiro usuário do sistema torna-se administrador automaticamente.
           </p>
 
-          <div className="mt-4 pt-3 border-t border-gray-100">
+          <div className="mt-4 pt-3 border-t border-line dark:border-gray-800">
             <p className="text-xs text-gray-400 text-center break-all">API: {getApiBase() || '(mesma origem)'}/api</p>
             <button
               type="button"
               disabled={testing}
               onClick={async () => { setTesting(true); setConnTest(null); setConnTest(await testConnection()); setTesting(false); }}
-              className="mt-2 w-full text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+              className="mt-2 w-full text-xs text-brand-600 hover:text-brand-700 disabled:text-gray-400 dark:text-brand-200"
             >
               {testing ? 'Testando...' : 'Testar conexão com a API'}
             </button>
             {connTest && (
-              <p className={`mt-1 text-xs text-center ${connTest.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+              <p className={`mt-1 text-xs text-center ${connTest.ok ? 'text-success-600' : 'text-danger-600'}`}>
                 {connTest.ok ? `✔ ${connTest.detail}` : `✖ ${connTest.detail}`}
               </p>
             )}
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

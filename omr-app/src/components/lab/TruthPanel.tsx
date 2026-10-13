@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react';
+import { CheckCircle2, Download, FileUp, Save, Wand2 } from 'lucide-react';
 import { LabSessionSummary, labSaveGroundTruth, labTotalQuestions } from '../../utils/lab-api';
 import { TruthParseResult, downloadTruthTemplate, formatTruthPreview, parseGroundTruthFile, parseGroundTruthText } from '../../utils/lab-truth';
+import Button from '../ui/Button';
+import Badge from '../ui/Badge';
 
 interface Props {
   session: LabSessionSummary;
@@ -63,13 +66,15 @@ export default function TruthPanel({ session, currentTruth, onSaved }: Props) {
   return (
     <div className="card">
       <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Gabarito esperado</h3>
-        <button
+        <h3 className="text-lg font-semibold text-ink dark:text-white">Gabarito esperado</h3>
+        <Button
+          variant="secondary"
+          size="sm"
           onClick={() => downloadTruthTemplate(total, currentTruth, `gabarito-sessao-${session.id}.xlsx`)}
-          className="btn btn-secondary btn-sm min-h-[44px]"
+          icon={<Download size={15} aria-hidden />}
         >
           Baixar modelo (XLSX)
-        </button>
+        </Button>
       </div>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         Sem gabarito não há métrica. O cartão deste modelo tem <strong>{total}</strong> questões.
@@ -78,8 +83,8 @@ export default function TruthPanel({ session, currentTruth, onSaved }: Props) {
       </p>
 
       <div className="grid md:grid-cols-2 gap-4">
-        <div className="rounded-xl border border-dashed border-gray-300 dark:border-gray-700 p-4">
-          <p className="text-sm font-medium text-gray-800 dark:text-gray-100 mb-2">Importar planilha (CSV/XLSX)</p>
+        <div className="rounded-xl border border-dashed border-line dark:border-gray-700 p-4">
+          <p className="text-sm font-medium text-gray-700 dark:text-gray-100 mb-2">Importar planilha (CSV/XLSX)</p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
             Duas colunas <code>questão</code> + <code>gabarito</code>, ou uma linha com os números das questões no cabeçalho.
           </p>
@@ -90,13 +95,13 @@ export default function TruthPanel({ session, currentTruth, onSaved }: Props) {
             className="hidden"
             onChange={onFile}
           />
-          <button onClick={() => fileRef.current?.click()} className="btn btn-secondary min-h-[44px]">
+          <Button variant="secondary" onClick={() => fileRef.current?.click()} icon={<FileUp size={16} aria-hidden />}>
             Escolher arquivo…
-          </button>
+          </Button>
         </div>
 
-        <div className="rounded-xl border border-gray-200 dark:border-gray-800 p-4">
-          <label className="text-sm font-medium text-gray-800 dark:text-gray-100" htmlFor="lab-truth-text">
+        <div className="rounded-xl border border-line dark:border-gray-800 p-4">
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-100" htmlFor="lab-truth-text">
             Ou cole o gabarito
           </label>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 mt-1">
@@ -109,31 +114,31 @@ export default function TruthPanel({ session, currentTruth, onSaved }: Props) {
             onChange={e => setText(e.target.value)}
             placeholder={'1=A\n2=C\n3=D\n4=B\n…'}
           />
-          <button onClick={useText} className="btn btn-secondary btn-sm mt-2 min-h-[44px]">Interpretar texto</button>
+          <Button variant="secondary" size="sm" onClick={useText} icon={<Wand2 size={15} aria-hidden />} className="mt-2">Interpretar texto</Button>
         </div>
       </div>
 
       {parsed && (
-        <div className="mt-4 rounded-xl border border-gray-200 dark:border-gray-800 p-4">
+        <div className="mt-4 rounded-xl border border-line dark:border-gray-800 p-4">
           <div className="flex flex-wrap items-center gap-2 mb-2">
-            <span className="badge-info">formato: {parsed.mode}</span>
-            <span className={parsed.n === total ? 'badge-success' : 'badge-warning'}>
+            <Badge tone="info">formato: {parsed.mode}</Badge>
+            <Badge tone={parsed.n === total ? 'success' : 'warning'}>
               {parsed.n}/{total} questões
-            </span>
+            </Badge>
             {source === 'file' && parsed.versions.length > 1 && (
-              <span className="text-xs text-gray-500">planilha com {parsed.versions.length} linhas — usando a última</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">planilha com {parsed.versions.length} linhas — usando a última</span>
             )}
           </div>
-          <p className="font-mono text-xs text-gray-700 dark:text-gray-300 break-words">{formatTruthPreview(parsed.truth, 20)}</p>
+          <p className="font-mono text-xs text-gray-600 dark:text-gray-300 break-words">{formatTruthPreview(parsed.truth, 20)}</p>
 
           {parsed.warnings.length > 0 && (
-            <ul className="mt-3 text-xs text-amber-700 dark:text-amber-300 list-disc pl-5 space-y-0.5">
+            <ul className="mt-3 text-xs text-warning-600 dark:text-warning-100 list-disc pl-5 space-y-0.5">
               {parsed.warnings.map((w, i) => <li key={i}>{w}</li>)}
             </ul>
           )}
           {parsed.ignored.length > 0 && (
-            <details className="mt-3 text-xs text-gray-500">
-              <summary className="cursor-pointer">{parsed.ignored.length} linha(s) ignorada(s)</summary>
+            <details className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+              <summary className="cursor-pointer min-h-[44px]"> {parsed.ignored.length} linha(s) ignorada(s)</summary>
               <ul className="mt-2 space-y-0.5">
                 {parsed.ignored.slice(0, 20).map((ig, i) => (
                   <li key={i}>linha {ig.row}: {ig.reason}</li>
@@ -143,10 +148,10 @@ export default function TruthPanel({ session, currentTruth, onSaved }: Props) {
           )}
 
           <div className="flex items-center gap-3 mt-4">
-            <button onClick={save} disabled={busy || parsed.n === 0} className="btn btn-primary min-h-[44px]">
-              {busy ? 'Salvando…' : 'Salvar gabarito nesta sessão'}
-            </button>
-            {saved && <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium">Gabarito salvo.</span>}
+            <Button onClick={save} loading={busy} disabled={parsed.n === 0} icon={<Save size={16} aria-hidden />}>
+              Salvar gabarito nesta sessão
+            </Button>
+            {saved && <span className="inline-flex items-center gap-1 text-sm text-success-600 dark:text-success-100 font-medium"><CheckCircle2 size={15} aria-hidden /> Gabarito salvo.</span>}
           </div>
         </div>
       )}

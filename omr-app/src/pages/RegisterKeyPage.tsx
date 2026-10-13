@@ -1,10 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
+import { Camera, CheckCircle2, Save, Wand2, XCircle } from 'lucide-react';
 import { AppView, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { putAnswerKeyDB, processImage as apiProcessImage, loadAdaptiveFlag } from '../utils/api';
 import { keyFromProcessResult, KeyFlag } from '../utils/key-from-photo';
 import { useAuth } from '../context/AuthContext';
+import PageHeader from '../components/ui/PageHeader';
+import Field from '../components/ui/Field';
+import Select from '../components/ui/Select';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   examId: string | null;
@@ -141,11 +148,12 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   };
 
   const filledCount = Object.keys(answerKey).length;
+  const progressPct = totalQuestions > 0 ? Math.round((filledCount / totalQuestions) * 100) : 0;
 
   const FLAG_LABEL: Record<KeyFlag, string> = {
-    blank: '⚠ não lida na foto (em branco)',
-    duplicate: '⚠ dupla marcação na foto',
-    low: '⚠ leitura incerta',
+    blank: 'não lida na foto (em branco)',
+    duplicate: 'dupla marcação na foto',
+    low: 'leitura incerta',
   };
 
   const renderQuestionRow = (q: number, displayNumber: number) => {
@@ -153,17 +161,21 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
     return (
       <div
         key={q}
-        className={`flex items-center gap-3 p-2 rounded-lg ${flag ? 'bg-amber-50 border border-amber-200' : 'hover:bg-gray-50'}`}
+        className={`flex items-center gap-3 p-2 rounded-lg ${flag ? 'bg-warning-50 border border-warning-500/30 dark:bg-warning-500/10' : 'hover:bg-surface dark:hover:bg-gray-800'}`}
       >
-        <span className="w-8 text-sm font-bold text-gray-700 text-right">
+        <span className="w-8 text-sm font-bold text-gray-600 dark:text-gray-300 text-right tabular-nums">
           {String(displayNumber).padStart(2, '0')}
         </span>
-        <div className="flex gap-2">
+        <div className="flex gap-2" role="radiogroup" aria-label={`Questão ${displayNumber}`}>
           {OPTIONS.map((opt) => (
             <button
               key={opt}
+              type="button"
+              role="radio"
+              aria-checked={answerKey[q] === opt}
+              aria-label={`Questão ${displayNumber}: ${opt}`}
               onClick={() => handleSetAnswer(q, opt)}
-              className={`bubble-option w-10 h-10 ${
+              className={`bubble-option w-10 h-10 min-w-[44px] min-h-[44px] ${
                 answerKey[q] === opt ? 'selected' : ''
               }`}
             >
@@ -172,10 +184,10 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
           ))}
         </div>
         {flag ? (
-          <span className="text-xs text-amber-700 ml-2">{FLAG_LABEL[flag]}</span>
+          <Badge tone="warning" className="ml-2">{FLAG_LABEL[flag]}</Badge>
         ) : answerKey[q] && (
-          <span className="text-sm text-gray-500 ml-2">
-            Resposta: <strong>{answerKey[q]}</strong>
+          <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
+            Resposta: <strong className="text-ink dark:text-white">{answerKey[q]}</strong>
           </span>
         )}
       </div>
@@ -184,8 +196,8 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
 
   const renderSubjectSection = (sid: 'lp' | 'mat', start: number, end: number) => (
     <div key={sid} className="mb-4">
-      <h3 className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+      <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-2 flex items-center gap-2">
+        <span className="w-2 h-2 rounded-full bg-brand-500 inline-block" aria-hidden />
         {activeExam ? getSubjectName(activeExam, sid) : sid.toUpperCase()} (1–{end - start + 1})
       </h3>
       <div className="space-y-1">
@@ -195,22 +207,23 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   );
 
   return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Cadastrar Gabarito</h1>
-      <p className="text-gray-500 mb-6">Defina a resposta correta para cada questão</p>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Cadastrar gabarito"
+        subtitle="Defina a resposta correta para cada questão"
+      />
 
-      <div className="card max-w-2xl mb-6">
+      <div className="card max-w-2xl">
         <div className="space-y-4">
-          <div>
-            <label className="label">Selecione a Prova</label>
+          <Field label="Selecione a prova" htmlFor="key-exam-select">
             {exams.length === 0 ? (
-              <div className="text-sm text-gray-500">
-                <p>Nenhuma prova cadastrada.</p>
-                <button onClick={() => onNavigate('new-exam')} className="btn btn-primary btn-sm mt-2">Criar Prova</button>
-              </div>
+              <EmptyState
+                title="Nenhuma prova cadastrada"
+                action={<Button size="sm" onClick={() => onNavigate('new-exam')}>Criar prova</Button>}
+              />
             ) : (
-              <select
-                className="input"
+              <Select
+                id="key-exam-select"
                 value={selectedExamId}
                 onChange={(e) => setSelectedExamId(e.target.value)}
               >
@@ -218,27 +231,33 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
                 {exams.map((e) => (
                   <option key={e.id} value={e.id}>{e.name}</option>
                 ))}
-              </select>
+              </Select>
             )}
-          </div>
+          </Field>
 
           {activeExam && (
             <>
-              <div className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
-                <span className="text-sm text-gray-600">
-                  Progresso: <strong>{filledCount}/{totalQuestions}</strong> questões
-                </span>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={reading}
-                    className="btn btn-sm btn-primary min-h-[44px]"
-                  >
-                    {reading ? 'Lendo foto…' : '📷 Ler por foto'}
-                  </button>
-                  <button onClick={() => handleAutoFill('ABCD')} className="btn btn-sm btn-secondary min-h-[44px]">
-                    Preencher ABCD
-                  </button>
+              <div className="bg-surface dark:bg-gray-800/60 rounded-lg p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <span className="text-sm text-gray-600 dark:text-gray-300">
+                    Progresso: <strong className="text-ink dark:text-white tabular-nums">{filledCount}/{totalQuestions}</strong> questões
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      loading={reading}
+                      icon={<Camera size={15} aria-hidden />}
+                    >
+                      Ler por foto
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => handleAutoFill('ABCD')} icon={<Wand2 size={15} aria-hidden />}>
+                      Preencher ABCD
+                    </Button>
+                  </div>
+                </div>
+                <div className="h-2 rounded-full bg-line dark:bg-gray-700 overflow-hidden" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso do gabarito">
+                  <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
                 </div>
               </div>
               <input
@@ -248,30 +267,29 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
                 className="hidden"
                 onChange={handleReadPhoto}
               />
-              <p className="text-xs text-gray-400 -mt-2">
-                📷 Imprima um cartão vazio em “Gerar Cartões”, marque as respostas corretas com
+              <p className="field-helper -mt-2">
+                Imprima um cartão vazio em “Gerar cartões”, marque as respostas corretas com
                 caneta escura e fotografe aqui — o gabarito é preenchido automaticamente.
               </p>
 
               {readSummary && (
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
-                  {readSummary}
-                </div>
+                <div className="callout-info">{readSummary}</div>
               )}
               {readError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                  {readError}
-                </div>
+                <div className="callout-danger">{readError}</div>
               )}
 
               {saved && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm">
-                  Gabarito salvo com sucesso!
+                <div className="callout-success">
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <CheckCircle2 size={15} aria-hidden />
+                    Gabarito salvo com sucesso!
+                  </span>
                   {serverState === 'saving' && <span className="block text-xs mt-1">Enviando ao servidor...</span>}
-                  {serverState === 'ok' && <span className="block text-xs mt-1">✔ Salvo no servidor — disponível no celular.</span>}
+                  {serverState === 'ok' && <span className="block text-xs mt-1">Salvo no servidor — disponível no celular.</span>}
                   {serverState === 'error' && (
-                    <span className="block text-xs mt-1 text-red-600">
-                      ✖ Só neste aparelho! Falha ao salvar no servidor: {serverError} Verifique o backend e salve de novo.
+                    <span className="block text-xs mt-1 text-danger-600 dark:text-danger-100">
+                      <span className="inline-flex items-center gap-1"><XCircle size={13} aria-hidden /> Só neste aparelho! Falha ao salvar no servidor: {serverError} Verifique o backend e salve de novo.</span>
                     </span>
                   )}
                 </div>
@@ -284,10 +302,10 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
                 })}
               </div>
 
-              <div className="flex gap-3 pt-4">
-                <button onClick={handleSave} className="btn btn-primary" disabled={filledCount < totalQuestions}>
-                  Salvar Gabarito
-                </button>
+              <div className="flex gap-2 pt-2">
+                <Button onClick={handleSave} disabled={filledCount < totalQuestions} icon={<Save size={16} aria-hidden />}>
+                  Salvar gabarito
+                </Button>
               </div>
             </>
           )}

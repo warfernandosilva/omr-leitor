@@ -1,6 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
+import { Download, KeyRound, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { AppView } from '../types';
 import { adminListUsers, adminUpdateUser, adminDeleteUser, AdminUser, getMe, adminDownloadBackup, adminRestoreBackup } from '../utils/api';
+import PageHeader from '../components/ui/PageHeader';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
+import Select from '../components/ui/Select';
 
 interface Props {
   onNavigate: (view: AppView) => void;
@@ -118,44 +123,46 @@ export default function AdminUsersPage({ onNavigate }: Props) {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Usuários do Sistema</h1>
-          <p className="text-gray-500 text-sm">Exclusivo para administradores — gerencie acesso e papéis</p>
-        </div>
-        <button onClick={load} className="btn btn-secondary btn-sm">Atualizar</button>
-      </div>
+    <div className="space-y-6 animate-fade-in">
+      <PageHeader
+        title="Usuários do sistema"
+        subtitle="Exclusivo para administradores — gerencie acesso e papéis"
+        actions={
+          <Button variant="secondary" size="sm" onClick={load} icon={<RefreshCw size={15} aria-hidden />}>
+            Atualizar
+          </Button>
+        }
+      />
 
-      {loading && <div className="card text-center py-12"><p className="text-gray-500">Carregando usuários...</p></div>}
+      {loading && <div className="card text-center py-12"><p className="text-gray-500 dark:text-gray-400" role="status">Carregando usuários...</p></div>}
 
       {error && (
-        <div className="card bg-red-50 border-red-200 text-red-700 text-sm p-4 mb-4">
+        <div className="card callout-danger mb-4">
           {error}
           {error.includes('403') && <p className="mt-2 text-xs">Você precisa ser administrador para acessar esta página.</p>}
-          <button onClick={() => onNavigate('home')} className="btn btn-sm btn-secondary mt-3">Voltar ao início</button>
+          <Button variant="secondary" size="sm" onClick={() => onNavigate('home')} className="mt-3">Voltar ao início</Button>
         </div>
       )}
 
       {!loading && !error && (
         <div className="card overflow-x-auto mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">Backup do banco</h3>
-          <p className="text-xs text-gray-500 mb-3">
+          <h3 className="text-lg font-semibold text-ink dark:text-white mb-1">Backup do banco</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
             Dump portátil (provas, alunos, gabaritos, usuários). O arquivo contém hashes de senha — guarde em local seguro, nunca no Git.
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={handleDownloadBackup} disabled={bkBusy} className="btn btn-sm btn-primary min-h-[44px]">
-              {bkBusy ? 'Gerando…' : 'Baixar backup'}
-            </button>
-            <button onClick={() => restoreInputRef.current?.click()} disabled={bkBusy} className="btn btn-sm btn-secondary min-h-[44px]">
+            <Button size="sm" onClick={handleDownloadBackup} loading={bkBusy} icon={<Download size={15} aria-hidden />}>
+              Baixar backup
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => restoreInputRef.current?.click()} disabled={bkBusy} icon={<Upload size={15} aria-hidden />}>
               Enviar restore…
-            </button>
-            <label className="flex items-center gap-2 text-xs text-gray-600 ml-1">
+            </Button>
+            <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 ml-1 min-h-[44px]">
               <input
                 type="checkbox"
                 checked={bkConfirm}
                 onChange={e => setBkConfirm(e.target.checked)}
-                className="w-4 h-4"
+                className="w-4 h-4 accent-brand-500"
               />
               Entendo que o restore atualiza registros existentes
             </label>
@@ -168,7 +175,7 @@ export default function AdminUsersPage({ onNavigate }: Props) {
             onChange={handleRestoreFile}
           />
           {bkMsg && (
-            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-700 text-sm">
+            <div className="callout-info mt-3">
               {bkMsg}
             </div>
           )}
@@ -179,75 +186,80 @@ export default function AdminUsersPage({ onNavigate }: Props) {
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200">
-                <th className="py-3 px-3 text-left font-medium text-gray-500">Nome</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500">E-mail</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500">Papel</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">Ativo</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">Provas</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 hidden md:table-cell">Criado em</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500">Ações</th>
+              <tr className="border-b border-line dark:border-gray-700">
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Nome</th>
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">E-mail</th>
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Papel</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Ativo</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Provas</th>
+                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">Criado em</th>
+                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Ações</th>
               </tr>
             </thead>
             <tbody>
               {users.map(u => {
                 const isMe = meEmail && u.email === meEmail;
                 return (
-                  <tr key={u.id} className={`border-b border-gray-50 hover:bg-gray-50 ${!u.is_active ? 'opacity-50' : ''}`}>
-                    <td className="py-3 px-3 font-medium text-gray-900">
-                      {u.nome} {isMe && <span className="text-xs text-blue-600 font-normal">(você)</span>}
+                  <tr key={u.id} className={`border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800 ${!u.is_active ? 'opacity-50' : ''}`}>
+                    <td className="py-3 px-3 font-medium text-ink dark:text-gray-100">
+                      {u.nome} {isMe && <Badge tone="info" className="ml-1">você</Badge>}
                     </td>
-                    <td className="py-3 px-3 text-gray-500">{u.email}</td>
+                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400">{u.email}</td>
                     <td className="py-3 px-3">
-                      <select
+                      <Select
+                        aria-label={`Papel de ${u.nome}`}
                         value={u.role}
                         onChange={e => handleRoleChange(u, e.target.value)}
-                        className="input py-1 px-2 text-xs w-28"
+                        className="py-1 px-2 text-xs w-28"
                         disabled={Boolean(isMe) && users.filter(x => x.role === 'admin').length <= 1 && u.role === 'admin'}
                         title={isMe && u.role === 'admin' ? 'Último admin não pode ser rebaixado' : undefined}
                       >
                         <option value="professor">professor</option>
                         <option value="admin">admin</option>
-                      </select>
+                      </Select>
                     </td>
                     <td className="py-3 px-3 text-center">
                       <button
                         onClick={() => handleToggleActive(u)}
                         disabled={!!isMe}
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${u.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'} disabled:opacity-50`}
+                        className="disabled:opacity-50 min-h-[44px]"
                         title={isMe ? 'Não pode desativar a própria conta' : undefined}
                       >
-                        {u.is_active ? 'Ativo' : 'Inativo'}
+                        <Badge tone={u.is_active ? 'success' : 'neutral'}>{u.is_active ? 'Ativo' : 'Inativo'}</Badge>
                       </button>
                     </td>
-                    <td className="py-3 px-3 text-center text-gray-600">{u.avaliacoes}</td>
-                    <td className="py-3 px-3 text-gray-400 text-xs hidden md:table-cell">
+                    <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 tabular-nums">{u.avaliacoes}</td>
+                    <td className="py-3 px-3 text-gray-400 dark:text-gray-500 text-xs hidden md:table-cell">
                       {u.created_at ? new Date(u.created_at).toLocaleString('pt-BR') : '—'}
                     </td>
                     <td className="py-3 px-3 text-center">
                       <div className="flex gap-1 justify-center">
-                        <button
+                        <Button
+                          size="sm"
+                          variant="secondary"
                           onClick={() => handleResetPassword(u)}
-                          className="btn btn-sm btn-secondary"
+                          icon={<KeyRound size={14} aria-hidden />}
                           title="Redefinir senha"
                         >
                           Senha
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
                           onClick={() => handleDelete(u)}
                           disabled={!!isMe}
-                          className="btn btn-sm btn-danger disabled:opacity-30"
+                          icon={<Trash2 size={14} aria-hidden />}
                           title={isMe ? 'Não pode excluir a própria conta' : 'Excluir usuário'}
                         >
                           Excluir
-                        </button>
+                        </Button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
               {users.length === 0 && (
-                <tr><td colSpan={7} className="py-8 text-center text-gray-400">Nenhum usuário cadastrado.</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-gray-400 dark:text-gray-500">Nenhum usuário cadastrado.</td></tr>
               )}
             </tbody>
           </table>
