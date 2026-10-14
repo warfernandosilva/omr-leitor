@@ -34,6 +34,7 @@ export default function Autocomplete({
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const reactId = useId();
   const listId = `${id ?? reactId}-listbox`;
   const active = activeIndex >= 0 && activeIndex < options.length ? options[activeIndex] : null;
@@ -99,8 +100,10 @@ export default function Autocomplete({
         invalid={invalid}
         placeholder={placeholder}
         value={value}
+        ref={inputRef}
         onChange={(e) => { onValueChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => { setOpen(true); if (value) inputRef.current?.select(); }}
+        onClick={() => { setOpen(true); inputRef.current?.select(); }}
         onKeyDown={handleKeyDown}
       />
       {open && (

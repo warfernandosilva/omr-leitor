@@ -838,6 +838,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     if (continuous) {
       // Modo contínuo: volta direto à câmera com a mesma prova
       setStudentName('');
+      setSelectedAlunoId(null);
+      setSelectedFromTurma(false);
       setCapturedImage(null);
       setOmrResult(null);
       setManualAnswers({});
