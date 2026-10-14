@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, GraduationCap, Users, ClipboardList, KeyRound, Printer,
   ScanLine, History, ClipboardCheck, BarChart3, FileText, FlaskConical,
-  Settings, LifeBuoy, ShieldCheck,
+  Settings, LifeBuoy, ShieldCheck, UserRound, ListChecks,
 } from 'lucide-react';
 import type { AppView } from '../../types';
 
@@ -29,7 +29,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { view: 'home', label: 'Painel inicial', icon: LayoutDashboard },
       { view: 'turmas', label: 'Turmas', icon: GraduationCap },
-      { view: 'alunos', label: 'Alunos', icon: Users, soon: true },
+      { view: 'alunos', label: 'Alunos', icon: Users },
     ],
   },
   {
@@ -39,6 +39,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: 'new-exam', label: 'Provas e avaliações', icon: ClipboardList },
       { view: 'register-key', label: 'Gabaritos', icon: KeyRound },
       { view: 'generate-card', label: 'Gerar cartões-resposta', icon: Printer },
+      { view: 'manage-exam', label: 'Gerenciar avaliação', icon: ListChecks },
     ],
   },
   {
@@ -47,7 +48,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { view: 'correct-card', label: 'Nova leitura', icon: ScanLine },
       { view: 'results', label: 'Histórico de correções', icon: History },
-      { view: 'pending', label: 'Revisões pendentes', icon: ClipboardCheck, soon: true },
+      { view: 'pending', label: 'Revisões pendentes', icon: ClipboardCheck },
     ],
   },
   {
@@ -55,7 +56,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Análises',
     items: [
       { view: 'dashboard', label: 'Resultados', icon: BarChart3 },
-      { view: 'reports', label: 'Relatórios', icon: FileText, soon: true },
+      { view: 'reports', label: 'Relatórios', icon: FileText },
       { view: 'lab', label: 'Banco de testes OMR', icon: FlaskConical },
     ],
   },
@@ -63,11 +64,26 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'sistema',
     label: 'Sistema',
     items: [
-      { view: 'settings', label: 'Configurações', icon: Settings, soon: true },
-      { view: 'help', label: 'Ajuda e suporte', icon: LifeBuoy, soon: true },
+      { view: 'settings', label: 'Configurações', icon: Settings },
+      { view: 'help', label: 'Ajuda e suporte', icon: LifeBuoy },
+      { view: 'profile', label: 'Perfil do usuário', icon: UserRound },
       { view: 'admin-users', label: 'Usuários', icon: ShieldCheck, adminOnly: true },
     ],
   },
+];
+
+/** Atalhos da barra de navegação inferior (mobile). "Mais" abre o drawer. */
+export interface BottomNavItem {
+  view: AppView;
+  label: string;
+  icon: LucideIcon;
+}
+
+export const BOTTOM_NAV: BottomNavItem[] = [
+  { view: 'home', label: 'Início', icon: LayoutDashboard },
+  { view: 'correct-card', label: 'Nova leitura', icon: ScanLine },
+  { view: 'dashboard', label: 'Resultados', icon: BarChart3 },
+  { view: 'turmas', label: 'Turmas', icon: GraduationCap },
 ];
 
 /** Título + grupo para TODAS as views (inclusive as fora da sidebar). */
@@ -77,7 +93,7 @@ export const VIEW_META: Record<AppView, { title: string; group: string }> = {
   turmas: { title: 'Turmas', group: 'Gerenciamento' },
   alunos: { title: 'Alunos', group: 'Gerenciamento' },
   'generate-card': { title: 'Gerar cartões-resposta', group: 'Avaliações' },
-  'import-students': { title: 'Importar alunos', group: 'Avaliações' },
+  'import-students': { title: 'Cartões por lista da prova', group: 'Avaliações' },
   'manage-exam': { title: 'Gerenciar avaliação', group: 'Avaliações' },
   'register-key': { title: 'Gabaritos', group: 'Avaliações' },
   'correct-card': { title: 'Nova leitura', group: 'Correção OMR' },
@@ -90,6 +106,7 @@ export const VIEW_META: Record<AppView, { title: string; group: string }> = {
   'view-result': { title: 'Detalhe da correção', group: 'Correção OMR' },
   settings: { title: 'Configurações', group: 'Sistema' },
   help: { title: 'Ajuda e suporte', group: 'Sistema' },
+  profile: { title: 'Perfil do usuário', group: 'Sistema' },
   'admin-users': { title: 'Usuários', group: 'Sistema' },
 };
 

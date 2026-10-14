@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Pencil, Plus, Printer, RefreshCw, Trash2 } from 'lucide-react';
-import { AppView, Exam, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS, templateLabel } from '../types';
+import { AppView, Exam, ExamStatus, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, SAE_MAX_QUESTIONS, SAEV_MIN_QPS, SAEV_MAX_QPS, templateLabel, normalizeExamStatus, examStatusLabel } from '../types';
 import { HERBY_MIN_QPS, HERBY_MAX_QPS } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import {
@@ -40,6 +40,12 @@ export default function NewExamPage({ onNavigate }: Props) {
   const [syncing, setSyncing] = useState(false);
   const [turmas, setTurmas] = useState<TurmaDTO[]>([]);
   const [turmaId, setTurmaId] = useState<number | ''>('');
+  const [status, setStatus] = useState<ExamStatus>('ativa');
+  const [step, setStep] = useState(0);
+  const [examSearch, setExamSearch] = useState('');
+  const [examStatusFilter, setExamStatusFilter] = useState<'' | ExamStatus>('');
+
+  const STEPS = ['Dados', 'Modelo', 'Configurações', 'Revisão'] as const;
 
   const isSae = templateType === 'sae';
   const isColar = templateType === 'colar';
@@ -168,6 +174,7 @@ export default function NewExamPage({ onNavigate }: Props) {
     const exam: Exam = {
       id: editingId || uuidv4(),
       name: name.trim(),
+      status,
       turma: turmaSel?.nome,
       turmaId: turmaSel?.id,
       subjectLP: subjectLP.trim(),
@@ -222,6 +229,8 @@ export default function NewExamPage({ onNavigate }: Props) {
     setEditingId(null);
     setName('');
     setTurmaId('');
+    setStatus('ativa');
+    setStep(0);
     setTemplateType('padrao');
     setSubjectLP('LÍNGUA PORTUGUESA');
     setSubjectMat('MATEMÁTICA');
@@ -230,6 +239,8 @@ export default function NewExamPage({ onNavigate }: Props) {
   const handleEdit = (exam: Exam) => {
     setEditingId(exam.id);
     setName(exam.name);
+    setStatus(normalizeExamStatus(exam.status));
+    setStep(0);
     setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado' ? exam.templateType : 'padrao');
     setLayoutMode(exam.layoutMode === 'single' ? 'single' : 'dual');
     setSubjectLP(exam.subjectLP);
@@ -244,6 +255,8 @@ export default function NewExamPage({ onNavigate }: Props) {
     setEditingId(null);
     setName('');
     setTurmaId('');
+    setStatus('ativa');
+    setStep(0);
     setTemplateType('padrao');
     setSubjectLP('LÍNGUA PORTUGUESA');
     setSubjectMat('MATEMÁTICA');
@@ -279,7 +292,37 @@ export default function NewExamPage({ onNavigate }: Props) {
           </div>
         )}
 
+        {/* Assistente em etapas */}
+        <ol className="flex items-center gap-1 mb-5" aria-label="Etapas da criação">
+          {STEPS.map((label, i) => {
+            const done = i < step;
+            const current = i === step;
+            return (
+              <li key={label} className="flex-1 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => { if (i < step) setStep(i); }}
+                  disabled={i > step}
+                  aria-current={current ? 'step' : undefined}
+                  className="w-full flex flex-col items-center gap-1.5 group"
+                >
+                  <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors
+                    ${done ? 'bg-success-500 text-white' : current ? 'bg-brand-500 text-white' : 'bg-surface text-gray-400 dark:bg-gray-800'}`}>
+                    {done ? '✓' : i + 1}
+                  </span>
+                  <span className={`text-[11px] font-medium truncate max-w-full ${current ? 'text-brand-700 dark:text-brand-200' : 'text-gray-400'}`}>
+                    {label}
+                  </span>
+                  <span aria-hidden className={`h-1 w-full rounded-full ${done || current ? 'bg-brand-500' : 'bg-line dark:bg-gray-800'}`} />
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+
         <div className="space-y-4">
+        {step === 0 && (
+          <>
           <Field label="Nome da prova" htmlFor="exam-name" required>
             <Input
               id="exam-name"
@@ -310,7 +353,11 @@ export default function NewExamPage({ onNavigate }: Props) {
               </Select>
             </Field>
           )}
+          </>
+        )}
 
+        {step === 1 && (
+          <>
           <div>
             <span className="label">Modelo do cartão *</span>
             <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Modelo do cartão">
@@ -411,7 +458,11 @@ export default function NewExamPage({ onNavigate }: Props) {
               onChange={(e) => handleQpsChange(e.target.value)}
             />
           </Field>
+          </>
+        )}
 
+        {step === 2 && (
+          <>
           <Field label="Escala de nota" htmlFor="exam-scale">
             <Select
               id="exam-scale"
@@ -424,21 +475,80 @@ export default function NewExamPage({ onNavigate }: Props) {
             </Select>
           </Field>
 
+          <div>
+            <span className="label">Situação da prova</span>
+            <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Situação da prova">
+              {(['rascunho', 'ativa', 'arquivada'] as ExamStatus[]).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={status === s}
+                  onClick={() => setStatus(s)}
+                  className={optionCard(status === s)}
+                >
+                  {examStatusLabel(s)}
+                </button>
+              ))}
+            </div>
+            <p className="field-helper">Rascunhos e arquivadas continuam salvos; o filtro da lista separa cada situação.</p>
+          </div>
+          </>
+        )}
+
+        {step === 3 && (
+          <dl className="rounded-lg border border-line dark:border-gray-700 divide-y divide-line dark:divide-gray-800 text-sm">
+            {[
+              ['Nome', name.trim() || '—'],
+              ['Turma', turmaId === '' ? 'Sem turma vinculada' : (turmas.find(t => t.id === turmaId)?.nome ?? '—')],
+              ['Modelo', templateLabel(templateType)],
+              ['Disciplinas', layoutMode === 'single' || isCustom ? subjectLP.trim() || '—' : `${subjectLP.trim() || '—'} + ${subjectMat.trim() || '—'}`],
+              ['Questões', String(questionsPerSubject > 0 ? totalQuestions : '—')],
+              ['Escala', gradeScale === 'count' ? 'Quantidade de acertos' : `0 a ${gradeScale === '0-10' ? '10' : '100'}`],
+              ['Situação', examStatusLabel(status)],
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3 px-3 py-2.5">
+                <dt className="text-gray-500 dark:text-gray-400">{k}</dt>
+                <dd className="font-medium text-ink dark:text-gray-100 text-right">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
           <div className="flex gap-2 pt-2">
-            <Button
-              onClick={handleSave}
-              loading={saving}
-              disabled={
-                !name.trim() || !subjectLP.trim()
-                || (layoutMode === 'dual' && !subjectMat.trim())
-                || questionsPerSubject < 1
-              }
-              icon={<Plus size={16} aria-hidden />}
-            >
-              {editingId ? 'Salvar alterações' : 'Criar prova'}
-            </Button>
+            {step > 0 && (
+              <Button variant="secondary" onClick={() => setStep(step - 1)} className="min-h-[44px]">
+                Voltar
+              </Button>
+            )}
+            {step < 3 ? (
+              <Button
+                onClick={() => setStep(step + 1)}
+                disabled={
+                  (step === 0 && !name.trim())
+                  || (step === 1 && (!subjectLP.trim() || (layoutMode === 'dual' && !isCustom && !subjectMat.trim()) || questionsPerSubject < 1))
+                }
+                className="min-h-[44px] flex-1"
+              >
+                Próximo
+              </Button>
+            ) : (
+              <Button
+                onClick={handleSave}
+                loading={saving}
+                disabled={
+                  !name.trim() || !subjectLP.trim()
+                  || (layoutMode === 'dual' && !isCustom && !subjectMat.trim())
+                  || questionsPerSubject < 1
+                }
+                icon={<Plus size={16} aria-hidden />}
+                className="min-h-[44px] flex-1"
+              >
+                {editingId ? 'Salvar alterações' : 'Criar prova'}
+              </Button>
+            )}
             {editingId && (
-              <Button variant="secondary" onClick={resetForm}>
+              <Button variant="secondary" onClick={resetForm} className="min-h-[44px]">
                 Cancelar
               </Button>
             )}
@@ -461,29 +571,75 @@ export default function NewExamPage({ onNavigate }: Props) {
             </Button>
           </div>
           {syncMsg && <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{syncMsg}</p>}
+          <div className="flex flex-col sm:flex-row gap-2 mb-3">
+            <Input
+              type="search"
+              aria-label="Buscar prova"
+              placeholder="Buscar prova..."
+              value={examSearch}
+              onChange={(e) => setExamSearch(e.target.value)}
+              className="flex-1"
+            />
+            <Select
+              aria-label="Filtrar por situação"
+              value={examStatusFilter}
+              onChange={(e) => setExamStatusFilter(e.target.value as '' | ExamStatus)}
+              className="sm:w-44"
+            >
+              <option value="">Todas</option>
+              <option value="ativa">Ativas</option>
+              <option value="rascunho">Rascunhos</option>
+              <option value="arquivada">Arquivadas</option>
+            </Select>
+          </div>
           <div className="space-y-2">
-            {exams.map((exam) => (
-              <div key={exam.id} className="card flex items-center justify-between gap-2 p-4">
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-ink dark:text-gray-100 truncate">{exam.name}</p>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    <span className="inline-flex gap-1 mr-1 align-middle">
-                      {exam.turma && <Badge tone="success">{exam.turma}</Badge>}
-                      {exam.templateType && exam.templateType !== 'padrao' && (
-                        <Badge tone="info">{templateLabel(exam.templateType)}</Badge>
-                      )}
-                    </span>
-                    {exam.layoutMode === 'single'
-                      ? exam.subjectLP
-                      : `${exam.subjectLP} + ${exam.subjectMat}`}
-                    {' '}— {exam.totalQuestions} questões — Escala: {exam.gradeScale}
-                  </p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500">
-                    Criada em {new Date(exam.createdAt).toLocaleString('pt-BR')}
-                    {exam.answerKey && ' — Gabarito definido'}
-                  </p>
+            {exams
+              .filter((exam) => {
+                if (examStatusFilter && normalizeExamStatus(exam.status) !== examStatusFilter) return false;
+                if (examSearch.trim() && !exam.name.toLowerCase().includes(examSearch.trim().toLowerCase())) return false;
+                return true;
+              })
+              .map((exam) => {
+              const st = normalizeExamStatus(exam.status);
+              return (
+              <div key={exam.id} className="card p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-ink dark:text-gray-100 truncate">{exam.name}</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      <span className="inline-flex flex-wrap gap-1 mr-1 align-middle">
+                        <Badge tone={st === 'ativa' ? 'success' : st === 'rascunho' ? 'info' : 'neutral'}>{examStatusLabel(st)}</Badge>
+                        {exam.turma && <Badge tone="success">{exam.turma}</Badge>}
+                        {exam.templateType && exam.templateType !== 'padrao' && (
+                          <Badge tone="info">{templateLabel(exam.templateType)}</Badge>
+                        )}
+                      </span>
+                      {exam.layoutMode === 'single'
+                        ? exam.subjectLP
+                        : `${exam.subjectLP} + ${exam.subjectMat}`}
+                      {' '}— {exam.totalQuestions} questões — Escala: {exam.gradeScale}
+                    </p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      Criada em {new Date(exam.createdAt).toLocaleString('pt-BR')}
+                      {exam.answerKey && ' — Gabarito definido'}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex gap-1 ml-2 flex-shrink-0">
+                <div className="flex flex-wrap items-center gap-1 mt-2">
+                  <Select
+                    aria-label={`Situação de ${exam.name}`}
+                    value={st}
+                    onChange={(e) => {
+                      saveExam({ ...exam, status: e.target.value as ExamStatus }, user?.id);
+                      setExams(getExams(user?.id));
+                    }}
+                    className="!w-auto !min-h-[44px] !py-1.5 text-xs"
+                  >
+                    <option value="rascunho">Rascunho</option>
+                    <option value="ativa">Ativa</option>
+                    <option value="arquivada">Arquivada</option>
+                  </Select>
+                  <span className="flex-1" />
                   <Button variant="secondary" size="sm" onClick={() => handleEdit(exam)} icon={<Pencil size={14} aria-hidden />}>
                     Editar
                   </Button>
@@ -495,7 +651,8 @@ export default function NewExamPage({ onNavigate }: Props) {
                   </Button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

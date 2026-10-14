@@ -1,10 +1,10 @@
-import { Exam, StudentResult, SaeSpec, DEFAULT_SAE_SPEC, HerbySpec, DEFAULT_HERBY_SPEC } from '../types';
+import { Exam, StudentResult, SaeSpec, DEFAULT_SAE_SPEC, HerbySpec, DEFAULT_HERBY_SPEC, normalizeExamStatus } from '../types';
 import type { DBExam } from './api';
 
 const STORAGE_KEY = 'omr-app-data';
 
 // Nota: provas e resultados ficam no navegador; alunos, gabaritos e
-// códigos QR vivem no banco do backend (fonte oficial — ver Importar Alunos).
+// códigos QR vivem no banco do backend (fonte oficial — ver tela Turmas).
 
 interface AppData {
   exams: Exam[];
@@ -18,11 +18,12 @@ function getStorageKey(userId?: string | number): string {
 function migrateExam(raw: unknown): Exam {
   const e = raw as Partial<Exam> & { subject?: string };
   if (typeof e.subjectLP === 'string') {
-    return e as Exam;
+    return { ...e, status: normalizeExamStatus(e.status) } as Exam;
   }
   return {
     id: e.id || '',
     name: e.name || '',
+    status: normalizeExamStatus(e.status),
     subjectLP: e.subject || 'LÍNGUA PORTUGUESA',
     subjectMat: 'MATEMÁTICA',
     questionsPerSubject: 22,
@@ -145,6 +146,7 @@ export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exa
     const exam: Exam = {
       id: db.external_id,
       name: db.titulo,
+      status: prev?.status ?? 'ativa',
       turma: db.turma ?? undefined,
       turmaId: db.turma_id ?? undefined,
       subjectLP: db.subject_lp,

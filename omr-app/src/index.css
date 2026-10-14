@@ -206,8 +206,7 @@
 
 .bubble-option {
   @apply w-10 h-10 rounded-full border-2 border-gray-300 flex items-center justify-center cursor-pointer transition-all duration-200 text-sm font-bold hover:border-brand-500 hover:bg-brand-50 dark:border-gray-600 dark:hover:bg-gray-800;
-}
-.bubble-option.selected {
+}.bubble-option.selected {
   @apply border-brand-500 bg-brand-500 text-white;
 }
 .bubble-option.marked {
@@ -215,3 +214,8 @@
 }
 .skeleton { @apply animate-pulse bg-gray-200 dark:bg-gray-800 rounded; }
 .card-hover { @apply transition-all duration-200 hover:shadow-md hover:-translate-y-0.5; }
+
+/* Áreas seguras (notch/gestos): BottomNav usa inline style; demais
+   barras fixas usam estas classes. */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pt-safe { padding-top: env(safe-area-inset-top); }

@@ -1,4 +1,5 @@
 import { StudentResult, Exam } from '../types';
+import type { DBResultado } from './api';
 import * as XLSX from 'xlsx';
 import { computeSubjectStats, SUBJECT_LABELS } from './exam';
 
@@ -86,10 +87,13 @@ export function downloadXLSX(results: StudentResult[], exams: Exam[]): void {
 // ─── Lote SAEV (LP/MAT): NOME,LP_Q1..LP_Qn,MAT_Q1..MAT_Qn ───
 // n = maior questionsPerSubject entre as provas DUAIS do filtro.
 // Resultados de provas não-duais (single/SAE/Colar) são ignorados (contados em skipped).
+// Resultados cuja prova não está salva neste aparelho são contados em
+// missingExam — use examsWithRemoteFallback() para não perdê-los.
 
 export interface SaevLoteResult {
   csv: string;
   skipped: number;
+  missingExam: number;
 }
 
 function saevCell(v: unknown): string {
@@ -115,14 +119,19 @@ export function exportSaevLoteCsv(results: StudentResult[], exams: Exam[]): Saev
 
   const rows: string[][] = [];
   let skipped = 0;
+  let missingExam = 0;
   for (const r of results) {
     const exam = byExam.get(r.examId);
-    const dual = !!exam && exam.layoutMode !== 'single' && exam.templateType !== 'sae' && exam.templateType !== 'colar';
+    if (!exam) {
+      missingExam++;
+      continue;
+    }
+    const dual = exam.layoutMode !== 'single' && exam.templateType !== 'sae' && exam.templateType !== 'colar';
     if (!dual) {
       skipped++;
       continue;
     }
-    const n = exam!.questionsPerSubject || 0;
+    const n = exam.questionsPerSubject || 0;
     const row: string[] = [r.studentName];
     for (let i = 1; i <= qps; i++) row.push(i <= n ? (r.answers[i] || '') : '');
     for (let i = 1; i <= qps; i++) row.push(i <= n ? (r.answers[n + i] || '') : '');
@@ -130,11 +139,11 @@ export function exportSaevLoteCsv(results: StudentResult[], exams: Exam[]): Saev
   }
 
   const csv = [headers, ...rows].map(row => row.map(saevCell).join(',')).join('\r\n');
-  return { csv, skipped };
+  return { csv, skipped, missingExam };
 }
 
 export function downloadSaevCsv(results: StudentResult[], exams: Exam[]): void {
-  const { csv, skipped } = exportSaevLoteCsv(results, exams);
+  const { csv, skipped, missingExam } = exportSaevLoteCsv(results, exams);
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -142,7 +151,54 @@ export function downloadSaevCsv(results: StudentResult[], exams: Exam[]): void {
   a.download = `saev_lote_LP_MAT_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+  const notes: string[] = [];
   if (skipped > 0) {
-    alert(`${skipped} resultado(s) de provas não-duais (1 disciplina/SAE/Colar) foram ignorados neste lote.`);
+    notes.push(`${skipped} resultado(s) de provas não-duais (1 disciplina/SAE/Colar) foram ignorados neste lote.`);
   }
+  if (missingExam > 0) {
+    notes.push(`${missingExam} resultado(s) foram ignorados porque a prova não está salva neste aparelho.`);
+  }
+  if (notes.length > 0) alert(notes.join('\n'));
+}
+
+/** Template remoto → templateType local (mesma regra de mergeRemoteExams). */
+function remoteTemplate(t: unknown): Exam['templateType'] {
+  return t === 'sae' || t === 'colar' || t === 'saev' || t === 'herby' || t === 'simulado' ? t : undefined;
+}
+
+/**
+ * Completa as provas locais com sintéticas derivadas dos resultados do
+ * servidor, para as provas que não estão salvas neste aparelho. O
+ * /api/resultados informa qps/layout/template/turma da prova — sem isso,
+ * resultados só-servidor caem no "skipped" do lote SAEV (com mensagem
+ * enganosa de "prova não-dual") e zeram LP/MAT no CSV/XLSX.
+ */
+export function examsWithRemoteFallback(local: Exam[], db: DBResultado[]): Exam[] {
+  const byId = new Map(local.map(e => [e.id, e]));
+  const out = [...local];
+  for (const d of db) {
+    const id = d?.avaliacao?.external_id;
+    if (!id || byId.has(id)) continue;
+    const layoutMode = d.avaliacao.layout_mode === 'single' ? 'single' : 'dual';
+    const qps = d.avaliacao.questions_per_subject || 0;
+    const exam: Exam = {
+      id,
+      name: d.avaliacao.titulo || 'Prova',
+      status: 'ativa',
+      turma: d.avaliacao.turma ?? undefined,
+      turmaId: d.avaliacao.turma_id ?? undefined,
+      subjectLP: 'Língua Portuguesa',
+      subjectMat: 'Matemática',
+      questionsPerSubject: qps,
+      totalQuestions: layoutMode === 'single' ? qps : qps * 2,
+      createdAt: d.data_correcao || new Date().toISOString(),
+      gradeScale: (d.avaliacao.grade_scale as Exam['gradeScale']) || '0-10',
+      answerKey: null,
+      layoutMode,
+      templateType: remoteTemplate(d.avaliacao.template),
+    };
+    byId.set(id, exam);
+    out.push(exam);
+  }
+  return out;
 }

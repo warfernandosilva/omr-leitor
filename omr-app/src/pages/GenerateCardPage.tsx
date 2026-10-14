@@ -193,7 +193,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
           subtitle="Gere o cartão em formato A4 para impressão"
           actions={
             <Button variant="secondary" size="sm" onClick={() => onNavigate('import-students')} icon={<Users size={15} aria-hidden />}>
-              Gerar por lista de alunos
+              Cartões por lista da prova
             </Button>
           }
         />

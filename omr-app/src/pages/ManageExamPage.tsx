@@ -222,7 +222,7 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
               Corrigir cartões
             </Button>
             <Button variant="secondary" onClick={() => onNavigate('import-students', data.avaliacao.external_id)} icon={<FileUp size={16} aria-hidden />}>
-              Importar mais alunos
+              Cartões por lista da prova
             </Button>
             <Button
               variant="success"

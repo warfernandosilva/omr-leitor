@@ -616,6 +616,25 @@ export async function materializeFromTurma(examExternalId: string, turmaId: numb
   return res.json();
 }
 
+export interface AlunoListItem {
+  id: number;
+  nome: string;
+  matricula: string | null;
+  identificador_externo: string | null;
+  turma_id: number;
+  turma_nome: string | null;
+}
+
+/** Lista global de alunos do catálogo (somente leitura — base da tela Alunos). */
+export async function listAlunos(search?: string, turmaId?: number): Promise<AlunoListItem[]> {
+  const qs = new URLSearchParams();
+  if (search?.trim()) qs.set('search', search.trim());
+  if (turmaId != null) qs.set('turma_id', String(turmaId));
+  const q = qs.toString();
+  const j = await turmaFetch<{ alunos: AlunoListItem[] }>(`/api/alunos${q ? `?${q}` : ''}`);
+  return j.alunos;
+}
+
 export interface GenerateGabaritosResult {
   avaliacao_id: number;
   total_alunos: number;
@@ -800,7 +819,7 @@ export interface DBResultado {
   observacoes: string | null;
   data_correcao: string | null;
   aluno: { id: number; nome: string; matricula: string | null };
-  avaliacao: { id: number; external_id: string; titulo: string; questions_per_subject: number; layout_mode: string; grade_scale: string };
+  avaliacao: { id: number; external_id: string; titulo: string; questions_per_subject: number; layout_mode: string; grade_scale: string; template: string | null; turma: string | null; turma_id: number | null };
 }
 
 export async function getResultadosFromDB(): Promise<DBResultado[]> {

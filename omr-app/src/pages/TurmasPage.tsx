@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { FilePlus2, Pencil, Plus, RefreshCw, Trash2, Upload, UserPlus } from 'lucide-react';
+import { Download, FilePlus2, Pencil, Plus, RefreshCw, Trash2, Upload, UserPlus } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { AppView } from '../types';
 import { importStudents } from '../utils/students';
 import {
   listTurmas, createTurma, getTurma, renameTurma, deleteTurma,
-  importTurmaAlunos, addTurmaAluno, removeTurmaAluno,
+  importTurmaAlunos, addTurmaAluno, removeTurmaAluno, saveBlob,
   TurmaDTO, TurmaDetail,
 } from '../utils/api';
 import PageHeader from '../components/ui/PageHeader';
@@ -15,6 +16,19 @@ import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
   onNavigate: (view: AppView) => void;
+}
+
+/** Gera a planilha-modelo (Nome + Matrícula) para download. */
+function downloadTemplate() {
+  const ws = XLSX.utils.json_to_sheet([
+    { 'Nome': 'Ana Beatriz Lima', 'Matrícula': '0012' },
+    { 'Nome': 'Bruno Henrique Silva', 'Matrícula': '0013' },
+  ]);
+  ws['!cols'] = [{ wch: 28 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Alunos');
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  saveBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'modelo-alunos.xlsx');
 }
 
 export default function TurmasPage({ onNavigate }: Props) {
@@ -292,6 +306,9 @@ export default function TurmasPage({ onNavigate }: Props) {
                 onChange={handleFile}
               />
             </label>
+            <Button variant="ghost" size="sm" onClick={downloadTemplate} icon={<Download size={14} aria-hidden />} className="mt-2">
+              Baixar planilha-modelo
+            </Button>
           </Field>
 
           <Field label="Adicionar aluno manualmente">

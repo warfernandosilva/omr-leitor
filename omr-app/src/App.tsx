@@ -1,8 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { AppView } from './types';
 import AppShell from './components/layout/AppShell';
-import { viewMeta, WIDE_VIEWS } from './components/layout/nav';
+import Splash from './components/layout/Splash';
+import { WIDE_VIEWS } from './components/layout/nav';
 import { ToastProvider } from './components/ui/Toast';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { saveNav, loadNav, saveSidebarCollapsed, loadSidebarCollapsed } from './utils/nav-persist';
@@ -10,7 +11,11 @@ import { initPwa, applyPwaUpdate, PWA_UPDATE_EVENT } from './pwa';
 import HomePage from './pages/HomePage';
 import NewExamPage from './pages/NewExamPage';
 import TurmasPage from './pages/TurmasPage';
-import ComingSoonPage from './pages/ComingSoonPage';
+import StudentsPage from './pages/StudentsPage';
+import PendingReviewsPage from './pages/PendingReviewsPage';
+import SettingsPage from './pages/SettingsPage';
+import HelpPage from './pages/HelpPage';
+import ReportsPage from './pages/ReportsPage';
 import GenerateCardPage from './pages/GenerateCardPage';
 import RosterCardsPage from './pages/RosterCardsPage';
 import ManageExamPage from './pages/ManageExamPage';
@@ -21,16 +26,13 @@ import DashboardPage from './pages/DashboardPage';
 import LabPage from './pages/LabPage';
 import ViewResultPage from './pages/ViewResultPage';
 import AdminUsersPage from './pages/AdminUsersPage';
+import ProfilePage from './pages/ProfilePage';
 import LoginPage from './pages/LoginPage';
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, token, loading } = useAuth();
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-surface">
-        <div className="animate-spin w-10 h-10 border-4 border-brand-500 border-t-transparent rounded-full" role="status" aria-label="Carregando" />
-      </div>
-    );
+    return <Splash />;
   }
   if (!token || !user) {
     return <LoginPage />;
@@ -50,6 +52,9 @@ function AppInner() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => loadSidebarCollapsed());
   const [pwaUpdate, setPwaUpdate] = useState(false);
+  // Entrada de histórico empurrada ao abrir o drawer (para o botão voltar
+  // do Android fechar o menu em vez de sair do app).
+  const drawerPushedRef = useRef(false);
 
   useEffect(() => {
     initPwa();
@@ -61,6 +66,34 @@ function AppInner() {
   useEffect(() => {
     saveNav({ view, examId: selectedExamId, resultId: selectedResultId });
   }, [view, selectedExamId, selectedResultId]);
+
+  // Drawer + botão voltar: abrir empurra uma entrada; voltar fecha o menu.
+  useEffect(() => {
+    if (drawerOpen && !drawerPushedRef.current) {
+      try {
+        window.history.pushState({ omrDrawer: true }, '');
+        drawerPushedRef.current = true;
+      } catch {
+        /* histórico indisponível — segue sem fechar no voltar */
+      }
+    }
+    const onPop = () => {
+      drawerPushedRef.current = false;
+      setDrawerOpen(false);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [drawerOpen]);
+
+  const closeDrawer = useCallback(() => {
+    if (drawerPushedRef.current) {
+      // Consome a entrada empurrada; o 'popstate' fecha o drawer.
+      drawerPushedRef.current = false;
+      window.history.back();
+    } else {
+      setDrawerOpen(false);
+    }
+  }, []);
 
   const navigate = useCallback((v: AppView, examId?: string, resultId?: string) => {
     setView(v);
@@ -93,11 +126,15 @@ function AppInner() {
       case 'turmas':
         return <TurmasPage onNavigate={navigate} />;
       case 'alunos':
+        return <StudentsPage onNavigate={navigate} />;
       case 'pending':
+        return <PendingReviewsPage onNavigate={navigate} />;
       case 'reports':
+        return <ReportsPage onNavigate={navigate} />;
       case 'settings':
+        return <SettingsPage onNavigate={navigate} />;
       case 'help':
-        return <ComingSoonPage view={view} onNavigate={navigate} />;
+        return <HelpPage onNavigate={navigate} />;
       case 'generate-card':
         return <GenerateCardPage examId={selectedExamId} onNavigate={navigate} />;
       case 'import-students':
@@ -118,24 +155,24 @@ function AppInner() {
         return <ViewResultPage resultId={selectedResultId} onNavigate={navigate} />;
       case 'admin-users':
         return <AdminUsersPage onNavigate={navigate} />;
+      case 'profile':
+        return <ProfilePage onNavigate={navigate} />;
       default:
         return <HomePage onNavigate={navigate} />;
     }
   };
 
-  const meta = viewMeta(view);
-
   return (
     <AppShell
       currentView={view}
       onNavigate={navigate}
-      crumbs={[{ label: meta.group }, { label: meta.title }]}
+      examId={selectedExamId}
       wide={WIDE_VIEWS.includes(view)}
       collapsed={collapsed}
       onToggleCollapse={toggleCollapse}
       drawerOpen={drawerOpen}
       onOpenDrawer={() => setDrawerOpen(true)}
-      onCloseDrawer={() => setDrawerOpen(false)}
+      onCloseDrawer={closeDrawer}
     >
       <ErrorBoundary>{renderView()}</ErrorBoundary>
       {pwaUpdate && (

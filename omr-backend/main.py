@@ -432,6 +432,10 @@ app.include_router(_lab_router)
 from routers.turmas import router as _turmas_router
 app.include_router(_turmas_router)
 
+# Lista global de alunos do catálogo (somente leitura — base da tela "Alunos")
+from routers.alunos import router as _alunos_router
+app.include_router(_alunos_router)
+
 
 def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
     """Decodifica bytes de imagem com correção de orientação EXIF (celular)
@@ -1653,6 +1657,9 @@ def list_resultados(limit: int = 100, offset: int = 0, db: Session = Depends(get
                 "questions_per_subject": g.avaliacao.questions_per_subject,
                 "layout_mode": g.avaliacao.layout_mode,
                 "grade_scale": g.avaliacao.grade_scale,
+                "template": g.avaliacao.template,
+                "turma": g.avaliacao.turma,
+                "turma_id": g.avaliacao.turma_id,
             },
         }
         for g in gabaritos

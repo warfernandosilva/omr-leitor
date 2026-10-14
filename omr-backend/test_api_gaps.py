@@ -70,6 +70,10 @@ def test_api_gaps(isolated, db_session):
     lst = owner.get("/api/resultados", params={"limit": 1}).json()
     assert len(lst) == 1, f"resultados respeita limit=1: n={len(lst)}"
 
+    av = lst[0]["avaliacao"]
+    for campo in ("template", "turma", "turma_id", "questions_per_subject", "layout_mode"):
+        assert campo in av, f"/api/resultados expoe avaliacao.{campo}: {sorted(av)}"
+
     # desativa o dono: sessão antiga deve cair
     from models import User as _U
     _db = db_session()

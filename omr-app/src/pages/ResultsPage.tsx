@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Download, RefreshCw, Trash2 } from 'lucide-react';
 import { AppView } from '../types';
 import PageHeader from '../components/ui/PageHeader';
@@ -7,9 +7,9 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import { getResults, getExams, deleteResult } from '../utils/storage';
-import { downloadCSV, downloadXLSX, downloadSaevCsv } from '../utils/export';
+import { downloadCSV, downloadXLSX, downloadSaevCsv, examsWithRemoteFallback } from '../utils/export';
 import { computeSubjectStats } from '../utils/exam';
-import { getResultadosFromDB, deleteResultadoDB, DBResultado } from '../utils/api';
+import { getResultadosFromDB, deleteResultadoDB, DBResultado, listTurmas, TurmaDTO } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -42,8 +42,10 @@ export default function ResultsPage({ onNavigate }: Props) {
   const [exams, setExams] = useState(() => getExams(userId));
   const [dbResults, setDbResults] = useState<DBResultado[]>([]);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [turmas, setTurmas] = useState<TurmaDTO[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterExamId, setFilterExamId] = useState('');
+  const [filterTurmaId, setFilterTurmaId] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'grade'>('date');
 
   const reloadDbResults = () => {
@@ -55,6 +57,7 @@ export default function ResultsPage({ onNavigate }: Props) {
 
   useEffect(() => {
     reloadDbResults();
+    listTurmas().then(setTurmas).catch(() => setTurmas([]));
   }, []);
 
   const dbAsLocal = dbResults.map(dbToLocal);
@@ -65,10 +68,26 @@ export default function ResultsPage({ onNavigate }: Props) {
   }
   const allResults = Array.from(mergedMap.values());
 
+  const examById = useMemo(
+    () => new Map(examsWithRemoteFallback(exams, dbResults).map(e => [e.id, e])),
+    [exams, dbResults],
+  );
+  // Provas sintéticas (do servidor) entram no export para que resultados
+  // só-servidor não caiam no "skipped" do lote SAEV nem zerem LP/MAT.
+  const examsForExport = useMemo(() => [...examById.values()], [examById]);
+
   const filtered = allResults
     .filter(r => {
       if (searchTerm && !r.studentName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       if (filterExamId && r.examId !== filterExamId) return false;
+      if (filterTurmaId) {
+        const ex = examById.get(r.examId);
+        const tid = ex?.turmaId != null ? String(ex.turmaId) : null;
+        const turma = turmas.find(t => String(t.id) === filterTurmaId);
+        const matchId = tid === filterTurmaId;
+        const matchName = turma != null && ex?.turma != null && ex.turma === turma.nome;
+        if (!matchId && !matchName) return false;
+      }
       return true;
     })
     .sort((a, b) => {
@@ -77,9 +96,9 @@ export default function ResultsPage({ onNavigate }: Props) {
       return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
     });
 
-  const handleExportCSV = () => downloadCSV(filtered, exams);
-  const handleExportXLSX = () => downloadXLSX(filtered, exams);
-  const handleExportSaev = () => downloadSaevCsv(filtered, exams);
+  const handleExportCSV = () => downloadCSV(filtered, examsForExport);
+  const handleExportXLSX = () => downloadXLSX(filtered, examsForExport);
+  const handleExportSaev = () => downloadSaevCsv(filtered, examsForExport);
 
   const handleDelete = async (id: string) => {
     if (!confirm('Tem certeza que deseja excluir este resultado?')) return;
@@ -149,8 +168,19 @@ export default function ResultsPage({ onNavigate }: Props) {
             onChange={(e) => setFilterExamId(e.target.value)}
           >
             <option value="">Todas as provas</option>
-            {exams.map(e => (
+            {examsForExport.map(e => (
               <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </Select>
+          <Select
+            aria-label="Filtrar por turma"
+            className="sm:w-44"
+            value={filterTurmaId}
+            onChange={(e) => setFilterTurmaId(e.target.value)}
+          >
+            <option value="">Todas as turmas</option>
+            {turmas.map(t => (
+              <option key={t.id} value={t.id}>{t.nome}</option>
             ))}
           </Select>
           <Select
@@ -190,8 +220,8 @@ export default function ResultsPage({ onNavigate }: Props) {
             </thead>
             <tbody>
               {filtered.map((r) => {
-                const exam = exams.find(e => e.id === r.examId);
-                const subjectStats = exam ? computeSubjectStats(exam, r.answers, r.duplicateQuestions ?? []) : null;
+                const exam = examById.get(r.examId);
+                const subjectStats = exam?.answerKey ? computeSubjectStats(exam, r.answers, r.duplicateQuestions ?? []) : null;
                 return (
                   <tr key={r.id} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
                     <td className="py-3 px-3 font-medium text-ink dark:text-gray-100">{r.studentName}</td>

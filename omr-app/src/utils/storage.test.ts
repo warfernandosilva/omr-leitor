@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import {
-  mergeRemoteExams, saveResult, getResults, deleteResult,
+  mergeRemoteExams, saveExam, getExams, saveResult, getResults, deleteResult,
   getDeletedExamIds, markExamDeleted, unmarkExamDeleted, isExamDeleted,
 } from './storage';
 import type { DBExam } from './api';
@@ -109,6 +109,21 @@ describe('mergeRemoteExams (servidor vence)', () => {
     expect(second.stats).toEqual({ added: 0, updated: 0 });
   });
 
+  it('status local sobrevive ao merge (rascunho não vira ativa)', () => {
+    const { merged, stats } = mergeRemoteExams(
+      [localExam({ status: 'rascunho' })],
+      [dbExam()],
+    );
+    expect(merged[0].status).toBe('rascunho');
+    // só o status existia de diferente? não: gabarito/turma iguais → sem "atualizado"
+    expect(stats.updated).toBe(0);
+  });
+
+  it('prova nova do servidor chega como ativa', () => {
+    const { merged } = mergeRemoteExams([], [dbExam()]);
+    expect(merged[0].status).toBe('ativa');
+  });
+
   it('preserva templateType herby + herbySpec no merge (correção mobile)', () => {
     const { merged } = mergeRemoteExams([], [
       dbExam({
@@ -136,7 +151,26 @@ function student(patch: Partial<StudentResult> = {}): StudentResult {
   };
 }
 
-describe('ciclo local resultado (salvar → listar → excluir)', () => {
+describe('status da prova (somente local)', () => {
+  afterEach(() => {
+    localStorage.removeItem('omr-app-data');
+    localStorage.removeItem(`omr-app-data-${UID}`);
+  });
+
+  it('prova antiga sem status volta como ativa', () => {
+    const semStatus = { ...localExam() };
+    delete semStatus.status;
+    saveExam(semStatus, UID);
+    expect(getExams(UID)[0].status).toBe('ativa');
+  });
+
+  it('status salvo é preservado na leitura', () => {
+    saveExam(localExam({ status: 'arquivada' }), UID);
+    expect(getExams(UID)[0].status).toBe('arquivada');
+  });
+});
+
+describe('ciclo local resultado', () => {
   afterEach(() => {
     localStorage.removeItem('omr-app-data');
     localStorage.removeItem(`omr-app-data-${UID}`);

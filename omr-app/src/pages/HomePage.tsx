@@ -1,10 +1,12 @@
 import {
   BarChart3, ClipboardCheck, ClipboardList, FlaskConical, GraduationCap,
-  KeyRound, Plus, Printer, ScanLine, ShieldCheck, TriangleAlert, Upload,
+  KeyRound, Plus, Printer, ScanLine, ShieldCheck, TriangleAlert, Upload, Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { AppView } from '../types';
 import { getExams, getResults } from '../utils/storage';
+import { listAlunos, listTurmas } from '../utils/api';
 import { pendingFromResults } from '../utils/pending';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
@@ -32,6 +34,27 @@ export default function HomePage({ onNavigate }: Props) {
   const avgGrade = results.length
     ? (results.reduce((acc, r) => acc + r.grade, 0) / results.length).toFixed(1)
     : '—';
+  const [turmaCount, setTurmaCount] = useState<number | null>(null);
+  const [alunoCount, setAlunoCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [ts, as] = await Promise.all([listTurmas(), listAlunos()]);
+        if (alive) {
+          setTurmaCount(ts.length);
+          setAlunoCount(as.length);
+        }
+      } catch {
+        if (alive) {
+          setTurmaCount(null);
+          setAlunoCount(null);
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const actions: QuickAction[] = [
     ...(user?.role === 'admin'
@@ -46,7 +69,7 @@ export default function HomePage({ onNavigate }: Props) {
     { title: 'Corrigir cartão', desc: 'Capture ou envie a foto do cartão preenchido', view: 'correct-card', icon: ScanLine },
     { title: 'Cadastrar gabarito', desc: 'Defina as respostas corretas da prova', view: 'register-key', icon: KeyRound },
     { title: 'Gerar cartões', desc: 'Cartão-resposta em formato A4 para impressão', view: 'generate-card', icon: Printer },
-    { title: 'Importar alunos', desc: 'Gabarito personalizado por aluno via XLSX/CSV', view: 'import-students', icon: Upload },
+    { title: 'Importar alunos', desc: 'Planilha XLSX/CSV na tela Turmas', view: 'turmas', icon: Upload },
     { title: 'Gerenciar avaliação', desc: 'Alunos, gabaritos e status de correção', view: 'manage-exam', icon: ClipboardList },
     { title: 'Turmas', desc: 'Catálogo de alunos reutilizável entre provas', view: 'turmas', icon: GraduationCap },
     { title: 'Resultados', desc: 'Veja todas as correções realizadas', view: 'results', icon: BarChart3 },
@@ -72,7 +95,19 @@ export default function HomePage({ onNavigate }: Props) {
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+        <StatCard
+          label="Turmas"
+          value={turmaCount ?? '—'}
+          tone="info"
+          icon={<GraduationCap size={18} aria-hidden />}
+        />
+        <StatCard
+          label="Alunos"
+          value={alunoCount ?? '—'}
+          tone="info"
+          icon={<Users size={18} aria-hidden />}
+        />
         <StatCard
           label="Provas criadas"
           value={exams.length}
@@ -160,7 +195,7 @@ export default function HomePage({ onNavigate }: Props) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {actions.map((a) => (
             <button
-              key={a.view}
+              key={a.title}
               onClick={() => onNavigate(a.view)}
               className="card card-hover text-left group"
             >

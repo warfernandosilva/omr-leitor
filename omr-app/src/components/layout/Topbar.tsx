@@ -5,18 +5,19 @@ import {
 } from 'lucide-react';
 import type { AppView } from '../../types';
 import { useAuth } from '../../context/AuthContext';
+import { viewMeta } from './nav';
 import { getExams, getResults } from '../../utils/storage';
 import { pendingFromResults } from '../../utils/pending';
 import { listTurmas } from '../../utils/api';
 import type { TurmaDTO } from '../../utils/api';
-import Breadcrumbs from '../ui/Breadcrumbs';
-import type { Crumb } from '../ui/Breadcrumbs';
 import Avatar from '../ui/Avatar';
 import Popover from '../ui/Popover';
 import ThemeToggle from '../ui/ThemeToggle';
 
 interface Props {
-  crumbs: Crumb[];
+  currentView: AppView;
+  /** Prova selecionada (contexto do cabeçalho nas telas de prova). */
+  examId?: string | null;
   onNavigate: (view: AppView, examId?: string, resultId?: string) => void;
   onOpenMenu: () => void;
 }
@@ -139,13 +140,15 @@ function GlobalSearch({ onNavigate }: { onNavigate: Navigate }) {
   );
 }
 
-export default function Topbar({ crumbs, onNavigate, onOpenMenu }: Props) {
+export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: Props) {
   const auth = useAuth();
   const user = auth.user;
   const userName = user?.nome || user?.email || 'Usuário';
   const exams = getExams(user?.id);
   const examName = (id: string) => exams.find((e) => e.id === id)?.name ?? 'Prova';
   const pending = pendingFromResults(getResults(undefined, user?.id));
+  const meta = viewMeta(currentView);
+  const contextExam = examId ? exams.find((e) => e.id === examId) : undefined;
 
   return (
     <header className="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-line dark:border-gray-800">
@@ -153,8 +156,14 @@ export default function Topbar({ crumbs, onNavigate, onOpenMenu }: Props) {
         <button onClick={onOpenMenu} className="btn-icon lg:hidden" aria-label="Abrir menu">
           <Menu size={20} />
         </button>
-        <div className="flex-1 min-w-0 py-1">
-          <Breadcrumbs items={crumbs} />
+        <div className="flex-1 min-w-0 py-0.5">
+          <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 leading-none truncate">{meta.group}</p>
+          <p className="text-[15px] font-bold text-ink dark:text-white leading-tight truncate">
+            {meta.title}
+            {contextExam ? (
+              <span className="font-medium text-gray-500 dark:text-gray-400"> · {contextExam.name}</span>
+            ) : null}
+          </p>
         </div>
         <div className="hidden sm:block w-52 md:w-72 shrink-0">
           <GlobalSearch onNavigate={onNavigate} />

@@ -306,7 +306,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
   return (
     <div className="space-y-6 animate-fade-in">
       <PageHeader
-        title="Gabaritos por lista de alunos"
+        title="Cartões por lista da prova"
         subtitle="1 nome válido importado = 1 aluno persistido = 1 gabarito com QR Code = 1 página no PDF"
       />
 

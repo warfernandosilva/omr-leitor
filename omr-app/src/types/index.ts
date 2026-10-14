@@ -1,6 +1,8 @@
 export interface Exam {
   id: string;
   name: string;
+  /** Situação da prova (somente local): rascunho, ativa ou arquivada. */
+  status?: ExamStatus;
   /** Nome da turma vinculada (rótulo impresso no cartão). */
   turma?: string;
   /** Id do catálogo da turma no backend (turmas.id). */
@@ -66,6 +68,19 @@ export const DEFAULT_HERBY_SPEC: HerbySpec = {
 };
 
 export const SAE_MAX_QUESTIONS = 28;
+
+/** Situação da prova (somente local; o backend ainda não espelha). */
+export type ExamStatus = 'rascunho' | 'ativa' | 'arquivada';
+
+export function normalizeExamStatus(s: unknown): ExamStatus {
+  return s === 'rascunho' || s === 'arquivada' ? s : 'ativa';
+}
+
+export function examStatusLabel(s: ExamStatus): string {
+  if (s === 'rascunho') return 'Rascunho';
+  if (s === 'arquivada') return 'Arquivada';
+  return 'Ativa';
+}
 
 /** qps por disciplina no Gabarito SAEV (dual). */
 export const SAEV_MIN_QPS = 16;
@@ -167,6 +182,7 @@ export type AppView =
   | 'view-result'
   | 'settings'
   | 'help'
+  | 'profile'
   | 'admin-users';
 
 export const SUBJECT_IDS = ['lp', 'mat'] as const;

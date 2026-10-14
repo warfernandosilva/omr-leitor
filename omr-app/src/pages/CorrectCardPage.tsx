@@ -12,7 +12,7 @@ import {
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
   fetchExamStudents, ExamStudent, AmbiguousNameError, NameCandidate,
   getExamsFromDB, getExamFromDB, getDeletedExamsFromDB, deleteExamFromDB, getApiBase,
-  checkHealth, loadAdaptiveFlag, saveAdaptiveFlag,
+  checkHealth, loadAdaptiveFlag, saveAdaptiveFlag, getTurma,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange, scoreAnswers } from '../utils/exam';
@@ -35,9 +35,13 @@ import PageHeader from '../components/ui/PageHeader';
 import Field from '../components/ui/Field';
 import Select from '../components/ui/Select';
 import Input from '../components/ui/Input';
+import Autocomplete, { AutocompleteOption } from '../components/ui/Autocomplete';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
+import ReadStages from '../components/omr/ReadStages';
+import { anchorLabelFor } from '../utils/read-stages';
+import { findStudentMatches, StudentOption } from '../utils/alunos';
 
 interface Props {
   examId: string | null;
@@ -172,12 +176,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [omrResult, setOmrResult] = useState<ProcessResult | null>(null);
   const [manualAnswers, setManualAnswers] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
-  const [processingProgress, setProcessingProgress] = useState(0);
+  /** Etapas concluídas da leitura (0–8): marcos reais, nunca temporizador. */
+  const [stageDone, setStageDone] = useState(0);
   const [identified, setIdentified] = useState<Identification>(null);
   // Pareamento manual por nome (sem QR): alunos da prova + homônimos
   const [examStudents, setExamStudents] = useState<ExamStudent[]>([]);
   const [candidates, setCandidates] = useState<NameCandidate[] | null>(null);
   const [manualInfo, setManualInfo] = useState<string | null>(null);
+  // Autocomplete de nome: aluno travado (atribuição direta) + fallback do catálogo da turma
+  const [selectedAlunoId, setSelectedAlunoId] = useState<number | null>(null);
+  const [selectedFromTurma, setSelectedFromTurma] = useState(false);
+  const [turmaOnlyOptions, setTurmaOnlyOptions] = useState<StudentOption[]>([]);
   // Captura automática por enquadramento
   const [autoMode, setAutoMode] = useState(true);
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
@@ -233,14 +242,34 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   }, []);
   // Alunos da prova p/ pareamento manual (só quando o QR não identificou).
   // Carrega ao entrar na conferência; falha silenciosa mantém o fluxo avulso.
+  // Fallback: prova ainda sem ninguém materializado, mas com turma vinculada —
+  // sugere o catálogo da turma (só preenche o nome; o resultado é criado por nome).
   useEffect(() => {
     if (step !== 'review') return;
     if (identified?.kind === 'ok' || identified?.kind === 'wrong_exam') return;
     const exam = exams.find(e => e.id === selectedExamId);
     if (!exam) return;
     let alive = true;
+    setTurmaOnlyOptions([]);
     fetchExamStudents(exam.id)
-      .then(list => { if (alive) setExamStudents(Array.isArray(list) ? list : []); })
+      .then(async list => {
+        if (!alive) return;
+        const arr = Array.isArray(list) ? list : [];
+        setExamStudents(arr);
+        if (arr.length === 0 && exam.turmaId != null) {
+          try {
+            const detail = await getTurma(exam.turmaId);
+            if (!alive) return;
+            setTurmaOnlyOptions((detail.alunos ?? []).map(a => ({
+              key: `turma:${a.id}`,
+              nome: a.nome,
+              matricula: a.matricula,
+              alunoId: null,
+              fromTurmaOnly: true,
+            })));
+          } catch { /* silencioso: mantém o fluxo avulso */ }
+        }
+      })
       .catch(() => { if (alive) setExamStudents([]); });
     return () => { alive = false; };
   }, [step, identified, selectedExamId, exams]);
@@ -255,11 +284,39 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   // Pareamento manual: sugere os nomes da prova quando não há QR válido
   const canMatchByName = identified === null || identified?.kind === 'unknown';
-  const studentHint = (s: ExamStudent): string | undefined => {
-    const parts: string[] = [];
-    if (s.matricula) parts.push(s.matricula);
-    if (!s.tem_gabarito) parts.push('sem cartão gerado');
-    return parts.length ? parts.join(' · ') : undefined;
+  const examOptions: StudentOption[] = useMemo(
+    () => examStudents.map(s => ({
+      key: String(s.aluno_id),
+      nome: s.nome,
+      matricula: s.matricula,
+      alunoId: s.aluno_id,
+      temGabarito: s.tem_gabarito,
+      codigoUnico: s.codigo_unico,
+    })),
+    [examStudents],
+  );
+  // Fonte das sugestões: prova materializada; senão, catálogo da turma.
+  const nameSource: StudentOption[] = examOptions.length > 0 ? examOptions : turmaOnlyOptions;
+  const autoOptions: AutocompleteOption[] = useMemo(
+    () => findStudentMatches(nameSource, studentName).map(s => ({
+      id: s.key,
+      label: s.nome,
+      sublabel: s.matricula ?? undefined,
+      badge: s.fromTurmaOnly ? 'só na turma' : (s.temGabarito === false ? 'sem cartão gerado' : undefined),
+    })),
+    [nameSource, studentName],
+  );
+
+  const handleStudentNameChange = (v: string) => {
+    setStudentName(v);
+    setSelectedAlunoId(null);
+    setSelectedFromTurma(false);
+  };
+  const handlePickStudent = (o: AutocompleteOption) => {
+    const found = nameSource.find(s => s.key === String(o.id));
+    setStudentName(o.label);
+    setSelectedAlunoId(found?.alunoId ?? null);
+    setSelectedFromTurma(!!found?.fromTurmaOnly);
   };
 
   // ─── Guia de captura adaptado ao gabarito da prova ───
@@ -550,10 +607,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const processOMR = async (dataUrl: string, frames: string[] = []) => {
     setStep('processing');
     setError(null);
-    setProcessingProgress(0);
+    setStageDone(1); // 1. imagem recebida
 
     try {
-      setProcessingProgress(50);
       const qpsUsado = activeExam?.questionsPerSubject ?? 22;
       const modoUsado = activeExam?.layoutMode ?? 'dual';
       const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : activeExam?.templateType === 'herby' ? 'herby' : isSimuladoExam(activeExam) ? 'simulado' : 'padrao';
@@ -574,7 +630,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
         result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive, debugMode);
       }
-      setProcessingProgress(100);
+      // 2–5. concluíram no servidor (âncoras, perspectiva, regiões, marcações)
+      setStageDone(5);
 
       setOmrResult(result);
 
@@ -632,6 +689,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         setIdentified(identification);
         setCandidates(null);
         setManualInfo(null);
+        // 6. comparação com o gabarito oficial (identificação resolvida)
+        setStageDone(6);
         setStep('review');
       } else {
         setError(result.error || 'Erro ao processar a imagem');
@@ -783,7 +842,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setOmrResult(null);
       setManualAnswers({});
       setError(null);
-      setProcessingProgress(0);
+      setStageDone(0);
       setIdentified(null);
       setCandidates(null);
       setManualInfo(null);
@@ -857,8 +916,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       }
       await finishSave({ codigoUnico: identified.cardId, finalName: studentName.trim(), matchedByName: false }, built, true);
     } else if (studentName.trim() && activeExam) {
-      // Sem QR (ou QR desconhecido): casa o nome com os alunos da prova
-      const r = await saveManualByName(built);
+      // Sem QR (ou QR desconhecido): nome clicado na lista atribui direto ao aluno
+      const r = await saveManualByName(built, selectedAlunoId != null ? { alunoId: selectedAlunoId } : {});
       if (!r) return;
       await finishSave(r, built, false);
     }
@@ -866,11 +925,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const resetForm = () => {
     setStudentName('');
+    setSelectedAlunoId(null);
+    setSelectedFromTurma(false);
     setCapturedImage(null);
     setOmrResult(null);
     setManualAnswers({});
     setError(null);
-    setProcessingProgress(0);
+    setStageDone(0);
     setIdentified(null);
     setCandidates(null);
     setManualInfo(null);
@@ -1219,7 +1280,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           {activeExam && (
             <div className="p-3 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg text-brand-800 dark:text-brand-200 text-sm">
               <strong>Identificação automática:</strong> o aluno será reconhecido pelo QR Code impresso no cartão
-              (lista importada em &quot;Importar Alunos&quot;). Não é preciso digitar o nome.
+              (lista da prova, gerada nos cartões por lista de alunos ou vinda de uma turma). Não é preciso digitar o nome.
               Cartões sem QR cadastrado pedirão o nome na conferência.
             </div>
           )}
@@ -1502,23 +1563,86 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       )}
 
       {step === 'processing' && (
-        <div className="card max-w-2xl text-center py-12">
-          <div className="animate-spin w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-gray-600 dark:text-gray-300 font-medium">Processando imagem...</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Lendo as marcações do cartão ({Math.round(processingProgress)}%)
-          </p>
-          <div className="w-full max-w-xs mx-auto bg-line dark:bg-gray-700 rounded-full h-2 mt-4 overflow-hidden">
-            <div
-              className="bg-brand-500 h-2 rounded-full transition-all duration-200"
-              style={{ width: `${processingProgress}%` }}
-            />
-          </div>
+        <div className="card max-w-2xl">
+          <h3 className="text-lg font-semibold text-ink dark:text-white mb-4 text-center">Processando leitura</h3>
+          <ReadStages doneCount={stageDone} anchorLabel={anchorLabelFor(activeExam)} />
         </div>
       )}
 
       {step === 'review' && omrResult && activeExam && (
         <div className="space-y-4 max-w-4xl">
+          {(() => {
+            const dupList = omrResult.duplicateQuestions ?? [];
+            const lowList = omrResult.lowConfidence ?? [];
+            const score = countResults(activeExam, manualAnswers, dupList);
+            const grade = calculateGrade(score.correct, activeExam.totalQuestions, activeExam.gradeScale);
+            const readCount = Object.keys(omrResult.answers ?? {}).length
+              + (omrResult.blankQuestions?.length ?? 0) + dupList.length;
+            const firm = Math.max(0, activeExam.totalQuestions - lowList.length - dupList.length);
+            const alunoNome = identified?.kind === 'ok' || identified?.kind === 'wrong_exam'
+              ? identified.name : (studentName.trim() || '(sem identificação)');
+            const cartao = omrResult.cardId ?? identified?.cardId ?? '—';
+            return (
+              <div className="card">
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="w-9 h-9 rounded-full bg-success-500 flex items-center justify-center text-white shrink-0" aria-hidden>
+                    <CheckCircle2 size={18} strokeWidth={2.2} />
+                  </span>
+                  <h3 className="text-lg font-bold text-ink dark:text-white">Leitura concluída!</h3>
+                </div>
+                <dl className="text-sm space-y-1.5">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-gray-500 dark:text-gray-400">Aluno(a)</dt>
+                    <dd className="font-medium text-ink dark:text-gray-100 text-right">{alunoNome}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-gray-500 dark:text-gray-400">Cartão</dt>
+                    <dd className="font-medium text-ink dark:text-gray-100 text-right font-mono">{cartao}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-gray-500 dark:text-gray-400">Questões lidas</dt>
+                    <dd className="font-medium text-ink dark:text-gray-100 text-right tabular-nums">{readCount} / {activeExam.totalQuestions}</dd>
+                  </div>
+                </dl>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-center">
+                  <div className="rounded-lg bg-surface dark:bg-gray-800/60 p-2.5">
+                    <p className="text-xl font-bold text-success-600 dark:text-success-100 tabular-nums">{score.correct}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Acertos</p>
+                  </div>
+                  <div className="rounded-lg bg-surface dark:bg-gray-800/60 p-2.5">
+                    <p className="text-xl font-bold text-danger-600 dark:text-danger-100 tabular-nums">{score.incorrect}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Erros</p>
+                  </div>
+                  <div className="rounded-lg bg-surface dark:bg-gray-800/60 p-2.5">
+                    <p className="text-xl font-bold text-gray-500 dark:text-gray-300 tabular-nums">{score.blank}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Em branco</p>
+                  </div>
+                  <div className="rounded-lg bg-brand-50 dark:bg-brand-700/20 p-2.5">
+                    <p className="text-xl font-bold text-brand-700 dark:text-brand-200 tabular-nums">{grade}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Nota final</p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    <span>Leitura firme em {firm} de {activeExam.totalQuestions} questões</span>
+                    <span className="tabular-nums">{Math.round((firm / Math.max(1, activeExam.totalQuestions)) * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-line dark:bg-gray-700 rounded-full h-2 overflow-hidden" aria-hidden>
+                    <div
+                      className="bg-success-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.round((firm / Math.max(1, activeExam.totalQuestions)) * 100)}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          <div className="card">
+            <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-3">Andamento da leitura</h3>
+            <ReadStages doneCount={7} anchorLabel={anchorLabelFor(activeExam)} />
+          </div>
+
           {identified?.kind === 'ok' && (
             <div className="p-3 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg text-success-600 dark:text-success-100 text-sm">
               <strong>Aluno identificado pelo banco de dados:</strong> {identified.name}{' '}
@@ -1781,31 +1905,49 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             <div className="mb-4">
               <Field
                 label="Aluno"
+                htmlFor="review-student-name"
                 required={identified?.kind !== 'ok'}
                 helper={identified?.kind === 'ok'
                   ? 'Identificado pelo banco de dados.'
-                  : canMatchByName && examStudents.length > 0
-                    ? `Digite para buscar entre os ${examStudents.length} alunos da prova — se o nome for igual, o resultado vai para o aluno já cadastrado. Alunos marcados “sem cartão gerado” terão o resultado criado e vinculado a eles.`
+                  : canMatchByName && nameSource.length > 0
+                    ? `Digite para buscar entre os ${nameSource.length} alunos ${examOptions.length > 0 ? 'da prova' : 'da turma'} — toque num nome para atribuir o resultado direto a ele. Nomes marcados "sem cartão gerado" terão o resultado criado e vinculado ao aluno.`
                     : (!studentName.trim()
                       ? 'Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.'
                       : undefined)}
               >
-                <Input
-                  type="text"
-                  invalid={!studentName.trim()}
-                  placeholder={identified?.kind === 'ok' ? identified.name : 'Digite o nome do aluno (cartão sem QR cadastrado)'}
-                  value={studentName}
-                  onChange={(e) => setStudentName(e.target.value)}
-                  list={canMatchByName && examStudents.length > 0 ? 'exam-student-names' : undefined}
-                  autoComplete="off"
-                />
+                {canMatchByName && nameSource.length > 0 ? (
+                  <Autocomplete
+                    id="review-student-name"
+                    value={studentName}
+                    onValueChange={handleStudentNameChange}
+                    options={autoOptions}
+                    onPick={handlePickStudent}
+                    invalid={!studentName.trim()}
+                    ariaLabel="Aluno"
+                    placeholder="Digite o nome do aluno (cartão sem QR cadastrado)"
+                    emptyText="Nenhum aluno encontrado — o resultado será criado para o nome digitado."
+                  />
+                ) : (
+                  <Input
+                    id="review-student-name"
+                    type="text"
+                    invalid={!studentName.trim()}
+                    placeholder={identified?.kind === 'ok' ? identified.name : 'Digite o nome do aluno (cartão sem QR cadastrado)'}
+                    value={studentName}
+                    onChange={(e) => handleStudentNameChange(e.target.value)}
+                    autoComplete="off"
+                  />
+                )}
               </Field>
-              {canMatchByName && examStudents.length > 0 && (
-                <datalist id="exam-student-names">
-                  {examStudents.map(s => (
-                    <option key={s.aluno_id} value={s.nome} label={studentHint(s)} />
-                  ))}
-                </datalist>
+              {selectedAlunoId != null && !manualInfo && (
+                <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1 mt-2">
+                  Aluno selecionado na lista — o resultado será atribuído direto a ele.
+                </p>
+              )}
+              {selectedAlunoId == null && selectedFromTurma && studentName.trim() && !manualInfo && (
+                <p className="text-xs text-brand-800 dark:text-brand-200 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 rounded-lg px-2 py-1 mt-2">
+                  Nome do catálogo da turma (ainda não importado para a prova) — o resultado será criado por nome.
+                </p>
               )}
               {manualInfo && (
                 <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1 mt-2">
@@ -2036,6 +2178,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             <Button variant="secondary" onClick={() => onNavigate('results')} icon={<ArrowRight size={16} aria-hidden />}>
               Ver resultados
             </Button>
+          </div>
+          <div className="text-left mt-6 pt-4 border-t border-line dark:border-gray-800">
+            <ReadStages doneCount={8} anchorLabel={anchorLabelFor(activeExam)} />
           </div>
         </div>
       )}
