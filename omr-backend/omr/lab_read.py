@@ -60,25 +60,29 @@ def run_lab_pipeline(
     layout_mode: str = "dual",
     adaptive: bool = False,
     overrides: OmrParams | None = None,
+    debug: bool = False,
 ) -> OMRResult | None:
-    """Dispatch por template — mesmo comportamento dos endpoints de produção."""
+    """Dispatch por template — mesmo comportamento dos endpoints de produção.
+
+    Se debug=True, inclui debug_points no resultado (geometria + scores + verdict).
+    """
     t = normalize_template(template)
     qps = int(questions_per_subject or 22)
     if t in ("sae", "colar"):
-        return process_sae_image(image, n_questions=qps, adaptive=adaptive, overrides=overrides)
+        return process_sae_image(image, n_questions=qps, adaptive=adaptive, overrides=overrides, debug=debug)
     if t == "saev":
-        return process_saev_image(image, questions_per_subject=qps, adaptive=adaptive, overrides=overrides)
+        return process_saev_image(image, questions_per_subject=qps, adaptive=adaptive, overrides=overrides, debug=debug)
     if t == "herby":
         return process_herby_image(
             image, questions_per_subject=qps, adaptive=adaptive, layout_mode=layout_mode,
-            overrides=overrides,
+            overrides=overrides, debug=debug,
         )
     if t == "simulado":
         return process_simulado_image(image, questions_per_subject=qps,
-                                      adaptive=adaptive, overrides=overrides)
+                                      adaptive=adaptive, overrides=overrides, debug=debug)
     return process_image(
         image, questions_per_subject=qps, layout_mode=layout_mode,
-        adaptive=adaptive, overrides=overrides,
+        adaptive=adaptive, overrides=overrides, debug=debug,
     )
 
 

@@ -515,6 +515,80 @@ def lab_image_rectified(
     return FileResponse(path, media_type="image/png", filename=path.name)
 
 
+@router.get("/api/lab/images/{iid}/debug")
+def lab_image_debug(
+    iid: int,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Debug visual da imagem: heatmap de scores por bolha (label -> base64 JPEG).
+
+    Re-processa a imagem original com debug=True para obter geometria + scores + heatmap.
+    """
+    from omr.lab_read import run_lab_pipeline
+    from omr.debug import render_heatmap
+
+    img = _get_image(db, iid, current_user)
+    if img.status != "processed":
+        raise HTTPException(status_code=400, detail="Imagem não processada com sucesso")
+
+    # Recarrega a imagem original
+    original_path = _LAB_ROOT / img.original_path
+    if not original_path.exists():
+        raise HTTPException(status_code=404, detail="Arquivo original não encontrado")
+
+    image_bytes = original_path.read_bytes()
+    image = _decode_image_bytes(image_bytes)
+    if image is None:
+        raise HTTPException(status_code=400, detail="Falha ao decodificar imagem original")
+
+    # Reprocessa com debug=True para obter geometria + scores
+    session = getattr(img, "session", None)
+    result = run_lab_pipeline(
+        image,
+        template=img.template_used,
+        questions_per_subject=img.total_questions,
+        layout_mode=session.layout_mode if session else "dual",
+        adaptive=session.adaptive if session else False,
+        debug=True,
+    )
+    if result is None:
+        raise HTTPException(status_code=500, detail="Falha ao reprocessar imagem para debug")
+
+    if not result.debug_points:
+        raise HTTPException(status_code=500, detail="Falha ao gerar pontos de debug")
+
+    # Render heatmap
+    heatmap_url = None
+    if result.rectified is not None:
+        heatmap_url = render_heatmap(result.rectified, result.debug_points)
+
+    # Agrupa debug_points por questão para resposta estruturada
+    points_by_question: dict[int, list[dict]] = {}
+    for p in result.debug_points:
+        q = p.get("letter", "?")
+        # The letter is the option (A/B/C/D), we need question number from context
+        # build_debug_points uses geom keys = question numbers
+        # We'll need to reconstruct by finding which question this point belongs to
+        # Since debug_points doesn't include question number directly, we can't easily group
+        # For now return flat list with all info
+
+    return {
+        "image_id": img.id,
+        "template": img.template_used,
+        "total_questions": img.total_questions,
+        "debug_points": result.debug_points,
+        "heatmap": heatmap_url,
+    }
+
+    return {
+        "image_id": img.id,
+        "template": img.template_used,
+        "debug_points": debug_points,
+        "heatmap": heatmap_url,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Fase 2 — Métricas, reclassificação, calibração, export, publicação
 # ---------------------------------------------------------------------------

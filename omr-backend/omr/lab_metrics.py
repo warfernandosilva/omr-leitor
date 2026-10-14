@@ -8,12 +8,17 @@ reprocessar (Fase 2, endpoint de reprocessamento com overrides).
 
 Confiança (gap): best - second (maior é melhor). É a métrica de confiança
 padrão; pode ser sobreposta por outro score no futuro.
+
+Fase B: persistência de componentes em data/lab/<n>/components.json.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, asdict
 from itertools import product
+from pathlib import Path
+from typing import Any
 
 from .reader import classify_question
 
@@ -171,3 +176,76 @@ def grid_search(
 
 def best_candidate(results: list[dict]) -> dict | None:
     return results[0] if results else None
+
+
+def save_components_json(session_id: int, questions_with_comps: list[dict], lab_root: Path | None = None) -> Path:
+    """Persiste componentes de score em data/lab/<session_id>/components.json.
+
+    `questions_with_comps`: lista de dicts com chaves:
+    - question_number: int
+    - options: list[OptionComponents]
+    - truth: str|None (opcional)
+    - image_id: int (opcional)
+
+    Retorna o Path do arquivo salvo.
+    """
+    if lab_root is None:
+        lab_root = Path(__file__).resolve().parent.parent / "data" / "lab"
+
+    session_dir = lab_root / str(session_id)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "session_id": session_id,
+        "saved_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "questions": [
+            {
+                "question_number": q["question_number"],
+                "truth": q.get("truth"),
+                "image_id": q.get("image_id"),
+                "options": [asdict(c) for c in q["options"]],
+            }
+            for q in questions_with_comps
+        ],
+    }
+
+    out_path = session_dir / "components.json"
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+
+def load_components_json(session_id: int, lab_root: Path | None = None) -> list[dict]:
+    """Carrega componentes salvos de data/lab/<session_id>/components.json.
+
+    Retorna lista de dicts com as mesmas chaves de save_components_json.
+    Se arquivo não existir, retorna lista vazia.
+    """
+    if lab_root is None:
+        lab_root = Path(__file__).resolve().parent.parent / "data" / "lab"
+
+    path = lab_root / str(session_id) / "components.json"
+    if not path.exists():
+        return []
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        questions = []
+        for q in data.get("questions", []):
+            questions.append({
+                "question_number": q["question_number"],
+                "truth": q.get("truth"),
+                "image_id": q.get("image_id"),
+                "options": [
+                    OptionComponents(
+                        letter=o["letter"],
+                        mean_intensity=o["mean_intensity"],
+                        dark_ratio=o["dark_ratio"],
+                        contrast=o["contrast"],
+                        otsu_threshold=o["otsu_threshold"],
+                    )
+                    for o in q.get("options", [])
+                ],
+            })
+        return questions
+    except (OSError, ValueError, KeyError):
+        return []

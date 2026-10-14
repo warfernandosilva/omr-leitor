@@ -10,18 +10,26 @@ Publicar uma configuração (Fase 2) escreve `data/active_config.json` (via
 omr/lab de Calibração). get_config() passa a refleti-la para o mundo externo —
 o próprio motor continua sendo alimentado pelos `overrides` do chamador, então
 publicar NUNCA muda produção sem o fluxo explícito do Laboratório.
+
+Fase B: snapshot com hash, params_diff e histórico em data/active_config_history/.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # Caminho da configuração ativa publicada pelo Laboratório (Fase 2).
 _DEFAULT_ACTIVE = Path(__file__).resolve().parent.parent / "data" / "active_config.json"
 _ACTIVE_PATH = Path(os.environ.get("OMR_ACTIVE_CONFIG", str(_DEFAULT_ACTIVE)))
+
+# Diretório de histórico de configs publicadas
+_HISTORY_DIR = Path(__file__).resolve().parent.parent / "data" / "active_config_history"
 
 
 @dataclass(frozen=True)
@@ -50,10 +58,16 @@ class OmrParams:
 
 
 def _read_active_config() -> dict:
+    """Lê o arquivo ativo e retorna apenas o dict de parâmetros (compatível com formato novo e antigo)."""
     try:
         if _ACTIVE_PATH.exists():
             data = json.loads(_ACTIVE_PATH.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                # Formato novo: {"params": {...}, "hash": "...", "updated_at": "..."}
+                if "params" in data and isinstance(data["params"], dict):
+                    return data["params"]
+                # Formato antigo: dict direto dos parâmetros
+                return data
     except (OSError, ValueError):
         return {}
     return {}
@@ -62,6 +76,17 @@ def _read_active_config() -> dict:
 def get_active_config() -> dict:
     """Configuração publicada ativa (vazia se nenhuma foi publicada)."""
     return _read_active_config()
+
+
+def get_active_config_with_meta() -> dict:
+    """Configuração ativa publicada com hash e metadados (vazio se nenhuma)."""
+    if not _ACTIVE_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_ACTIVE_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def get_params_override() -> OmrParams:
@@ -106,3 +131,95 @@ def clear_active_config() -> None:
             _ACTIVE_PATH.unlink()
     except OSError:
         pass
+
+
+def _config_hash(params: dict) -> str:
+    """SHA-256 hash dos parâmetros normalizados (ordem estável)."""
+    normalized = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def write_active_config(params: dict) -> None:
+    """Grava a configuração ativa publicada (usado pelo endpoint publish).
+
+    Só é chamado pelo fluxo explícito do Laboratório/Calibração — nunca
+    automaticamente pela leitura de imagens.
+    """
+    _ACTIVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "params": params,
+        "hash": _config_hash(params),
+        "updated_at": datetime.utcnow().isoformat() + "Z",
+    }
+    _ACTIVE_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    _save_history_entry(payload)
+
+
+def _save_history_entry(payload: dict) -> None:
+    """Salva entrada no histórico de configs publicadas."""
+    _HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    hist_file = _HISTORY_DIR / f"{timestamp}_{payload['hash']}.json"
+    hist_file.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def params_diff(old: dict, new: dict) -> dict:
+    """Compara dois dicionários de parâmetros e devolve as diferenças.
+
+    Retorna dict com chaves: added, removed, changed (dict old->new), unchanged.
+    """
+    all_keys = set(old.keys()) | set(new.keys())
+    added = {k: new[k] for k in all_keys if k not in old}
+    removed = {k: old[k] for k in all_keys if k not in new}
+    changed = {}
+    unchanged = {}
+    for k in all_keys:
+        if k in old and k in new:
+            if old[k] != new[k]:
+                changed[k] = {"old": old[k], "new": new[k]}
+            else:
+                unchanged[k] = old[k]
+    return {
+        "added": added,
+        "removed": removed,
+        "changed": changed,
+        "unchanged": unchanged,
+    }
+
+
+def list_active_config_history(limit: int = 50) -> list[dict]:
+    """Lista entradas do histórico (mais recentes primeiro)."""
+    if not _HISTORY_DIR.exists():
+        return []
+    entries = []
+    for f in sorted(_HISTORY_DIR.glob("*.json"), reverse=True)[:limit]:
+        try:
+            entries.append(json.loads(f.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            pass
+    return entries
+
+
+def get_active_config_with_meta() -> dict:
+    """Configuração ativa publicada com hash e metadados (vazio se nenhuma)."""
+    if not _ACTIVE_PATH.exists():
+        return {}
+    try:
+        return json.loads(_ACTIVE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def get_params_override() -> OmrParams:
+    """OmrParams derivado da configuração ativa publicada (se houver)."""
+    cfg = _read_active_config()
+    return OmrParams(
+        floor=cfg.get("floor"),
+        margin=cfg.get("margin"),
+        low_conf_threshold=cfg.get("low_conf_threshold"),
+        weights=tuple(cfg["weights"]) if isinstance(cfg.get("weights"), list) else None,
+        inner_radius=cfg.get("inner_radius"),
+        square_inset=cfg.get("square_inset"),
+        clahe_clip=cfg.get("clahe_clip"),
+        clahe_tiles=tuple(cfg["clahe_tiles"]) if isinstance(cfg.get("clahe_tiles"), list) else None,
+    )
