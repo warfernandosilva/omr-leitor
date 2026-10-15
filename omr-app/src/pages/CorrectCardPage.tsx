@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
@@ -19,7 +20,7 @@ import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange, sc
 import { useAutoCapture } from '../hooks/useAutoCapture';
 import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
 import {
-  guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide,
+  guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide, tapToFocusPoint,
 } from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
 import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor } from '../utils/overlay-bubbles';
@@ -28,8 +29,9 @@ import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 import {
-  ArrowRight, Camera, CheckCircle2, Eye, Flashlight, FlashlightOff,
-  ImagePlus, ImageUp, Play, RefreshCw, RotateCcw, Save, SwitchCamera, Trash2, ZoomIn,
+  ArrowLeft, ArrowRight, Camera, CheckCircle2, Eye, Flashlight, FlashlightOff, Focus,
+  ImagePlus, ImageUp, Info, Play, RefreshCw, RotateCcw, Save,
+  SlidersHorizontal, Sun, SwitchCamera, Trash2, X, ZoomIn,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Field from '../components/ui/Field';
@@ -190,6 +192,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // Captura automática por enquadramento
   const [autoMode, setAutoMode] = useState(true);
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
+  // Layout de captura: grade de terços + painel "Ajustes" (lateral/inline)
+  const [showThirds, setShowThirds] = useState(false);
+  const [showAdjust, setShowAdjust] = useState(false);
   // Modo contínuo: após salvar, volta direto à câmera (correção em série)
   const [continuous, setContinuous] = useState(false);
   const [sessionCount, setSessionCount] = useState(0);
@@ -460,6 +465,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     await startCamera(videoDevices[next], false);
   };
 
+  // Toque-para-focar no visor (só onde o aparelho expõe pointsOfInterest)
+  const handleViewTap = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!focusPointSupported || !autoMode || confirmUrl) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const p = tapToFocusPoint(
+      rect.width, rect.height,
+      e.clientX - rect.left, e.clientY - rect.top,
+    );
+    void setFocusPoint(p.x, p.y);
+  };
+
   const captureDataUrl = (): string | null => {
     if (!videoRef.current || !canvasRef.current) return null;
     const video = videoRef.current;
@@ -548,7 +564,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   const { analysis: frameAnalysis, lockProgress, torchOn, torchSupported, toggleTorch,
-    zoomSupported, zoom, maxZoom, setZoomLevel, reset: resetAuto } =
+    zoomSupported, zoom, maxZoom, setZoomLevel,
+    exposureSupported, exposureMin, exposureMax, exposureStep, exposure, setExposureLevel,
+    focusSupported, focusPointSupported, focusAuto, toggleFocusAuto, setFocusPoint,
+    reset: resetAuto } =
     useAutoCapture(videoRef, {
       enabled: step === 'capture' && autoMode && !confirmUrl,
       onLocked: handleAutoLocked,
@@ -589,6 +608,30 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       streamRef.current = null;
     }
   };
+
+  // Volta da tela de captura em tela cheia para o formulário
+  const goBackFromCapture = () => {
+    stopCamera();
+    setConfirmUrl(null);
+    setSharpRetry(null);
+    setStep('form');
+  };
+
+  // Tela de captura em tela cheia: trava o scroll do fundo + Escape volta
+  useEffect(() => {
+    if (step !== 'capture') return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') goBackFromCapture();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prev;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1337,13 +1380,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               {window.isSecureContext ? 'Enviar imagem' : 'Câmera do sistema'}
             </Button>
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
           {!window.isSecureContext && (
             <p className="text-xs text-brand-600 dark:text-brand-200 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg p-2">
               Acesso via IP — ao clicar em “Capturar com Câmera” ou “Enviar Imagem” o sistema abre a câmera ou a galeria do celular.
@@ -1352,47 +1388,90 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         </div>
       )}
 
-      {step === 'capture' && (
-        <div className="card max-w-2xl">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <p className="text-sm text-gray-600 dark:text-gray-300">
-              {autoMode && !confirmUrl
-                ? 'Aponte para o cartão — a captura é automática ao travar.'
-                : 'Enquadre o cartão-resposta na moldura.'}
-            </p>
+      {/* input da galeria fora do form: a barra de captura também usa (modo capture) */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileUpload}
+      />
+
+      {step === 'capture' && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Captura do cartão-resposta"
+          className="fixed inset-0 z-[80] flex flex-col bg-[#04192E] text-white"
+        >
+          {/* header: seta + título (como na referência) */}
+          <div className="flex shrink-0 items-center gap-2 px-2 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+            <button
+              type="button"
+              onClick={goBackFromCapture}
+              aria-label="Voltar"
+              title="Voltar"
+              className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-white/90 transition-colors hover:bg-white/10"
+            >
+              <ArrowLeft size={22} aria-hidden />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-medium uppercase tracking-widest text-sky-200/70 leading-none">correção OMR</p>
+              <h2 className="mt-0.5 truncate text-lg font-semibold leading-tight">Nova leitura</h2>
+            </div>
             {sessionCount > 0 && (
-              <span className="shrink-0 text-xs font-medium text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-full px-2 py-0.5">
+              <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/15 px-2 py-0.5 text-xs font-medium text-emerald-200">
                 {sessionCount} corrigido(s)
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => setShowAdjust(a => !a)}
+              aria-pressed={showAdjust}
+              aria-expanded={showAdjust}
+              aria-label="Ajustes da câmera"
+              title="Ajustes da câmera"
+              className={`inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full transition-colors ${showAdjust ? 'bg-[#0B6BFB] text-white' : 'text-white/90 hover:bg-white/10'}`}
+            >
+              <SlidersHorizontal size={18} aria-hidden />
+            </button>
           </div>
-          {(!autoMode || confirmUrl) && (
-            <ul className="text-xs text-gray-500 dark:text-gray-400 list-disc list-inside space-y-1 mb-3">
-              <li>Bem iluminado (sem sombras sobre os círculos)</li>
-              <li>Plano e sem dobraduras</li>
-              <li>Totalmente visível dentro da moldura</li>
-            </ul>
-          )}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={autoMode}
-            onClick={() => { setAutoMode(a => !a); setConfirmUrl(null); setSharpRetry(null); }}
-            className="mb-3 inline-flex items-center gap-3 min-h-[48px] cursor-pointer"
-          >
-            <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${autoMode ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
-              <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${autoMode ? 'translate-x-6' : 'translate-x-1'}`} />
-            </span>
-            <span className="text-sm text-gray-700 dark:text-gray-300 text-left">Captura automática por enquadramento</span>
-          </button>
+          {/* barra de instrução (como na referência) */}
+          <div className="mx-3 mb-2 flex shrink-0 items-start gap-2 rounded-xl bg-[#182F4A]/90 px-3 py-2">
+            <Info size={15} className="mt-0.5 shrink-0 text-sky-200" aria-hidden />
+            <p className="text-[13px] leading-snug text-white">
+              {confirmUrl
+                ? 'Prévia travada — confira e envie para correção.'
+                : autoMode
+                  ? 'Enquadre o cartão-resposta na moldura. Mantenha o cartão bem iluminado e plano.'
+                  : 'Enquadre o cartão-resposta e toque no obturador para capturar.'}
+            </p>
+          </div>
 
-          <div ref={viewRef} className="relative bg-black overflow-hidden mb-4 -mx-6 rounded-none sm:mx-0 sm:rounded-xl">
-            <video ref={videoRef} autoPlay playsInline muted className="w-full sm:rounded-xl" style={{ height: 'min(78dvh, 640px)', objectFit: 'cover' }} />
+          {/* visor full-bleed: preenche o espaço entre a instrução e a barra */}
+          <div
+            ref={viewRef}
+            onClick={handleViewTap}
+            className="relative min-h-0 w-full flex-1 overflow-hidden bg-black"
+          >
+            <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
             {/* chip do modelo da prova */}
             {autoMode && !confirmUrl && (
               <span className="absolute top-2 left-2 z-10 text-[11px] font-semibold text-white bg-black/55 rounded-full px-2.5 py-1 pointer-events-none">
                 {templateLabel(activeExam?.templateType)}
               </span>
+            )}
+            {/* ajustes ficam no header (ícone) e no sheet; visor limpo como na referência */}
+            {/* grade regra-dos-terços (composição) */}
+            {showThirds && autoMode && !confirmUrl && (
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
+                {[100 / 3, 200 / 3].map(v => (
+                  <g key={v} stroke="rgba(255,255,255,0.45)" strokeWidth="0.4">
+                    <line x1={v} y1="0" x2={v} y2="100" />
+                    <line x1="0" y1={v} x2="100" y2={v} />
+                  </g>
+                ))}
+              </svg>
             )}
             {/* guia A4 calculado para o visor + alvos das âncoras do modelo (0..100) */}
             {autoMode && !confirmUrl && (
@@ -1465,103 +1544,233 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             {!autoMode && (
               <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-lg pointer-events-none" />
             )}
+            {/* dica de enquadramento difícil: chip sobre o visor */}
+            {autoMode && !confirmUrl && searchSecs >= 8 && !frameAnalysis?.locked && (
+              <p className="absolute inset-x-3 bottom-12 z-10 rounded-lg border border-amber-300/40 bg-black/60 px-2 py-1.5 text-center text-[11px] text-amber-100 pointer-events-none">
+                Enquadramento difícil? Toque no <strong>obturador</strong> para forçar a captura.
+              </p>
+            )}
+            {/* status da captura automática: overlay fino no rodapé do visor */}
+            {autoMode && !confirmUrl && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-2">
+                <div className="flex items-center justify-between gap-2 text-[11px] leading-tight">
+                  <span className={frameAnalysis?.locked ? 'font-medium text-emerald-300' : 'text-white/90'}>
+                    {sharpRetry ?? (frameAnalysis ? frameAnalysis.hint : 'Apontando a câmera...')}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-white/70">{frameAnalysis ? `${frameAnalysis.found}/4 cantos` : ''}</span>
+                </div>
+                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/20">
+                  <div className="h-1.5 rounded-full bg-emerald-400 transition-all duration-150" style={{ width: `${Math.round(lockProgress * 100)}%` }} />
+                </div>
+              </div>
+            )}
           </div>
-
-          {/* barra de status da captura automática */}
-          {autoMode && !confirmUrl && (
-            <div className="mb-4">
-              <div className="flex items-center justify-between text-sm mb-1">
-                <span className={frameAnalysis?.locked ? 'text-success-600 dark:text-success-100 font-medium' : 'text-gray-600 dark:text-gray-300'}>
-                  {sharpRetry ?? (frameAnalysis ? frameAnalysis.hint : 'Apontando a câmera...')}
-                </span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">{frameAnalysis ? `${frameAnalysis.found}/4 cantos` : ''}</span>
+          {/* sheet Ajustes: bottom-sheet no celular, painel lateral no desktop (tema escuro) */}
+          {showAdjust && !confirmUrl && (
+            <>
+              <div className="absolute inset-0 z-20 bg-black/50" onClick={() => setShowAdjust(false)} aria-hidden />
+              <div className="absolute inset-x-0 bottom-0 z-30 max-h-[70dvh] overflow-y-auto rounded-t-2xl bg-[#0A2540] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:inset-y-0 lg:bottom-0 lg:left-auto lg:right-0 lg:top-0 lg:max-h-none lg:w-80 lg:rounded-none lg:rounded-l-2xl">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-white">Ajustes da câmera</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdjust(false)}
+                    aria-label="Fechar ajustes"
+                    className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-full text-white/70 transition-colors hover:bg-white/10"
+                  >
+                    <X size={16} aria-hidden />
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium uppercase tracking-widest text-sky-200/60">Captura</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={autoMode}
+                      onClick={() => { setAutoMode(a => !a); setConfirmUrl(null); setSharpRetry(null); }}
+                      className="flex min-h-[48px] cursor-pointer items-center gap-3"
+                    >
+                      <span className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${autoMode ? 'bg-[#0B6BFB]' : 'bg-white/20'}`}>
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${autoMode ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </span>
+                      <span className="text-left text-xs text-white/90">Captura automática por enquadramento</span>
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium uppercase tracking-widest text-sky-200/60">Composição</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={showThirds}
+                      onClick={() => setShowThirds(t => !t)}
+                      className="flex min-h-[48px] cursor-pointer items-center gap-3"
+                    >
+                      <span className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${showThirds ? 'bg-[#0B6BFB]' : 'bg-white/20'}`}>
+                        <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${showThirds ? 'translate-x-6' : 'translate-x-1'}`} />
+                      </span>
+                      <span className="text-left text-xs text-white/90">Grade de terços</span>
+                    </button>
+                  </div>
+                  {zoomSupported && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium uppercase tracking-widest text-sky-200/60">Zoom</span>
+                      <div className="flex items-center gap-2">
+                        <ZoomIn size={15} className="shrink-0 text-sky-200/70" aria-hidden />
+                        <input
+                          type="range"
+                          min={1}
+                          max={maxZoom}
+                          step={0.1}
+                          value={zoom}
+                          onChange={(e) => setZoomLevel(Number(e.target.value))}
+                          className="flex-1 accent-[#0B6BFB]"
+                          aria-label="Zoom da câmera"
+                        />
+                        <span className="w-9 text-right text-xs tabular-nums text-white/70">{zoom.toFixed(1)}x</span>
+                      </div>
+                    </div>
+                  )}
+                  {exposureSupported && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium uppercase tracking-widest text-sky-200/60">Exposição (brilho do sensor)</span>
+                      <div className="flex items-center gap-2">
+                        <Sun size={15} className="shrink-0 text-sky-200/70" aria-hidden />
+                        <input
+                          type="range"
+                          min={exposureMin}
+                          max={exposureMax}
+                          step={exposureStep}
+                          value={exposure}
+                          onChange={(e) => void setExposureLevel(Number(e.target.value))}
+                          className="flex-1 accent-[#0B6BFB]"
+                          aria-label="Exposição da câmera"
+                        />
+                        <span className="w-10 text-right text-xs tabular-nums text-white/70">{exposure.toFixed(1)}</span>
+                      </div>
+                    </div>
+                  )}
+                  {(focusSupported || focusPointSupported) && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium uppercase tracking-widest text-sky-200/60">Foco</span>
+                      {focusSupported && (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={focusAuto}
+                          onClick={() => void toggleFocusAuto()}
+                          className="flex min-h-[48px] cursor-pointer items-center gap-3"
+                        >
+                          <span className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${focusAuto ? 'bg-[#0B6BFB]' : 'bg-white/20'}`}>
+                            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${focusAuto ? 'translate-x-6' : 'translate-x-1'}`} />
+                          </span>
+                          <span className="text-left text-xs text-white/90">Foco automático {focusAuto ? '' : '(toque no visor para focar)'}</span>
+                        </button>
+                      )}
+                      {focusPointSupported && (
+                        <p className="flex items-center gap-1 text-[11px] text-white/60">
+                          <Focus size={12} aria-hidden /> Toque num ponto do visor para focar ali.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {!exposureSupported && !focusSupported && !zoomSupported && (
+                    <p className="text-[11px] text-white/60">
+                      Neste aparelho o sistema controla brilho, foco e zoom sozinho — aqui aparecem só captura e composição.
+                    </p>
+                  )}
+                </div>
               </div>
-              <div className="w-full bg-line dark:bg-gray-700 rounded-full h-2 overflow-hidden">
-                <div className="bg-success-500 h-2 rounded-full transition-all duration-150" style={{ width: `${Math.round(lockProgress * 100)}%` }} />
-              </div>
-              {/* fallback manual: trava não engata há ~8s */}
-              {searchSecs >= 8 && !frameAnalysis?.locked && (
-                <p className="mt-2 text-xs text-warning-600 dark:text-warning-100 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg px-2 py-1.5">
-                  Enquadramento difícil? Toque em <strong>Capturar agora</strong> para forçar a captura.
-                </p>
-              )}
-            </div>
+            </>
           )}
 
-          {/* zoom óptico/digital (só onde o aparelho expõe — Android/Chrome) */}
-          {autoMode && !confirmUrl && zoomSupported && (
-            <div className="flex items-center gap-2 mb-4">
-              <ZoomIn size={15} className="text-gray-400 dark:text-gray-500 shrink-0" aria-hidden />
-              <input
-                type="range"
-                min={1}
-                max={maxZoom}
-                step={0.1}
-                value={zoom}
-                onChange={(e) => setZoomLevel(Number(e.target.value))}
-                className="flex-1 accent-brand-500"
-                aria-label="Zoom da câmera"
-              />
-              <span className="text-xs text-gray-500 dark:text-gray-400 w-9 text-right tabular-nums">{zoom.toFixed(1)}x</span>
-            </div>
-          )}
+          {/* status, cantos e zoom vivem como overlay no visor e no sheet de Ajustes */}
 
           <canvas ref={canvasRef} className="hidden" />
 
           {confirmUrl ? (
-            <div className="flex gap-2 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
-              <Button variant="success" onClick={confirmAutoCapture} className="flex-1 min-h-[48px]">
+            <div className="flex shrink-0 gap-2 bg-[#051C34] px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              <button
+                type="button"
+                onClick={confirmAutoCapture}
+                className="min-h-[52px] flex-1 rounded-xl bg-[#0B6BFB] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0959d6]"
+              >
                 Enviar para correção
-              </Button>
-              <Button variant="secondary" onClick={retryAutoCapture} className="min-h-[48px]">
+              </button>
+              <button
+                type="button"
+                onClick={retryAutoCapture}
+                className="min-h-[52px] rounded-xl bg-white/10 px-4 text-sm font-medium text-white transition-colors hover:bg-white/20"
+              >
                 Repetir
-              </Button>
+              </button>
             </div>
           ) : (
-            <div className="flex gap-2 sticky bottom-0 pb-[env(safe-area-inset-bottom)]">
-              {!autoMode && (
-                <Button onClick={captureFrame} className="flex-1 min-h-[48px]">
-                  Capturar
-                </Button>
-              )}
-              {autoMode && (
+            <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-start bg-[#051C34] px-6 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {/* Galeria (como na referência) */}
+              <div className="flex flex-col items-center gap-1 justify-self-start">
                 <button
-                  onClick={captureFrame}
-                  className={`btn btn-secondary flex-1 min-h-[48px] ${searchSecs >= 8 && !frameAnalysis?.locked ? 'animate-pulse border-warning-500' : ''}`}
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Galeria / enviar imagem"
+                  aria-label="Abrir galeria"
+                  className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
                 >
-                  Capturar agora
+                  <ImagePlus size={20} aria-hidden />
                 </button>
-              )}
-              {autoMode && torchSupported && (
-                <Button
-                  variant={torchOn ? 'success' : 'secondary'}
-                  onClick={toggleTorch}
-                  className="min-h-[48px]"
-                  icon={torchOn ? <Flashlight size={16} aria-hidden /> : <FlashlightOff size={16} aria-hidden />}
-                  aria-pressed={torchOn}
-                  title="Lanterna"
-                >
-                  {torchOn ? 'Ligada' : 'Luz'}
-                </Button>
-              )}
-              {videoDevices.length > 1 && (
-                <Button
-                  variant="secondary"
-                  size="icon"
-                  onClick={switchCamera}
-                  className="min-h-[48px] min-w-[48px]"
-                  title="Trocar câmera (frontal/traseira)"
-                  aria-label="Trocar câmera"
-                >
-                  <SwitchCamera size={18} aria-hidden />
-                </Button>
-              )}
-              <Button variant="secondary" onClick={() => { stopCamera(); setConfirmUrl(null); setSharpRetry(null); setStep('form'); }} className="min-h-[48px]">
-                Cancelar
-              </Button>
+                <span className="text-[11px] text-white/80">Galeria</span>
+              </div>
+              {/* obturador: disco branco + anel azul (como na referência) */}
+              <button
+                type="button"
+                onClick={captureFrame}
+                aria-label={autoMode ? 'Capturar agora' : 'Capturar'}
+                title={autoMode ? 'Capturar agora' : 'Capturar'}
+                className={`flex h-[68px] w-[68px] shrink-0 items-center justify-center rounded-full bg-white p-1.5 shadow-lg ring-4 transition-transform active:scale-95 ${
+                  autoMode && searchSecs >= 8 && !frameAnalysis?.locked
+                    ? 'animate-pulse ring-amber-400'
+                    : 'ring-[#0B6BFB]'
+                }`}
+              >
+                <span className="block h-full w-full rounded-full bg-[#0B6BFB]/90" aria-hidden />
+              </button>
+              {/* controle direito: lanterna; senão, trocar câmera (como na referência) */}
+              <div className="flex flex-col items-center gap-1 justify-self-end">
+                {autoMode && torchSupported ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={toggleTorch}
+                      aria-pressed={torchOn}
+                      title="Lanterna"
+                      aria-label={torchOn ? 'Apagar lanterna' : 'Acender lanterna'}
+                      className={`flex h-12 w-12 items-center justify-center rounded-full transition-colors ${torchOn ? 'bg-amber-400 text-[#04192E]' : 'bg-white/10 text-white hover:bg-white/20'}`}
+                    >
+                      {torchOn ? <Flashlight size={20} aria-hidden /> : <FlashlightOff size={20} aria-hidden />}
+                    </button>
+                    <span className="text-[11px] text-white/80">{torchOn ? 'Ligada' : 'Luz'}</span>
+                  </>
+                ) : videoDevices.length > 1 ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={switchCamera}
+                      title="Trocar câmera (frontal/traseira)"
+                      aria-label="Trocar câmera"
+                      className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20"
+                    >
+                      <SwitchCamera size={20} aria-hidden />
+                    </button>
+                    <span className="text-[11px] text-white/80">Virar</span>
+                  </>
+                ) : (
+                  <span className="h-12 w-12" aria-hidden />
+                )}
+              </div>
             </div>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
 
       {step === 'processing' && (

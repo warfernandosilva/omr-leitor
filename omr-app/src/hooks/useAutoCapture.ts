@@ -46,6 +46,16 @@ export function useAutoCapture(
   const [zoomSupported, setZoomSupported] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [maxZoom, setMaxZoom] = useState(1);
+  // Painel "Ajustes": exposição e foco só aparecem quando o aparelho expõe
+  // (Android/Chrome via getCapabilities; iOS/Safari não — seguem ocultos).
+  const [exposureSupported, setExposureSupported] = useState(false);
+  const [exposureMin, setExposureMin] = useState(-2);
+  const [exposureMax, setExposureMax] = useState(2);
+  const [exposureStep, setExposureStep] = useState(0.5);
+  const [exposure, setExposure] = useState(0);
+  const [focusSupported, setFocusSupported] = useState(false);
+  const [focusPointSupported, setFocusPointSupported] = useState(false);
+  const [focusAuto, setFocusAuto] = useState(true);
 
   const streakRef = useRef(0);
   const attemptsRef = useRef(0);
@@ -77,6 +87,11 @@ export function useAutoCapture(
       setZoomSupported(false);
       setZoom(1);
       setMaxZoom(1);
+      setExposureSupported(false);
+      setExposure(0);
+      setFocusSupported(false);
+      setFocusPointSupported(false);
+      setFocusAuto(true);
       attemptsRef.current = 0;
       streakRef.current = 0;
       return;
@@ -135,7 +150,7 @@ export function useAutoCapture(
     return () => cancelAnimationFrame(rafRef.current);
   }, [enabled, videoRef, fireLocked]);
 
-  // Detecta suporte à lanterna e ao zoom quando o stream existe
+  // Detecta suporte à lanterna, zoom, exposição e foco quando o stream existe
   // (Android/Chrome expõem via getCapabilities; iOS não — segue oculto)
   useEffect(() => {
     if (!enabled) return;
@@ -147,6 +162,8 @@ export function useAutoCapture(
       try {
         const caps = track?.getCapabilities?.() as unknown as {
           torch?: boolean; zoom?: { min?: number; max?: number };
+          exposureCompensation?: { min?: number; max?: number; step?: number };
+          focusMode?: string[];
         } | undefined;
         if (caps?.torch) {
           setTorchSupported(true);
@@ -154,6 +171,26 @@ export function useAutoCapture(
         if (caps?.zoom && typeof caps.zoom.max === 'number' && caps.zoom.max > 1) {
           setZoomSupported(true);
           setMaxZoom(caps.zoom.max);
+        }
+        const ec = caps?.exposureCompensation;
+        if (ec && typeof ec.min === 'number' && typeof ec.max === 'number' && ec.max > ec.min) {
+          setExposureSupported(true);
+          setExposureMin(ec.min);
+          setExposureMax(ec.max);
+          if (typeof ec.step === 'number' && ec.step > 0) setExposureStep(ec.step);
+          try {
+            const cur = (track?.getSettings?.() as unknown as { exposureCompensation?: number } | undefined)
+              ?.exposureCompensation;
+            if (typeof cur === 'number') setExposure(cur);
+          } catch {
+            /* mantém o default */
+          }
+        }
+        if (Array.isArray(caps?.focusMode) && caps.focusMode.length > 0) {
+          setFocusSupported(true);
+          // pointsOfInterest não aparece em getCapabilities; a disponibilidade
+          // real é confirmada no primeiro toque (falha silenciosa desliga).
+          setFocusPointSupported(true);
         }
       } catch {
         /* ignora */
@@ -194,9 +231,54 @@ export function useAutoCapture(
     setStatus('searching');
   }, []);
 
+  // Exposição do sensor (brilho real — sem filtro falso no preview).
+  const setExposureLevel = useCallback(async (v: number) => {
+    const track = (videoRef.current?.srcObject as MediaStream | null)
+      ?.getVideoTracks?.()?.[0] as (MediaStreamTrack & { applyConstraints?: (c: unknown) => Promise<void> }) | undefined;
+    if (!track?.applyConstraints) return;
+    try {
+      await track.applyConstraints({ advanced: [{ exposureCompensation: v }] } as unknown as MediaTrackConstraints);
+      setExposure(v);
+    } catch {
+      setExposureSupported(false);
+    }
+  }, [videoRef]);
+
+  // Foco automático (contínuo) ↔ manual.
+  const toggleFocusAuto = useCallback(async () => {
+    const track = (videoRef.current?.srcObject as MediaStream | null)
+      ?.getVideoTracks?.()?.[0] as (MediaStreamTrack & { applyConstraints?: (c: unknown) => Promise<void> }) | undefined;
+    if (!track?.applyConstraints) return;
+    const next = !focusAuto;
+    try {
+      await track.applyConstraints({ advanced: [{ focusMode: next ? 'continuous' : 'manual' }] } as unknown as MediaTrackConstraints);
+      setFocusAuto(next);
+    } catch {
+      setFocusSupported(false);
+    }
+  }, [focusAuto, videoRef]);
+
+  // Toque-para-focar: ponto normalizado 0..1 + disparo único.
+  const setFocusPoint = useCallback(async (nx: number, ny: number) => {
+    const track = (videoRef.current?.srcObject as MediaStream | null)
+      ?.getVideoTracks?.()?.[0] as (MediaStreamTrack & { applyConstraints?: (c: unknown) => Promise<void> }) | undefined;
+    if (!track?.applyConstraints) return;
+    try {
+      await track.applyConstraints({
+        advanced: [{ pointsOfInterest: [{ x: nx, y: ny }], focusMode: 'single-shot' }],
+      } as unknown as MediaTrackConstraints);
+      setFocusAuto(false);
+    } catch {
+      setFocusPointSupported(false);
+    }
+  }, [videoRef]);
+
   return {
     analysis, lockProgress, status,
     torchOn, torchSupported, toggleTorch,
-    zoomSupported, zoom, maxZoom, setZoomLevel, reset,
+    zoomSupported, zoom, maxZoom, setZoomLevel,
+    exposureSupported, exposureMin, exposureMax, exposureStep, exposure, setExposureLevel,
+    focusSupported, focusPointSupported, focusAuto, toggleFocusAuto, setFocusPoint,
+    reset,
   };
 }

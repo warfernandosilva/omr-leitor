@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   guideRectFor, anchorTargetsFor, thresholdsFor, captureTemplateFor,
-  fallbackGuide, CARD_ASPECT,
+  fallbackGuide, CARD_ASPECT, tapToFocusPoint,
 } from './capture-guide';
 import { DEFAULT_THRESHOLDS } from './frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT } from './card-template';
@@ -141,5 +141,23 @@ describe('thresholdsFor / captureTemplateFor', () => {
     const sae = anchorTargetsFor('sae', guide);
     expect(saev.TL.y).toBeLessThan(sae.TL.y);
     expect(thresholdsFor('saev')).toEqual(DEFAULT_THRESHOLDS);
+  });
+});
+
+describe('tapToFocusPoint', () => {
+  it('normaliza o toque para 0..1 (pointsOfInterest)', () => {
+    expect(tapToFocusPoint(360, 640, 90, 160)).toEqual({ x: 0.25, y: 0.25 });
+    expect(tapToFocusPoint(360, 640, 360, 640)).toEqual({ x: 1, y: 1 });
+    expect(tapToFocusPoint(360, 640, 0, 0)).toEqual({ x: 0, y: 0 });
+  });
+
+  it('limita (clamp) toques fora do visor', () => {
+    expect(tapToFocusPoint(360, 640, -20, 900)).toEqual({ x: 0, y: 1 });
+    expect(tapToFocusPoint(360, 640, 500, -5)).toEqual({ x: 1, y: 0 });
+  });
+
+  it('visor inválido: cai no centro', () => {
+    expect(tapToFocusPoint(0, 640, 90, 160)).toEqual({ x: 0.5, y: 0.5 });
+    expect(tapToFocusPoint(360, 0, 90, 160)).toEqual({ x: 0.5, y: 0.5 });
   });
 });

@@ -92,6 +92,17 @@ export function thresholdsFor(template: CaptureTemplate): GuideThresholds {
   };
 }
 
+// Ponto de toque-para-focar normalizado 0..1 (pointsOfInterest), com clamp.
+// Função pura p/ teste: o <video> usa objectFit cover preenchendo o visor,
+// então a posição relativa ao elemento aproxima a posição no frame visível.
+export function tapToFocusPoint(
+  viewW: number, viewH: number, offsetX: number, offsetY: number,
+): { x: number; y: number } {
+  const cx = (v: number) => Math.min(1, Math.max(0, v));
+  if (!(viewW > 0) || !(viewH > 0)) return { x: 0.5, y: 0.5 };
+  return { x: cx(offsetX / viewW), y: cx(offsetY / viewH) };
+}
+
 // Mapeia o templateType da prova (legado sem tipo = padrão)
 export function captureTemplateFor(templateType?: string): CaptureTemplate {
   if (templateType === 'sae') return 'sae';
