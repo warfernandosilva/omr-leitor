@@ -117,6 +117,10 @@ def default_config(page_w: int = 0, page_h: int = 0) -> dict:
         "schema_version": SCHEMA_VERSION,
         "page_w": int(page_w),
         "page_h": int(page_h),
+        # Multi-página: o modelo pode ter N páginas sobre a MESMA folha
+        # importada. Âncoras/blocos carregam `page` (0-based); QR, regiões
+        # informativas, campos de impressão e parâmetros são compartilhados.
+        "n_pages": 1,
         "anchors": [],
         "qr": None,
         "info_regions": [],
@@ -155,6 +159,14 @@ def _opt_int(v: Any) -> int | None:
         return None
 
 
+def _page_index(v: Any) -> int:
+    """Índice de página (0-based) tolerante a ausência/valor inválido."""
+    try:
+        return max(0, int(v))
+    except (TypeError, ValueError):
+        return 0
+
+
 def normalize_config(config: dict | None) -> dict:
     """Normaliza a configuração recebida do editor (defaults + tipos).
 
@@ -174,6 +186,7 @@ def normalize_config(config: dict | None) -> dict:
             "type": a.get("type") if a.get("type") in ("aruco", "quad") else "quad",
             "corner": a.get("corner") if a.get("corner") in CORNERS else None,
             "aruco_id": int(a["aruco_id"]) if a.get("aruco_id") is not None else None,
+            "page": _page_index(a.get("page")),
             "x": _clamp01(a.get("x")),
             "y": _clamp01(a.get("y")),
             "size": _clamp01(a.get("size"), 0.05) or 0.05,
@@ -223,6 +236,7 @@ def normalize_config(config: dict | None) -> dict:
         questions.append({
             "id": str(b.get("id") or f"block_{len(questions) + 1}"),
             "type": "bubble_block",
+            "page": _page_index(b.get("page")),
             "first_x": _clamp01(b.get("first_x")),
             "first_y": _clamp01(b.get("first_y")),
             "option_step_x": _clamp01(b.get("option_step_x"), 0.05) or 0.05,
@@ -271,7 +285,55 @@ def normalize_config(config: dict | None) -> dict:
         "low_conf_threshold": op.get("low_conf_threshold"),
         "adaptive": bool(op.get("adaptive", False)),
     }
+
+    # Multi-página: respeita o nº declarado pelo editor e nunca "corta" uma
+    # página que ainda tenha âncora/bloco (evita regiões inalcançáveis).
+    used = [a["page"] for a in out["anchors"]] + [b["page"] for b in out["questions"]]
+    out["n_pages"] = max(1, _page_index(cfg.get("n_pages") or 1),
+                         (max(used) + 1) if used else 1)
     return out
+
+
+# ---------------------------------------------------------------------------
+# Multi-página (mesma folha, N páginas)
+# ---------------------------------------------------------------------------
+
+def n_pages(config: dict | None) -> int:
+    """Nº de páginas do modelo (>= 1). Modelos antigos = 1 página."""
+    return max(1, int(normalize_config(config).get("n_pages") or 1))
+
+
+def config_for_page(config: dict | None, page: int = 0) -> dict:
+    """Recorte da config relativo a UMA página (mesma folha importada).
+
+    Cada âncora/bloco carrega `page`; a leitura e a validação por página usam
+    só as regiões da página pedida. QR, regiões informativas, campos de
+    impressão e `omr_params` são compartilhados entre as páginas.
+    """
+    cfg = normalize_config(config)
+    total = max(1, int(cfg.get("n_pages") or 1))
+    idx = max(0, min(total - 1, int(page or 0)))
+    out = dict(cfg)
+    out["anchors"] = [a for a in cfg["anchors"] if int(a.get("page") or 0) == idx]
+    out["questions"] = [q for q in cfg["questions"] if int(q.get("page") or 0) == idx]
+    return out
+
+
+def question_offset_before_page(config: dict | None, page: int) -> int:
+    """Menor número de questão livre considerando as páginas ANTERIORES.
+
+    Usado para numerar blocos detectados numa página sem repetir questões
+    já existentes nas páginas anteriores (numeração contínua no cartão).
+    """
+    cfg = normalize_config(config)
+    idx = max(0, int(page or 0))
+    used: set[int] = set()
+    for b in cfg["questions"]:
+        if int(b.get("page") or 0) >= idx:
+            continue
+        for bubble in expand_block(b):
+            used.add(int(bubble["question"]))
+    return (max(used) + 1) if used else 1
 
 
 # ---------------------------------------------------------------------------
@@ -406,24 +468,31 @@ def validate_config(config: dict) -> list[dict]:
     if not cfg["page_w"] or not cfg["page_h"]:
         add("error", "page_size", "Dimensões da imagem não definidas (reimporte a imagem).", None)
 
-    anchors = cfg["anchors"]
-    if len(anchors) != 4:
-        add("warning", "anchors_count",
-            f"{len(anchors)} âncora(s) configurada(s); o ideal são 4 (uma por canto). "
-            "Sem 4 âncoras o sistema tenta a borda da página como alinhamento alternativo.",
-            None)
-    corners_seen: list[str] = []
-    for a in anchors:
-        corner = a["corner"] or _infer_corner(anchors, a["id"])
-        if corner:
-            corners_seen.append(corner)
-        if a["type"] == "aruco" and a["aruco_id"] is None:
-            add("error", "anchor_aruco_id", "Âncora ArUco sem identificador (aruco_id).", a["id"])
-        if not (0.0 <= a["x"] <= 1.0 and 0.0 <= a["y"] <= 1.0):
-            add("error", "anchor_bounds", "Âncora fora dos limites da imagem.", a["id"])
-    dup = {c for c in corners_seen if corners_seen.count(c) > 1}
-    if dup:
-        add("error", "anchors_duplicate", f"Cantos duplicados nas âncoras: {', '.join(sorted(dup))}.", None)
+    total_pages = max(1, int(cfg.get("n_pages") or 1))
+    multi = total_pages > 1
+
+    # Âncoras são POR PÁGINA (cada página tem o próprio conjunto de 4 cantos).
+    for p in range(total_pages):
+        page_tag = f" (página {p + 1})" if multi else ""
+        anchors = [a for a in cfg["anchors"] if int(a.get("page") or 0) == p]
+        if len(anchors) != 4:
+            add("warning", "anchors_count",
+                f"{len(anchors)} âncora(s) configurada(s){page_tag}; o ideal são 4 (uma por canto). "
+                "Sem 4 âncoras o sistema tenta a borda da página como alinhamento alternativo.",
+                None)
+        corners_seen: list[str] = []
+        for a in anchors:
+            corner = a["corner"] or _infer_corner(anchors, a["id"])
+            if corner:
+                corners_seen.append(corner)
+            if a["type"] == "aruco" and a["aruco_id"] is None:
+                add("error", "anchor_aruco_id", "Âncora ArUco sem identificador (aruco_id).", a["id"])
+            if not (0.0 <= a["x"] <= 1.0 and 0.0 <= a["y"] <= 1.0):
+                add("error", "anchor_bounds", "Âncora fora dos limites da imagem.", a["id"])
+        dup = {c for c in corners_seen if corners_seen.count(c) > 1}
+        if dup:
+            add("error", "anchors_duplicate",
+                f"Cantos duplicados nas âncoras{page_tag}: {', '.join(sorted(dup))}.", None)
 
     qr = cfg["qr"]
     if qr is not None and (qr["w"] <= 0 or qr["h"] <= 0):
@@ -435,11 +504,21 @@ def validate_config(config: dict) -> list[dict]:
         if r["x"] + r["w"] > 1.0001 or r["y"] + r["h"] > 1.0001:
             add("warning", "info_overflow", "Região informativa ultrapassa a borda da imagem.", r["id"])
 
-    if not cfg["questions"]:
-        add("error", "no_questions", "Nenhuma questão configurada — desenhe ao menos um bloco de bolhas.", None)
+    # Cada página precisa de pelo menos um bloco de questões.
+    for p in range(total_pages):
+        blocks_p = [b for b in cfg["questions"] if int(b.get("page") or 0) == p]
+        if blocks_p:
+            continue
+        if multi:
+            add("error", "page_no_questions",
+                f"Página {p + 1} não tem nenhum bloco de questões — desenhe ao menos um.",
+                None)
+        else:
+            add("error", "no_questions",
+                "Nenhuma questão configurada — desenhe ao menos um bloco de bolhas.", None)
 
     question_numbers: dict[int, str] = {}
-    bboxes: list[tuple[str, tuple[float, float, float, float]]] = []
+    bboxes: dict[int, list[tuple[str, tuple[float, float, float, float]]]] = {}
     for b in cfg["questions"]:
         if b["n_questions"] <= 0:
             add("error", "block_empty", "Bloco de questões sem número de questões.", b["id"])
@@ -498,22 +577,26 @@ def validate_config(config: dict) -> list[dict]:
 
         bb = _block_bbox(b)
         if bb is not None:
-            bboxes.append((b["id"], bb))
+            # Sobreposição só faz sentido entre blocos da MESMA página (num
+            # modelo multi-página as páginas usam a mesma folha e, portanto,
+            # se sobrepõem por construção).
+            bboxes.setdefault(int(b.get("page") or 0), []).append((b["id"], bb))
 
     # Sobreposição suspeita entre blocos (retângulos se tocam muito)
-    for i in range(len(bboxes)):
-        for j in range(i + 1, len(bboxes)):
-            a_id, a = bboxes[i]
-            b_id, b = bboxes[j]
-            inter_w = min(a[2], b[2]) - max(a[0], b[0])
-            inter_h = min(a[3], b[3]) - max(a[1], b[1])
-            if inter_w > 0 and inter_h > 0:
-                area_inter = inter_w * inter_h
-                area_a = max(1e-9, (a[2] - a[0]) * (a[3] - a[1]))
-                area_b = max(1e-9, (b[2] - b[0]) * (b[3] - b[1]))
-                if area_inter / min(area_a, area_b) > 0.15:
-                    add("warning", "blocks_overlap",
-                        "Blocos de questões com sobreposição suspeita.", b_id)
+    for page_bboxes in bboxes.values():
+        for i in range(len(page_bboxes)):
+            for j in range(i + 1, len(page_bboxes)):
+                a_id, a = page_bboxes[i]
+                b_id, b = page_bboxes[j]
+                inter_w = min(a[2], b[2]) - max(a[0], b[0])
+                inter_h = min(a[3], b[3]) - max(a[1], b[1])
+                if inter_w > 0 and inter_h > 0:
+                    area_inter = inter_w * inter_h
+                    area_a = max(1e-9, (a[2] - a[0]) * (a[3] - a[1]))
+                    area_b = max(1e-9, (b[2] - b[0]) * (b[3] - b[1]))
+                    if area_inter / min(area_a, area_b) > 0.15:
+                        add("warning", "blocks_overlap",
+                            "Blocos de questões com sobreposição suspeita.", b_id)
 
     if not cfg["print_fields"] and qr is None:
         add("warning", "no_print_fields",
@@ -1108,11 +1191,14 @@ def _mode_max(vals: list[int]) -> int:
     return max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
 
 
-def detect_grid(image: np.ndarray, config: dict | None = None) -> dict:
+def detect_grid(image: np.ndarray, config: dict | None = None,
+                start_question: int = 1) -> dict:
     """Sugere bloco(s) `bubble_block` a partir da imagem do cartão importado.
 
     `config` é usado apenas para saber as dimensões lógicas (default: as da
-    própria imagem). Devolve `{ok, blocks, candidates, rows, columns, radius_px}`.
+    própria imagem). `start_question` numera a primeira questão detectada —
+    em modelos multi-página a numeração continua a das páginas anteriores.
+    Devolve `{ok, blocks, candidates, rows, columns, radius_px}`.
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     h, w = gray.shape[:2]
@@ -1151,7 +1237,7 @@ def detect_grid(image: np.ndarray, config: dict | None = None) -> dict:
     columns = _cluster_groups(segments, GRID_COLUMN_TOL_FACTOR * r0)
 
     blocks: list[dict] = []
-    start_question = 1
+    start_question = max(1, int(start_question or 1))
     for cl in sorted(columns, key=lambda c: c["x"]):
         gs = sorted(cl["items"], key=lambda g: g["y"])
         n_opts = _mode_max([len(g["items"]) for g in gs])
@@ -1390,12 +1476,17 @@ def process_custom_image(
     strict_alignment: bool = True,
     corners: list | None = None,
     diagnostics: dict | None = None,
+    page: int = 0,
 ) -> OMRResult | None:
     """Lê um cartão personalizado. None = não foi possível retificar/ler.
 
     `corners`, se informado, são os 4 cantos (TL, TR, BR, BL) da PÁGINA em
     coords normalizadas 0..1 — alinhamento MANUAL que substitui a detecção de
     âncoras (útil em fotos tortas em que o alinhamento automático falha).
+
+    `page` seleciona a página do modelo (multi-página sobre a mesma folha);
+    só as âncoras e os blocos dessa página são usados. Em modelos de 1 página
+    o valor é irrelevante.
 
     `diagnostics`, se fornecido, recebe {"reason", "detail", "alignment"} para
     explicar a falha (None = sucesso).
@@ -1408,7 +1499,7 @@ def process_custom_image(
             diagnostics["detail"] = detail
             diagnostics["alignment"] = alignment
 
-    cfg = normalize_config(config)
+    cfg = config_for_page(config, page)
     p_base, cfg_adaptive = omr_params_from_config(cfg)
     p = overrides if overrides is not None else p_base
     adaptive = adaptive or cfg_adaptive
@@ -1692,6 +1783,7 @@ def config_summary(config: dict) -> dict:
         "n_blocks": len(cfg["questions"]),
         "n_questions": total_questions(cfg),
         "n_print_fields": len(cfg["print_fields"]),
+        "n_pages": max(1, int(cfg.get("n_pages") or 1)),
         "page_w": cfg["page_w"],
         "page_h": cfg["page_h"],
     }

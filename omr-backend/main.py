@@ -632,6 +632,7 @@ def process_omr(
     client_duration_ms: int | None = Form(None),  # Herby: tempo client-side por foto (diagnóstico)
     custom_template_id: int | None = Form(None),  # obrigatório quando template=custom
     corners: str | None = Form(None),  # custom: 4 cantos [TL,TR,BR,BL] normalizados (JSON)
+    page: int = Form(0),  # custom multi-página: página do modelo sendo lida (0-based)
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -668,7 +669,7 @@ def process_omr(
         diag: dict = {}
         c_result = process_custom_image(image, custom_cfg, adaptive=adaptive, debug=debug,
                                         corners=_parse_manual_corners(corners),
-                                        diagnostics=diag)
+                                        diagnostics=diag, page=page)
         if c_result is None:
             detail = diag.get("detail") or ""
             base = ("Não foi possível alinhar/ler o gabarito personalizado. "

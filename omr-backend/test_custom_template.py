@@ -1368,3 +1368,245 @@ def test_api_process_with_manual_corners(authed):
     )
     assert r.status_code == 200
     client.delete(f"/api/custom-templates/{tid}")
+
+# ---------------------------------------------------------------------------
+# Multi-página (mesma folha, N páginas)
+# ---------------------------------------------------------------------------
+
+B2_FX, B2_FY = 0.30, 0.55  # bloco da página 2 (outra região da MESMA folha)
+
+
+def _anchors_for(page: int) -> list[dict]:
+    return [
+        {"id": f"a{page}_{i}", "type": "aruco", "aruco_id": i, "corner": c,
+         "page": page, "x": ANCHOR_POS[i][0], "y": ANCHOR_POS[i][1],
+         "size": ARUCO_SIZE / PAGE_W, "tolerance": 0.2, "required": True}
+        for i, c in enumerate(["TL", "TR", "BR", "BL"])
+    ]
+
+
+def _config_multipage() -> dict:
+    cfg = _config()
+    cfg["anchors"] = _anchors_for(0) + _anchors_for(1)
+    cfg["questions"][0]["page"] = 0
+    cfg["questions"].append({
+        "id": "blk2", "type": "bubble_block", "page": 1,
+        "first_x": B2_FX, "first_y": B2_FY,
+        "option_step_x": OPT_STEP, "question_step_y": Q_STEP,
+        "columns": 1, "n_questions": 5, "labels": ["A", "B", "C", "D"],
+        "radius": B_RADIUS, "shape": "circle", "start_question": 6,
+        "distribution": "column",
+    })
+    cfg["n_pages"] = 2
+    return cfg
+
+
+def _bubble_center_p2(q: int, letter: str) -> tuple[float, float]:
+    labels = ["A", "B", "C", "D"]
+    return B2_FX + labels.index(letter) * OPT_STEP, B2_FY + (q - 6) * Q_STEP
+
+
+def _make_page_card(page: int, marks: dict[int, str]) -> np.ndarray:
+    """Foto de UMA página: âncoras (iguais) + só a grade daquela página."""
+    img = np.ones((PAGE_H, PAGE_W, 3), dtype=np.uint8) * 255
+    for mid, (nx, ny) in ANCHOR_POS.items():
+        m = _generate_aruco_marker(ARUCO_DICT, mid, ARUCO_SIZE)
+        if m.ndim == 2:
+            m = cv2.cvtColor(m, cv2.COLOR_GRAY2BGR)
+        cx, cy = int(nx * PAGE_W), int(ny * PAGE_H)
+        x0, y0 = cx - ARUCO_SIZE // 2, cy - ARUCO_SIZE // 2
+        img[y0:y0 + ARUCO_SIZE, x0:x0 + ARUCO_SIZE] = m
+    center = _bubble_center_p2 if page == 1 else _bubble_center
+    qs = range(6, 11) if page == 1 else range(1, 6)
+    r_px = int(B_RADIUS * max(PAGE_W, PAGE_H))
+    for q in qs:
+        for letter in ["A", "B", "C", "D"]:
+            nx, ny = center(q, letter)
+            cv2.circle(img, (int(nx * PAGE_W), int(ny * PAGE_H)), r_px, (0, 0, 0), 2)
+    for q, letter in marks.items():
+        nx, ny = center(q, letter)
+        cv2.circle(img, (int(nx * PAGE_W), int(ny * PAGE_H)), r_px - 4, (0, 0, 0), -1)
+    return img
+
+
+def test_normalize_n_pages_and_page_fields():
+    cfg = ct.normalize_config({
+        "page_w": 100, "page_h": 100, "n_pages": 2,
+        "anchors": [{"id": "a", "page": 1, "x": 0.1, "y": 0.1}],
+        "questions": [{"page": 1, "n_questions": 2}],
+    })
+    assert cfg["n_pages"] == 2
+    assert cfg["anchors"][0]["page"] == 1 and cfg["questions"][0]["page"] == 1
+    # bloco na 2ª página sem n_pages declarado: a página é inferida pelo uso
+    cfg2 = ct.normalize_config({"page_w": 100, "page_h": 100,
+                                "questions": [{"page": 1, "n_questions": 2}]})
+    assert cfg2["n_pages"] == 2
+    # lixo cai no default
+    assert ct.normalize_config({"n_pages": "x"})["n_pages"] == 1
+    assert ct.normalize_config({"page_w": 100, "page_h": 100})["n_pages"] == 1
+
+
+def test_config_for_page_filters_regions():
+    cfg = _config_multipage()
+    p0 = ct.config_for_page(cfg, 0)
+    p1 = ct.config_for_page(cfg, 1)
+    assert [a["id"] for a in p0["anchors"]] == ["a0_0", "a0_1", "a0_2", "a0_3"]
+    assert [b["id"] for b in p0["questions"]] == ["blk1"]
+    assert [b["id"] for b in p1["questions"]] == ["blk2"]
+    # QR, regiões informativas e campos de impressão são compartilhados
+    assert p1["info_regions"] == cfg["info_regions"]
+    assert p1["print_fields"] == cfg["print_fields"]
+    assert {b["question"] for b in ct.expand_bubbles(p1)} == set(range(6, 11))
+    assert {b["question"] for b in ct.expand_bubbles(p0)} == set(range(1, 6))
+    # fora do intervalo satura na última página
+    assert [b["id"] for b in ct.config_for_page(cfg, 9)["questions"]] == ["blk2"]
+    assert ct.n_pages(cfg) == 2
+
+
+def test_question_offset_before_page():
+    cfg = _config_multipage()
+    assert ct.question_offset_before_page(cfg, 1) == 6
+    assert ct.question_offset_before_page(cfg, 0) == 1
+    assert ct.question_offset_before_page(_config(), 1) == 6
+    assert ct.question_offset_before_page({}, 0) == 1
+
+
+def test_validate_multipage_requires_questions_per_page():
+    codes = {i["code"] for i in ct.validate_config(_config_multipage())}
+    assert "page_no_questions" not in codes and "no_questions" not in codes
+    cfg = _config_multipage()
+    cfg["questions"] = [q for q in cfg["questions"] if q["id"] != "blk2"]
+    assert any(i["code"] == "page_no_questions" for i in ct.validate_config(cfg))
+    # 1 página mantém o código/mensagem originais (retrocompatibilidade)
+    single = _config()
+    single["questions"] = []
+    assert any(i["code"] == "no_questions" for i in ct.validate_config(single))
+
+
+def test_validate_multipage_anchor_corners_are_per_page():
+    issues = ct.validate_config(_config_multipage())
+    assert not any(i["code"] == "anchors_duplicate" for i in issues)
+    assert not any(i["code"] == "anchors_count" for i in issues)
+    # página 2 sem âncoras próprias: aviso cita a página
+    cfg = _config_multipage()
+    cfg["anchors"] = _anchors_for(0)
+    warn = next(i for i in ct.validate_config(cfg) if i["code"] == "anchors_count")
+    assert "página 2" in warn["message"]
+
+
+def test_validate_multipage_overlap_only_within_page():
+    cfg = _config_multipage()
+    cfg["questions"][1]["first_x"] = cfg["questions"][0]["first_x"]
+    cfg["questions"][1]["first_y"] = cfg["questions"][0]["first_y"]
+    # páginas diferentes ocupam a mesma folha: sobrepor não é erro
+    assert not any(i["code"] == "blocks_overlap" for i in ct.validate_config(cfg))
+    # na MESMA página a sobreposição continua sendo suspeita
+    cfg["questions"][1]["page"] = 0
+    assert any(i["code"] == "blocks_overlap" for i in ct.validate_config(cfg))
+
+
+def test_config_summary_reports_n_pages():
+    assert ct.config_summary(_config_multipage())["n_pages"] == 2
+    assert ct.config_summary(_config())["n_pages"] == 1
+
+
+def test_process_multipage_reads_selected_page():
+    cfg = _config_multipage()
+    res = ct.process_custom_image(_make_page_card(1, {6: "A", 9: "D"}), cfg, page=1,
+                                  strict_alignment=False)
+    assert res is not None
+    assert res.answers == {6: "A", 9: "D"}
+    assert set(res.blank_questions) == {7, 8, 10}
+    # a página 2 não lê questões da página 1
+    assert not (set(res.answers) & set(range(1, 6)))
+
+
+def test_process_multipage_page0_ignores_other_page():
+    cfg = _config_multipage()
+    res = ct.process_custom_image(_make_page_card(1, {6: "A"}), cfg, page=0,
+                                  strict_alignment=False)
+    assert res is not None
+    assert set(res.answers) <= set(range(1, 6))
+    assert not (set(res.answers) & set(range(6, 11)))
+
+
+def test_api_multipage_bubbles_detect_grid_and_test(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Multi").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_multipage()})
+
+    # bolhas por página
+    r = client.get(f"/api/custom-templates/{tid}/bubbles?page=1")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["n_pages"] == 2
+    assert {b["question"] for b in body["bubbles"]} == set(range(6, 11))
+    r = client.get(f"/api/custom-templates/{tid}/bubbles")
+    assert {b["question"] for b in r.json()["bubbles"]} == set(range(1, 11))
+
+    # detecção da grade na página 2: numeração continua a da página anterior
+    r = client.post(f"/api/custom-templates/{tid}/detect-grid?page=1")
+    assert r.status_code == 200, r.text
+    blocks = r.json()["blocks"]
+    assert blocks and all(b["page"] == 1 for b in blocks)
+    assert min(b["start_question"] for b in blocks) == 6
+
+    # teste de leitura informando a página
+    r = client.post(
+        f"/api/custom-templates/{tid}/test",
+        files={"file": ("p2.png", _png_bytes(_make_page_card(1, {6: "C", 10: "B"})), "image/png")},
+        data={"page": "1"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    assert body["answers"] == {"6": "C", "10": "B"}
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_multipage_print_two_sheets(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Multi print").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_multipage()})
+
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "blank", "format": "PDF"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["count"] == 1
+    assert body["n_pages"] == 2 and body["sheets"] == 2
+    assert [p["title"] for p in body["pages"]] == [
+        "Cartão em branco — Página 1/2", "Cartão em branco — Página 2/2"]
+
+    r = client.post(f"/api/custom-templates/{tid}/print",
+                    json={"mode": "blank", "format": "PDF"})
+    assert r.status_code == 200 and r.headers["content-type"] == "application/pdf"
+    pages = r.content.count(b"/Type /Page") - r.content.count(b"/Type /Pages")
+    assert pages == 2, f"PDF com 2 folhas: pages={pages}"
+
+    # modelo de 1 página continua emitindo 1 folha por cartão
+    client.delete(f"/api/custom-templates/{tid}")
+    tid = _create(client, _png_bytes(_make_card({})), "Single print").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+    r = client.post(f"/api/custom-templates/{tid}/print",
+                    json={"mode": "blank", "format": "PDF"})
+    pages = r.content.count(b"/Type /Page") - r.content.count(b"/Type /Pages")
+    assert r.status_code == 200 and pages == 1
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_process_endpoint_with_page(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_page_card(1, {})), "Multi proc").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_multipage()})
+    client.post(f"/api/custom-templates/{tid}/activate")
+    r = client.post(
+        "/api/omr/process",
+        files={"file": ("p2.png", _png_bytes(_make_page_card(1, {7: "B"})), "image/png")},
+        data={"template": "custom", "custom_template_id": str(tid), "page": "1"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    assert body["answers"] == {"7": "B"}
+    client.delete(f"/api/custom-templates/{tid}")

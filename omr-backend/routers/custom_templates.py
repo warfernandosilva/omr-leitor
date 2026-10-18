@@ -28,13 +28,16 @@ from models import (
     Aluno, Avaliacao, CustomTemplate, CustomTemplateVersion, GabaritoNomeado, User,
 )
 from omr.custom_template import (
+    config_for_page,
     config_summary,
     default_config,
     detect_grid,
     expand_bubbles,
     has_errors,
+    n_pages,
     normalize_config,
     process_custom_image,
+    question_offset_before_page,
     render_overlay,
     render_preview_overlay,
     validate_config,
@@ -363,6 +366,7 @@ def test_template(
     ground_truth: str | None = Form(None),
     adaptive: bool = Form(False),
     debug: bool = Form(True),
+    page: int = Form(0),
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -375,7 +379,7 @@ def test_template(
 
     diag: dict = {}
     result = process_custom_image(image, tpl.config or {}, adaptive=adaptive, debug=debug,
-                                  diagnostics=diag)
+                                  diagnostics=diag, page=page)
     if result is None:
         detail = diag.get("detail") or ""
         return {
@@ -525,8 +529,20 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
     if base is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
 
+    # Multi-página (mesma folha): cada cartão gera UMA folha impressa por
+    # página do modelo. A imagem é a mesma; só o rótulo diferencia (p. 1/2).
+    npg = n_pages(tpl.config or {})
+
+    def _sheets(nome: str, codigo: str, img: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
+        if npg <= 1:
+            return [(nome, codigo, img)]
+        return [
+            (f"{nome} — Página {i + 1}/{npg}", codigo, img)
+            for i in range(npg)
+        ]
+
     if req.mode == "blank":
-        return [("Cartão em branco", "", base)]
+        return _sheets("Cartão em branco", "", base)
 
     if req.mode == "avaliacao":
         if not tpl.avaliacao_id:
@@ -570,7 +586,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
                 "exam_title": (av.titulo if av else "") or "",
             }
             img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=codigo)
-            pages.append((aluno.nome, codigo, img))
+            pages.extend(_sheets(aluno.nome, codigo, img))
         if persist:
             db.commit()
         return pages
@@ -590,7 +606,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
             "code": codigo,
         }
         img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=codigo)
-        pages.append((s.nome.strip(), codigo, img))
+        pages.extend(_sheets(s.nome.strip(), codigo, img))
     return pages
 
 
@@ -693,7 +709,9 @@ def print_preview(
         {"title": title, "code": code, "image": _data_url_jpeg(img, max_side=520)}
         for title, code, img in pages
     ]
+    npg = n_pages(tpl.config or {})
     return {"ok": True, "error": None, "count": total, "shown": len(shown),
+            "n_pages": npg, "sheets": total * npg,
             "mode": req.mode, "pages": shown}
 
 
@@ -702,9 +720,25 @@ def print_preview(
 # ---------------------------------------------------------------------------
 
 @router.get("/api/custom-templates/{tid}/bubbles")
-def template_bubbles(tid: int, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+def template_bubbles(
+    tid: int,
+    page: int | None = None,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Expande as bolhas do modelo (editor exibir a numeração).
+
+    `page` (opcional) devolve só as bolhas da página pedida — em modelos
+    multi-página as páginas compartilham a mesma folha importada.
+    """
     tpl = _get_template(db, tid, current_user)
-    return {"bubbles": expand_bubbles(tpl.config or {}), "summary": config_summary(tpl.config or {})}
+    cfg = tpl.config or {}
+    source = config_for_page(cfg, page) if page is not None else cfg
+    return {
+        "bubbles": expand_bubbles(source),
+        "summary": config_summary(cfg),
+        "n_pages": n_pages(cfg),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -714,15 +748,25 @@ def template_bubbles(tid: int, current_user: User = Depends(auth.get_current_use
 @router.post("/api/custom-templates/{tid}/detect-grid")
 def detect_grid_endpoint(
     tid: int,
+    page: int = 0,
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Analisa a imagem importada e propõe bloco(s) de bolhas (o usuário ajusta)."""
+    """Analisa a imagem importada e propõe bloco(s) de bolhas (o usuário ajusta).
+
+    Em modelos multi-página, `page` numera os blocos a partir do fim das
+    páginas anteriores e já carrega `page` no bloco sugerido.
+    """
     tpl = _get_template(db, tid, current_user)
     image = _load_image(tpl)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
-    return detect_grid(image, tpl.config or {})
+    res = detect_grid(image, tpl.config or {},
+                      start_question=question_offset_before_page(tpl.config or {}, page))
+    if res.get("ok"):
+        for b in res["blocks"]:
+            b["page"] = max(0, int(page or 0))
+    return res
 
 
 # ---------------------------------------------------------------------------
