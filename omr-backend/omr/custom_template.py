@@ -917,6 +917,250 @@ def detect_bubble_centers(gray: np.ndarray, config: dict) -> list[tuple[float, f
     return out
 
 
+# ---------------------------------------------------------------------------
+# Auto-detecção da grade (editor do Gabarito Personalizado)
+# ---------------------------------------------------------------------------
+# Dado o cartão IMPORTADO (que é a própria referência de coordenadas do
+# modelo), localiza as bolhas por contorno e propõe bloco(s) `bubble_block`
+# — uma SUGESTÃO que o usuário ajusta no editor. Não depende de config prévia
+# (raio/âncoras ainda podem não existir no início da edição).
+#
+# Estratégia: contornos com cara de bolha → raio dominante (descarta âncoras,
+# texto e ruído) → agrupa em linhas → separa colunas pelo maior gap → propõe um
+# bloco por coluna de questões. Funciona tanto para foto digitalizada quanto
+# para foto de celular aproximadamente alinhada; não retifica perspectiva.
+GRID_MIN_CANDIDATES = 6          # menos candidatos que isto não formam grade
+GRID_AREA_MIN_FRAC = 0.000005    # fração da área da imagem (contorno de bolha)
+GRID_AREA_MAX_FRAC = 0.03
+GRID_MIN_CIRCULARITY = 0.30
+GRID_ASPECT_MIN = 0.5
+GRID_ASPECT_MAX = 2.0
+GRID_RADIUS_BAND = (0.7, 1.4)    # faixa aceita em torno do raio dominante
+GRID_ROW_TOL_FACTOR = 0.9        # tol. de linha (y) = fator × diâmetro mediano
+GRID_COLUMN_TOL_FACTOR = 1.5     # tol. de coluna de grupo = fator × raio
+GRID_GAP_FACTOR = 2.5            # gap que separa áreas (entre alternativas)
+GRID_MIN_LABELS = 2              # menos alternativas que isto não é questão
+
+
+def _grid_candidates(gray: np.ndarray) -> list[tuple[float, float, float]]:
+    """Contornos com cara de bolha em px: `(cx, cy, raio)`. Dispensa config."""
+    h, w = gray.shape[:2]
+    if h < 8 or w < 8:
+        return []
+    area_img = float(h * w)
+    try:
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        _, bw = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        bw = cv2.morphologyEx(bw, cv2.MORPH_OPEN, k)
+        cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    except cv2.error:
+        return []
+
+    out: list[tuple[float, float, float]] = []
+    for c in cnts:
+        area = float(cv2.contourArea(c))
+        if area <= 0:
+            continue
+        frac = area / area_img
+        if frac < GRID_AREA_MIN_FRAC or frac > GRID_AREA_MAX_FRAC:
+            continue
+        x, y, ww, hh = cv2.boundingRect(c)
+        if ww <= 0 or hh <= 0:
+            continue
+        aspect = ww / float(hh)
+        if aspect < GRID_ASPECT_MIN or aspect > GRID_ASPECT_MAX:
+            continue
+        peri = float(cv2.arcLength(c, True))
+        if peri <= 0:
+            continue
+        if 4.0 * math.pi * area / (peri * peri) < GRID_MIN_CIRCULARITY:
+            continue
+        out.append((x + ww / 2.0, y + hh / 2.0, (ww + hh) / 4.0))
+    return out
+
+
+def _dominant_radius(cands: list[tuple[float, float, float]]
+                     ) -> tuple[float, list[tuple[float, float, float]]]:
+    """Raio do grupo que melhor "se parece com as bolhas" e os candidatos nele.
+
+    Escolhe o tamanho por `apoio × raio²`: as bolhas são o conjunto circular
+    grande E numeroso. Isso descarta marcações de âncora (grandes, mas poucas)
+    e células internas do ArUco/texto (numerosas, mas pequenas).
+    """
+    if not cands:
+        return 0.0, []
+    lo, hi = GRID_RADIUS_BAND
+    best_score = -1.0
+    best_seed = 0.0
+    best_kept: list = []
+    for seed in {round(c[2], 1) for c in cands}:
+        if seed <= 0:
+            continue
+        kept = [c for c in cands if lo * seed <= c[2] <= hi * seed]
+        score = len(kept) * seed * seed
+        if score > best_score:
+            best_score, best_seed, best_kept = score, seed, kept
+    return best_seed, best_kept
+
+
+def _dedupe_points(cands: list[tuple[float, float, float]], min_dist: float
+                   ) -> list[tuple[float, float, float]]:
+    """Remove candidatos coincidentes (mantém o maior de cada aglomerado)."""
+    kept: list[tuple[float, float, float]] = []
+    for c in sorted(cands, key=lambda c: -c[2]):
+        if all((c[0] - k[0]) ** 2 + (c[1] - k[1]) ** 2 > min_dist * min_dist
+               for k in kept):
+            kept.append(c)
+    return kept
+
+
+def _group_rows(cands: list[tuple[float, float, float]], tol: float) -> list[dict]:
+    """Agrupa candidatos em linhas por proximidade em y."""
+    rows: list[dict] = []
+    for c in sorted(cands, key=lambda c: c[1]):
+        if rows and abs(c[1] - rows[-1]["y"]) <= tol:
+            r = rows[-1]
+            r["items"].append(c)
+            r["y"] = sum(i[1] for i in r["items"]) / len(r["items"])
+        else:
+            rows.append({"y": c[1], "items": [c]})
+    return rows
+
+
+def _split_by_gap(items: list[tuple[float, float, float]], gap: float
+                  ) -> list[list[tuple[float, float, float]]]:
+    """Separa itens ordenados por x onde o vão supera `gap`."""
+    xs = sorted(items, key=lambda c: c[0])
+    groups: list[list] = [[xs[0]]]
+    for a, b in zip(xs, xs[1:]):
+        if b[0] - a[0] > gap:
+            groups.append([])
+        groups[-1].append(b)
+    return groups
+
+
+def _cluster_groups(groups: list[dict], tol: float) -> list[dict]:
+    """Agrupa segmentos de linha em COLUNAS de questões (x do 1º item)."""
+    clusters: list[dict] = []
+    for g in sorted(groups, key=lambda g: g["items"][0][0]):
+        cx = g["items"][0][0]
+        if clusters and abs(cx - clusters[-1]["x"]) <= tol:
+            cl = clusters[-1]
+            cl["items"].append(g)
+            cl["x"] = sum(i["items"][0][0] for i in cl["items"]) / len(cl["items"])
+        else:
+            clusters.append({"x": cx, "items": [g]})
+    return clusters
+
+
+def _mode_max(vals: list[int]) -> int:
+    """Valor mais frequente; empate → o maior."""
+    counts: dict[int, int] = {}
+    for v in vals:
+        counts[v] = counts.get(v, 0) + 1
+    return max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+
+def detect_grid(image: np.ndarray, config: dict | None = None) -> dict:
+    """Sugere bloco(s) `bubble_block` a partir da imagem do cartão importado.
+
+    `config` é usado apenas para saber as dimensões lógicas (default: as da
+    própria imagem). Devolve `{ok, blocks, candidates, rows, columns, radius_px}`.
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    h, w = gray.shape[:2]
+    if h < 8 or w < 8:
+        return {"ok": False, "blocks": [], "reason": "image_too_small",
+                "candidates": 0, "rows": 0, "columns": 0, "radius_px": 0.0}
+
+    cands = _grid_candidates(gray)
+    if len(cands) < GRID_MIN_CANDIDATES:
+        return {"ok": False, "blocks": [], "reason": "no_candidates",
+                "candidates": len(cands), "rows": 0, "columns": 0, "radius_px": 0.0}
+
+    r0, kept = _dominant_radius(cands)
+    kept = _dedupe_points(kept, 0.6 * r0)
+    if len(kept) < GRID_MIN_CANDIDATES:
+        return {"ok": False, "blocks": [], "reason": "no_candidates",
+                "candidates": len(cands), "rows": 0, "columns": 0, "radius_px": r0}
+
+    rows = _group_rows(kept, GRID_ROW_TOL_FACTOR * 2.0 * r0)
+
+    # Cada linha é dividida em segmentos (uma questão por segmento).
+    segments: list[dict] = []
+    for r in rows:
+        items = sorted(r["items"], key=lambda c: c[0])
+        diffs = sorted(b[0] - a[0] for a, b in zip(items, items[1:]))
+        mdiff = diffs[len(diffs) // 2] if diffs else 0.0
+        gap = max(GRID_GAP_FACTOR * mdiff, GRID_GAP_FACTOR * r0)
+        for seg in _split_by_gap(items, gap):
+            if len(seg) >= GRID_MIN_LABELS:
+                segments.append({"y": r["y"], "items": seg})
+
+    if not segments:
+        return {"ok": False, "blocks": [], "reason": "no_grid", "candidates": len(cands),
+                "rows": len(rows), "columns": 0, "radius_px": r0}
+
+    columns = _cluster_groups(segments, GRID_COLUMN_TOL_FACTOR * r0)
+
+    blocks: list[dict] = []
+    start_question = 1
+    for cl in sorted(columns, key=lambda c: c["x"]):
+        gs = sorted(cl["items"], key=lambda g: g["y"])
+        n_opts = _mode_max([len(g["items"]) for g in gs])
+        rows_use = [g for g in gs if len(g["items"]) == n_opts]
+        if len(rows_use) < 2:  # linhas irregulares: aceita o conjunto maior
+            rows_use = gs
+            n_opts = _mode_max([len(g["items"]) for g in rows_use])
+        if len(rows_use) < 2 or n_opts < GRID_MIN_LABELS:
+            continue
+
+        top = min(rows_use, key=lambda g: g["y"])
+        fx = top["items"][0][0] / w
+        fy = top["y"] / h
+        osx_gaps: list[float] = []
+        for g in rows_use:
+            xs = sorted(b[0] for b in g["items"])
+            osx_gaps += [b - a for a, b in zip(xs, xs[1:])]
+        ys = sorted(g["y"] for g in rows_use)
+        q_gaps = [b - a for a, b in zip(ys, ys[1:])]
+        if not osx_gaps or not q_gaps:
+            continue
+        osx = float(np.median(osx_gaps)) / w
+        qsy = float(np.median(q_gaps)) / h
+        if osx <= 0 or qsy <= 0:
+            continue
+
+        nq = len(rows_use)
+        blocks.append({
+            "id": f"blk{len(blocks) + 1}",
+            "type": "bubble_block",
+            "first_x": round(fx, 4),
+            "first_y": round(fy, 4),
+            "option_step_x": round(osx, 4),
+            "question_step_y": round(qsy, 4),
+            "columns": 1,
+            "n_questions": nq,
+            "labels": [chr(ord("A") + i) for i in range(n_opts)],
+            "radius": round(r0 / max(w, h), 4),
+            "shape": "circle",
+            "start_question": start_question,
+            "distribution": "column",
+        })
+        start_question += nq
+
+    return {
+        "ok": bool(blocks),
+        "blocks": blocks,
+        "reason": None if blocks else "no_grid",
+        "candidates": len(cands),
+        "rows": len(rows),
+        "columns": len(columns),
+        "radius_px": round(r0, 1),
+    }
+
+
 def _nearest_dist(pts: list[tuple[float, float]], x: float, y: float) -> float:
     best = float("inf")
     for (px, py) in pts:

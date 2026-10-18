@@ -1052,3 +1052,83 @@ def test_exam_without_custom_template_has_null_id(authed):
                  if e["external_id"] == "ex-native-1")
     assert entry["template"] != "custom"
     assert entry["custom_template_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Auto-detecção da grade (editor)
+# ---------------------------------------------------------------------------
+
+def _make_dual_card() -> np.ndarray:
+    """Cartão com DUAS colunas de questões (6 × 4 alternativas cada)."""
+    img = np.ones((PAGE_H, PAGE_W, 3), dtype=np.uint8) * 255
+    for mid, (nx, ny) in ANCHOR_POS.items():
+        m = _generate_aruco_marker(ARUCO_DICT, mid, ARUCO_SIZE)
+        if m.ndim == 2:
+            m = cv2.cvtColor(m, cv2.COLOR_GRAY2BGR)
+        cx, cy = int(nx * PAGE_W), int(ny * PAGE_H)
+        img[cy - ARUCO_SIZE // 2:cy + ARUCO_SIZE // 2,
+            cx - ARUCO_SIZE // 2:cx + ARUCO_SIZE // 2] = m
+    r_px = int(B_RADIUS * max(PAGE_W, PAGE_H))
+    for fx in (0.12, 0.62):
+        for q in range(6):
+            for i in range(4):
+                x = fx + i * OPT_STEP
+                y = 0.25 + q * Q_STEP
+                cv2.circle(img, (int(x * PAGE_W), int(y * PAGE_H)), r_px, (0, 0, 0), 2)
+    return img
+
+
+def test_detect_grid_single_block():
+    """Detecta a grade do cartão de teste e cai perto da geometria real."""
+    res = ct.detect_grid(_make_card({}), {})
+    assert res["ok"] is True, res
+    assert res["columns"] == 1 and len(res["blocks"]) == 1
+    b = res["blocks"][0]
+    assert b["labels"] == ["A", "B", "C", "D"]
+    assert b["n_questions"] == 5
+    assert b["first_x"] == pytest.approx(B1_FX, abs=0.02)
+    assert b["first_y"] == pytest.approx(B1_FY, abs=0.02)
+    assert b["option_step_x"] == pytest.approx(OPT_STEP, abs=0.01)
+    assert b["question_step_y"] == pytest.approx(Q_STEP, abs=0.01)
+    assert b["radius"] == pytest.approx(B_RADIUS, abs=0.005)
+    # âncoras ArUco (grandes, poucas) não entram como bolhas
+    assert res["radius_px"] == pytest.approx(int(B_RADIUS * PAGE_H), abs=3)
+
+
+def test_detect_grid_dual_columns():
+    """Duas colunas de questões → dois blocos, numeração sequencial."""
+    res = ct.detect_grid(_make_dual_card(), {})
+    assert res["ok"] is True and res["columns"] == 2 and len(res["blocks"]) == 2
+    left, right = res["blocks"]
+    assert left["first_x"] < right["first_x"]
+    assert left["start_question"] == 1 and right["start_question"] == 7
+    for b in (left, right):
+        assert b["n_questions"] == 6 and b["labels"] == ["A", "B", "C", "D"]
+
+
+def test_detect_grid_blank_image():
+    res = ct.detect_grid(np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255, {})
+    assert res["ok"] is False and res["blocks"] == []
+    assert res["reason"] == "no_candidates"
+
+
+def test_detect_grid_too_small():
+    res = ct.detect_grid(np.ones((4, 4, 3), np.uint8) * 255, {})
+    assert res["ok"] is False and res["reason"] == "image_too_small"
+
+
+def test_api_detect_grid_endpoint(authed):
+    client = authed
+    r = _create(client, _png_bytes(_make_card({})), "Detectável")
+    tid = r.json()["id"]
+    # sem nenhuma config salva, a detecção já sugere a grade
+    r = client.post(f"/api/custom-templates/{tid}/detect-grid")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and len(body["blocks"]) == 1
+    assert body["blocks"][0]["n_questions"] == 5
+    # a sugestão é aplicável: vira config válida no editor
+    cfg = _config()
+    cfg["questions"] = body["blocks"]
+    assert not ct.has_errors(ct.validate_config(cfg))
+    client.delete(f"/api/custom-templates/{tid}")

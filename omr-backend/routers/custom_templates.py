@@ -30,6 +30,7 @@ from models import (
 from omr.custom_template import (
     config_summary,
     default_config,
+    detect_grid,
     expand_bubbles,
     has_errors,
     normalize_config,
@@ -620,6 +621,24 @@ def print_template(
 def template_bubbles(tid: int, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     tpl = _get_template(db, tid, current_user)
     return {"bubbles": expand_bubbles(tpl.config or {}), "summary": config_summary(tpl.config or {})}
+
+
+# ---------------------------------------------------------------------------
+# Auto-detecção da grade (sugestão para o editor — NÃO persiste)
+# ---------------------------------------------------------------------------
+
+@router.post("/api/custom-templates/{tid}/detect-grid")
+def detect_grid_endpoint(
+    tid: int,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Analisa a imagem importada e propõe bloco(s) de bolhas (o usuário ajusta)."""
+    tpl = _get_template(db, tid, current_user)
+    image = _load_image(tpl)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Imagem original não encontrada")
+    return detect_grid(image, tpl.config or {})
 
 
 # ---------------------------------------------------------------------------

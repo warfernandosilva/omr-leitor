@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import {
   ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
-  Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon,
+  Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -20,7 +20,7 @@ import {
   CustomAnchor, CustomBlock, CustomConfig, CustomInfoRegion, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
-  createCustomTemplate, customTemplateImage, deleteCustomTemplate, expandBlock,
+  createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, expandBlock,
   getCustomTemplate, listCustomTemplates, printCustomTemplate, testCustomTemplate,
   updateCustomTemplate, validateCustomTemplate,
 } from '../utils/custom-template-api';
@@ -34,6 +34,22 @@ interface Rect { x: number; y: number; w: number; h: number }
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const rnd = () => Math.random().toString(36).slice(2, 8);
+
+/** Bloco de questões com todos os campos do esquema (defaults + overrides). */
+function defaultBlock(id: string, start: number, over: Partial<CustomBlock> = {}): CustomBlock {
+  return {
+    id, type: 'bubble_block',
+    first_x: 0.3, first_y: 0.3,
+    option_step_x: 0.06, question_step_y: 0.035, column_step_x: null,
+    columns: 1, n_questions: 10, labels: ['A', 'B', 'C', 'D'], radius: 0.012,
+    shape: 'circle', start_question: Math.max(1, start), distribution: 'column',
+    multi_answer: false, multi_marks_min: null, multi_marks_max: null,
+    points: 1, annulled: false, overrides: {},
+    pick_darkest_mark: false, darkest_mark_threshold: null,
+    fallback_on_empty: false, fallback_floor: null, mark_style: 'filled',
+    ...over,
+  };
+}
 
 /** Envolve o notify do ToastProvider na forma { success, error, info }. */
 function useNotify() {
@@ -294,6 +310,7 @@ function TemplateEditor({
   const [anchorArucoId, setAnchorArucoId] = useState(0);
   const [creating, setCreating] = useState<CreateBox | null>(null);
   const [dragKind, setDragKind] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
 
   const configRef = useRef(config);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -512,19 +529,30 @@ function TemplateEditor({
   const addBlock = () => {
     const id = `blk_${rnd()}`;
     const start = config.questions.reduce((m, b) => Math.max(m, b.start_question + b.n_questions), 1);
-    pendingBlockRef.current = {
-      id, type: 'bubble_block',
-      first_x: 0.3, first_y: 0.3,
-      option_step_x: 0.06, question_step_y: 0.035, column_step_x: null,
-      columns: 1, n_questions: 10, labels: ['A', 'B', 'C', 'D'], radius: 0.012,
-      shape: 'circle', start_question: Math.max(1, start), distribution: 'column',
-      multi_answer: false, multi_marks_min: null, multi_marks_max: null,
-      points: 1, annulled: false, overrides: {},
-      pick_darkest_mark: false, darkest_mark_threshold: null,
-      fallback_on_empty: false, fallback_floor: null, mark_style: 'filled',
-    };
+    pendingBlockRef.current = defaultBlock(id, start);
     setTool('place-block');
     toast.info('Clique no cartão para posicionar a 1ª alternativa (A) da 1ª questão.');
+  };
+
+  // Analisa a imagem importada e sugere bloco(s) de bolhas (ação no undo).
+  const detectGrid = async () => {
+    setDetecting(true);
+    try {
+      const res = await detectCustomGrid(detail.id);
+      if (!res.ok || !res.blocks.length) {
+        toast.info('Não encontrei uma grade de bolhas nesta imagem — posicione o bloco manualmente.');
+        return;
+      }
+      const blocks = res.blocks.map((b) =>
+        defaultBlock(b.id || `blk_${rnd()}`, b.start_question, b));
+      apply({ ...configRef.current, questions: [...configRef.current.questions, ...blocks] });
+      setSelection({ kind: 'block', id: blocks[0].id });
+      toast.success(`Grade detectada: ${blocks.length} bloco(s) de questões. Ajuste se precisar.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao detectar a grade');
+    } finally {
+      setDetecting(false);
+    }
   };
 
   const save = useCallback(async (): Promise<boolean> => {
@@ -599,7 +627,8 @@ function TemplateEditor({
           <Toolbar tool={tool} setTool={setTool}
                    anchorType={anchorType} setAnchorType={setAnchorType}
                    anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
-                   onAddBlock={addBlock} />
+                   onAddBlock={addBlock}
+                   onDetectGrid={() => void detectGrid()} detecting={detecting} />
 
           <div>
             <p className="label">Camadas</p>
@@ -771,12 +800,15 @@ function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
 // ───────────────────────────────────────────────────────────────────────────
 
 function Toolbar({
-  tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId, onAddBlock,
+  tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId,
+  onAddBlock, onDetectGrid, detecting,
 }: {
   tool: Tool; setTool: (t: Tool) => void;
   anchorType: 'aruco' | 'quad'; setAnchorType: (t: 'aruco' | 'quad') => void;
   anchorArucoId: number; setAnchorArucoId: (n: number) => void;
   onAddBlock: () => void;
+  onDetectGrid: () => void;
+  detecting: boolean;
 }) {
   const tools: { id: Tool; label: string; icon: typeof PenSquare }[] = [
     { id: 'select', label: 'Selecionar', icon: Crosshair },
@@ -797,6 +829,11 @@ function Toolbar({
         <button type="button" onClick={onAddBlock}
                 className={`btn btn-sm min-h-[40px] justify-start col-span-2 ${tool === 'place-block' ? 'btn-primary' : 'btn-secondary'}`}>
           <Boxes size={15} aria-hidden /> Bloco de questões
+        </button>
+        <button type="button" onClick={onDetectGrid} disabled={detecting}
+                title="Analisa a imagem importada e sugere os blocos de questões automaticamente"
+                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
+          <ScanSearch size={15} aria-hidden /> {detecting ? 'Detectando…' : 'Detectar grade'}
         </button>
       </div>
 

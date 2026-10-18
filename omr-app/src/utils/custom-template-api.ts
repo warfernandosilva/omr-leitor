@@ -263,6 +263,39 @@ export async function customBubbles(id: number): Promise<{ bubbles: ExpandedBubb
   return apiJson(`/api/custom-templates/${id}/bubbles`);
 }
 
+// ─── Auto-detecção de grade (sugestão para o editor) ───
+
+/** Bloco sugerido pela detecção (campos de geometria; defaults no editor). */
+export interface DetectedBlock {
+  id: string;
+  type: 'bubble_block';
+  first_x: number;
+  first_y: number;
+  option_step_x: number;
+  question_step_y: number;
+  columns: number;
+  n_questions: number;
+  labels: string[];
+  radius: number;
+  shape: 'circle' | 'square';
+  start_question: number;
+  distribution: 'column' | 'row';
+}
+
+export interface DetectGridResult {
+  ok: boolean;
+  blocks: DetectedBlock[];
+  reason: string | null;
+  candidates: number;
+  rows: number;
+  columns: number;
+  radius_px: number;
+}
+
+export function detectCustomGrid(id: number): Promise<DetectGridResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/detect-grid`, 'POST', {});
+}
+
 // ─── Teste ───
 
 export function testCustomTemplate(
