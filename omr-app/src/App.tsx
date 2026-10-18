@@ -17,6 +17,7 @@ import SettingsPage from './pages/SettingsPage';
 import HelpPage from './pages/HelpPage';
 import ReportsPage from './pages/ReportsPage';
 import GenerateCardPage from './pages/GenerateCardPage';
+import CustomTemplatePage from './pages/CustomTemplatePage';
 import RosterCardsPage from './pages/RosterCardsPage';
 import ManageExamPage from './pages/ManageExamPage';
 import RegisterKeyPage from './pages/RegisterKeyPage';
@@ -137,6 +138,8 @@ function AppInner() {
         return <HelpPage onNavigate={navigate} />;
       case 'generate-card':
         return <GenerateCardPage examId={selectedExamId} onNavigate={navigate} />;
+      case 'custom-template':
+        return <CustomTemplatePage />;
       case 'import-students':
         return <RosterCardsPage examId={selectedExamId} onNavigate={navigate} />;
       case 'manage-exam':

@@ -67,7 +67,7 @@ class BubbleMetrics:
         )
 
 
-from .config import FLOOR, LOW_CONF_THRESHOLD, MARGIN
+from .config import DARKEST_MARK_GAP_FACTOR, FLOOR, LOW_CONF_THRESHOLD, MARGIN
 from .params import OmrParams
 from .tuning import compute_floor_for
 
@@ -91,6 +91,11 @@ class OMRResult:
     t_score: float = 0.0
     # Pontos p/ heatmap de debug (só quando debug=True)
     debug_points: list | None = None
+    # Diagnóstico de alinhamento (só Gabarito Personalizado): {"ok", "method", ...}
+    alignment: dict | None = None
+    # Gabarito Personalizado: questões resolvidas por regra alternativa
+    darkest_marks: list[int] | None = None   # dupla resolvida pela marca mais escura
+    fallback_marks: list[int] | None = None  # vazia recuperada pelo método alternativo
 
 
 def classify_question(
@@ -98,12 +103,17 @@ def classify_question(
     floor: float = FLOOR,
     margin: float = MARGIN,
     low_thr: float | None = None,
+    pick_darkest: bool = False,
+    darkest_gap: float | None = None,
 ) -> tuple[str, str | None, list[str]]:
     """Classifica uma questão a partir dos scores A–D.
 
     Devolve (status, melhor_letra, marcas):
     - blank: melhor abaixo do piso — nada marcado;
     - duplicate: DUAS ou mais acima do piso com gap < margin — dupla real;
+    - darkest: como `duplicate`, mas resolvida pela marca mais escura quando
+      `pick_darkest` está ligado e o vencedor abre `darkest_gap` sobre a 2ª
+      marca (default: MARGIN * DARKEST_MARK_GAP_FACTOR);
     - low: ambíguo (uma no piso e demais abaixo, ou melhor fraco) — conferência manual;
     - ok: vencedor claro.
 
@@ -111,6 +121,10 @@ def classify_question(
     com score elevado por ruído (foto de celular) virem "duplicada".
     O limiar de baixa confiança acompanha o piso (mesmo offset do fixo),
     a menos que `low_thr` explicite um valor (calibração).
+
+    `pick_darkest`/`darkest_gap` só são usados pelo Gabarito Personalizado;
+    os modelos nativos chamam sem esses argumentos e o comportamento é
+    idêntico ao anterior.
     """
     if low_thr is None:
         low_thr = floor + (LOW_CONF_THRESHOLD - FLOOR)
@@ -121,6 +135,9 @@ def classify_question(
         return "blank", None, []
     if second_score >= floor and best_score - second_score < margin:
         marks = sorted(letter for letter, s in ratios.items() if s >= floor)
+        gap_thr = (margin * DARKEST_MARK_GAP_FACTOR) if darkest_gap is None else darkest_gap
+        if pick_darkest and (best_score - second_score) >= gap_thr:
+            return "darkest", best_letter, [best_letter]
         return "duplicate", None, marks
     if best_score < low_thr or best_score - second_score < margin:
         return "low", best_letter, []

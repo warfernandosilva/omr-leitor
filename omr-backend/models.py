@@ -64,6 +64,8 @@ class Avaliacao(Base, TimestampMixin):
     grade_scale: Mapped[str] = mapped_column(String(10), nullable=False, default="0-10")
     answer_key: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    # Gabarito Personalizado vinculado (quando template == 'custom')
+    custom_template_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
     owner: Mapped["User | None"] = relationship()
 
@@ -146,6 +148,9 @@ class GabaritoNomeado(Base, TimestampMixin):
     # ID impresso + payload do QR Code (sempre iguais)
     codigo_unico: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     qr_code_payload: Mapped[str] = mapped_column(String(120))
+    # Versionamento: cartão emitido com Gabarito Personalizado referencia a
+    # versão de configuração usada (mudar o layout não invalida o impresso).
+    custom_template_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # Herby: conteúdo integral do QR do cabeçalho (magic link; só armazenado)
     magic_link: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Herby: estado da foto (Successful/QrNotRead/AnswerFieldsCut/PageCut)
@@ -366,3 +371,59 @@ class OmrConfig(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
     owner: Mapped["User | None"] = relationship()
+
+
+class CustomTemplate(Base, TimestampMixin):
+    """Gabarito Personalizado: modelo de cartão-resposta importado pelo usuário.
+
+    `config` guarda TODAS as regiões em coordenadas NORMALIZADAS (0..1):
+    âncoras, QR, campos informativos, blocos de questões e campos de
+    impressão. A imagem original fica em disco (image_path) e é servida
+    como fundo do editor e da impressão.
+
+    Estados: rascunho -> validado -> ativo. Ao ativar, uma cópia imutável
+    da config vira CustomTemplateVersion; cada cartão emitido referencia a
+    versão usada, então editar o layout depois não corrompe cartões já
+    impressos.
+    """
+
+    __tablename__ = "custom_templates"
+
+    STATUS_RASCUNHO = "rascunho"
+    STATUS_VALIDADO = "validado"
+    STATUS_ATIVO = "ativo"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    avaliacao_id: Mapped[int | None] = mapped_column(ForeignKey("avaliacoes.id"), nullable=True, index=True)
+    nome: Mapped[str] = mapped_column(String(200), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=STATUS_RASCUNHO)
+
+    image_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    image_w: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    image_h: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Resultado da última validação (cache para a UI; recalcular é barato)
+    last_issues: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+    owner: Mapped["User | None"] = relationship()
+    avaliacao: Mapped["Avaliacao | None"] = relationship()
+    versions: Mapped[list["CustomTemplateVersion"]] = relationship(
+        back_populates="template", cascade="all, delete-orphan"
+    )
+
+
+class CustomTemplateVersion(Base):
+    """Snapshot imutável de um Gabarito Personalizado ativado."""
+
+    __tablename__ = "custom_template_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    template_id: Mapped[int] = mapped_column(ForeignKey("custom_templates.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    config: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    template: Mapped["CustomTemplate"] = relationship(back_populates="versions")

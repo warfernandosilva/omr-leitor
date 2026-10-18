@@ -2,6 +2,9 @@
 FLOOR = 0.30
 MARGIN = 0.22
 LOW_CONF_THRESHOLD = 0.35
+# Gabarito Personalizado — dupla resolvida pela marca mais escura: o vencedor
+# precisa abrir este gap (fração do MARGIN) sobre a 2ª marca para ser aceito.
+DARKEST_MARK_GAP_FACTOR = 0.5
 BLUR_THRESHOLD = 35.0  # aviso; bloqueio só abaixo de BLUR_BLOCK
 BLUR_BLOCK = 15.0  # extremamente borrada — pipeline retorna None
 # Cascata de detecção ArUco (taxa de detecção é a métrica principal)

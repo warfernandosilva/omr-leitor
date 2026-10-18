@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, GraduationCap, Users, ClipboardList, KeyRound, Printer,
   ScanLine, History, ClipboardCheck, BarChart3, FileText, FlaskConical,
-  Settings, LifeBuoy, ShieldCheck, UserRound, ListChecks,
+  Settings, LifeBuoy, ShieldCheck, UserRound, ListChecks, PenSquare,
 } from 'lucide-react';
 import type { AppView } from '../../types';
 
@@ -39,6 +39,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { view: 'new-exam', label: 'Provas e avaliações', icon: ClipboardList },
       { view: 'register-key', label: 'Gabaritos', icon: KeyRound },
       { view: 'generate-card', label: 'Gerar cartões-resposta', icon: Printer },
+      { view: 'custom-template', label: 'Gabarito personalizado', icon: PenSquare },
       { view: 'manage-exam', label: 'Gerenciar avaliação', icon: ListChecks },
     ],
   },
@@ -93,6 +94,7 @@ export const VIEW_META: Record<AppView, { title: string; group: string }> = {
   turmas: { title: 'Turmas', group: 'Gerenciamento' },
   alunos: { title: 'Alunos', group: 'Gerenciamento' },
   'generate-card': { title: 'Gerar cartões-resposta', group: 'Avaliações' },
+  'custom-template': { title: 'Gabarito personalizado', group: 'Avaliações' },
   'import-students': { title: 'Cartões por lista da prova', group: 'Avaliações' },
   'manage-exam': { title: 'Gerenciar avaliação', group: 'Avaliações' },
   'register-key': { title: 'Gabaritos', group: 'Avaliações' },
@@ -112,7 +114,7 @@ export const VIEW_META: Record<AppView, { title: string; group: string }> = {
 
 /** Páginas de trabalho intensivo usam a largura total do monitor. */
 export const WIDE_VIEWS: AppView[] = [
-  'correct-card', 'manage-exam', 'results', 'dashboard', 'lab', 'view-result',
+  'correct-card', 'manage-exam', 'results', 'dashboard', 'lab', 'view-result', 'custom-template',
 ];
 
 export function viewMeta(view: AppView): { title: string; group: string } {

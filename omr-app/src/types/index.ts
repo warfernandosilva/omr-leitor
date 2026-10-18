@@ -17,6 +17,8 @@ export interface Exam {
   layoutMode?: 'dual' | 'single';
   /** Modelo do cartão: 'padrao' (ArUco), 'sae' (Avaliação Contínua), 'colar' (Colar em Avaliação, só grade), 'saev' (Gabarito SAEV, dual 16+16 a 26+26), 'herby' (Gabarito Herby, dual 1+1 a 26+26, QR duplo), 'simulado' (tabela única, réguas como âncora, 22 fixo, sem identificação). */
   templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
+  /** Id do Gabarito Personalizado no backend (quando a prova usa um cartão importado). */
+  customTemplateId?: number;
   /** Cabeçalho editável do cartão SAE (só quando templateType === 'sae'). */
   saeSpec?: SaeSpec;
   /** Cabeçalho editável do cartão Herby (só quando templateType === 'herby'). */
@@ -102,6 +104,11 @@ export function isSimuladoExam(exam?: Pick<Exam, 'templateType'> | null): boolea
   return exam?.templateType === 'simulado';
 }
 
+/** Prova vinculada a um Gabarito Personalizado (cartão importado pelo usuário). */
+export function isCustomExam(exam?: Pick<Exam, 'customTemplateId'> | null): boolean {
+  return exam?.customTemplateId != null;
+}
+
 /** SAE e Colar compartilham a mesma geometria de grade/âncoras (leitura e overlay). */
 export function isSaeFamilyExam(exam?: Pick<Exam, 'templateType'> | null): boolean {
   return exam?.templateType === 'sae' || exam?.templateType === 'colar';
@@ -183,7 +190,8 @@ export type AppView =
   | 'settings'
   | 'help'
   | 'profile'
-  | 'admin-users';
+  | 'admin-users'
+  | 'custom-template';
 
 export const SUBJECT_IDS = ['lp', 'mat'] as const;
 export type SubjectId = (typeof SUBJECT_IDS)[number];

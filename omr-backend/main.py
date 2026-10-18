@@ -137,6 +137,8 @@ class ProcessResponse(BaseModel):
     duplicate_questions: list[int] | None = None
     duplicate_marks: dict[int, list[str]] | None = None
     low_confidence: list[int] | None = None
+    darkest_marks: list[int] | None = None   # Gabarito Personalizado: dupla resolvida pela marca mais escura
+    fallback_marks: list[int] | None = None  # Gabarito Personalizado: vazia recuperada pelo fallback
     all_ratios: dict[int, dict[str, float]] | None = None
     card_id: str | None = None
     rectified_image: str | None = None  # base64 dataURL da imagem retificada (para overlay perfeito)
@@ -436,6 +438,10 @@ app.include_router(_turmas_router)
 from routers.alunos import router as _alunos_router
 app.include_router(_alunos_router)
 
+# Gabaritos personalizados (importar cartão próprio + editor + impressão)
+from routers.custom_templates import router as _custom_router
+app.include_router(_custom_router)
+
 
 def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
     """Decodifica bytes de imagem com correção de orientação EXIF (celular)
@@ -507,16 +513,77 @@ def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
     return qps if layout_mode == "single" else 2 * qps
 
 
+def _load_custom_config(db: Session, tid: int, user: User) -> dict | None:
+    """Config normalizada do Gabarito Personalizado (com checagem de acesso)."""
+    from models import CustomTemplate
+    tpl = db.get(CustomTemplate, tid)
+    if tpl is None:
+        return None
+    if tpl.owner_id is not None and tpl.owner_id != user.id and user.role != "admin":
+        return None
+    return tpl.config or {}
+
+
+def _custom_process_response(result: OMRResult, debug: bool, tid: int) -> "ProcessResponse":
+    """Resposta do /api/omr/process para template='custom'."""
+    total = len(result.answers) + len(result.blank_questions) + len(result.duplicate_questions)
+    _ops_record({
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "model": "custom",
+        "custom_template_id": tid,
+        "success": True,
+        "answers": len(result.answers),
+        "blank": len(result.blank_questions),
+        "dup": len(result.duplicate_questions),
+        "low": len(result.low_confidence),
+        "t_total_ms": round((result.t_detect + result.t_warp + result.t_qr + result.t_score) * 1000),
+        "floor": round(result.floor_used, 3),
+        "floor_source": result.floor_source,
+    })
+    return ProcessResponse(
+        success=True,
+        answers={str(k): v for k, v in result.answers.items()},
+        blank_questions=result.blank_questions,
+        duplicate_questions=result.duplicate_questions,
+        duplicate_marks={str(q): marks for q, marks in (result.duplicate_marks or {}).items()},
+        low_confidence=result.low_confidence,
+        darkest_marks=result.darkest_marks or [],
+        fallback_marks=result.fallback_marks or [],
+        all_ratios={str(k): v for k, v in result.all_ratios.items()},
+        card_id=result.qr_id,
+        rectified_image=_rectified_data_url(result.rectified),
+        template_used="custom",
+        thresholds_used={"floor": round(result.floor_used, 3), "margin": MARGIN,
+                         "source": result.floor_source},
+        debug_images=_debug_images(result, debug),
+        photo_status="Successful" if result.qr_id else "QrNotRead",
+        answer_string=_answer_string(result, total),
+    )
+
+
+def _rectified_data_url(rectified) -> str | None:
+    try:
+        if rectified is None:
+            return None
+        import base64
+        _, buf = cv2.imencode('.jpg', rectified, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+        return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode('ascii')
+    except Exception:
+        return None
+
+
 @app.post("/api/omr/process", response_model=ProcessResponse)
 def process_omr(
     file: UploadFile = File(...),
     questions_per_subject: int = Form(22),
     layout_mode: str = Form("dual"),
-    template: str = Form("padrao"),  # padrao | sae | colar | saev | herby | simulado
+    template: str = Form("padrao"),  # padrao | sae | colar | saev | herby | simulado | custom
     adaptive: bool = Form(False),  # limiar adaptativo por foto (experimental, default OFF)
     debug: bool = Form(False),  # heatmap de diagnóstico (default off = zero custo)
     client_duration_ms: int | None = Form(None),  # Herby: tempo client-side por foto (diagnóstico)
+    custom_template_id: int | None = Form(None),  # obrigatório quando template=custom
     current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
 ):
     """Processa uma imagem (foto/scan) do cartão preenchido.
 
@@ -539,6 +606,28 @@ def process_omr(
 
     if image is None:
         return ProcessResponse(success=False, error="Não foi possível decodificar a imagem")
+
+    # Gabarito Personalizado: a configuração (regiões normalizadas) vem do banco
+    if template == "custom":
+        if not custom_template_id:
+            return ProcessResponse(success=False, error="Gabarito personalizado sem identificador (custom_template_id).")
+        custom_cfg = _load_custom_config(db, custom_template_id, current_user)
+        if custom_cfg is None:
+            return ProcessResponse(success=False, error="Gabarito personalizado não encontrado.")
+        from omr.custom_template import process_custom_image
+        diag: dict = {}
+        c_result = process_custom_image(image, custom_cfg, adaptive=adaptive, debug=debug,
+                                        diagnostics=diag)
+        if c_result is None:
+            detail = diag.get("detail") or ""
+            base = ("Não foi possível alinhar/ler o gabarito personalizado. "
+                    "Confira as âncoras configuradas, a nitidez da foto e se o cartão "
+                    "inteiro está visível.")
+            return ProcessResponse(
+                success=False, template_used="custom",
+                error=(f"{base} ({detail})" if detail else base),
+            )
+        return _custom_process_response(c_result, debug, custom_template_id)
 
     result: OMRResult | None
     template_used = template if template in ("padrao", "sae", "colar", "saev", "herby", "simulado") else "padrao"
@@ -1127,7 +1216,8 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     av.layout_mode = req.layout_mode
     if req.template not in ("padrao", "sae", "colar", "saev", "herby", "simulado"):
         raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar', 'saev', 'herby' ou 'simulado'")
-    av.template = req.template
+    # Prova com Gabarito Personalizado ativo mantém o vínculo (não volta p/ nativo).
+    av.template = "custom" if av.custom_template_id is not None else req.template
     if req.sae is not None:
         spec = req.sae.to_spec()
         av.sae_spec = {

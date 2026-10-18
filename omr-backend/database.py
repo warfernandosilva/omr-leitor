@@ -104,7 +104,9 @@ def init_db() -> None:
     _ensure_column("avaliacoes", "turma_id", "INTEGER")
     _ensure_column("gabaritos_nomeados", "magic_link", "VARCHAR(255)")
     _ensure_column("gabaritos_nomeados", "photo_status", "VARCHAR(30)")
+    _ensure_column("gabaritos_nomeados", "custom_template_version_id", "INTEGER")
     _ensure_column("alunos", "origem_turma_aluno_id", "INTEGER")
+    _ensure_column("avaliacoes", "custom_template_id", "INTEGER")
 
 
 def _ensure_column(table: str, column: str, ddl_type: str) -> None:
