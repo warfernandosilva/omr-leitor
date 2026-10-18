@@ -15,6 +15,8 @@ export interface CustomAnchor {
   type: 'aruco' | 'quad';
   corner: CornerName | null;
   aruco_id: number | null;
+  // Multi-página (mesma folha): cada página tem o próprio conjunto de âncoras.
+  page?: number;
   x: number;
   y: number;
   size: number;
@@ -45,6 +47,8 @@ export interface CustomInfoRegion {
 export interface CustomBlock {
   id: string;
   type: 'bubble_block';
+  // Multi-página (mesma folha): bloco pertence a uma página do modelo.
+  page?: number;
   first_x: number;
   first_y: number;
   option_step_x: number;
@@ -81,6 +85,8 @@ export interface CustomConfig {
   schema_version: number;
   page_w: number;
   page_h: number;
+  // Multi-página (mesma folha): 1 = modelo de 1 página (default).
+  n_pages?: number;
   anchors: CustomAnchor[];
   qr: CustomQr | null;
   info_regions: CustomInfoRegion[];
@@ -109,6 +115,7 @@ export interface CustomTemplateSummary {
     n_blocks: number;
     n_questions: number;
     n_print_fields: number;
+    n_pages: number;
     page_w: number;
     page_h: number;
   };
@@ -259,8 +266,9 @@ export function customTemplateImage(id: number): Promise<Blob> {
   return apiBlob(`/api/custom-templates/${id}/image`);
 }
 
-export async function customBubbles(id: number): Promise<{ bubbles: ExpandedBubble[] }> {
-  return apiJson(`/api/custom-templates/${id}/bubbles`);
+export async function customBubbles(id: number, page?: number): Promise<{ bubbles: ExpandedBubble[]; n_pages?: number }> {
+  const q = page == null ? '' : `?page=${page}`;
+  return apiJson(`/api/custom-templates/${id}/bubbles${q}`);
 }
 
 // ─── Auto-detecção de grade (sugestão para o editor) ───
@@ -269,6 +277,7 @@ export async function customBubbles(id: number): Promise<{ bubbles: ExpandedBubb
 export interface DetectedBlock {
   id: string;
   type: 'bubble_block';
+  page?: number;
   first_x: number;
   first_y: number;
   option_step_x: number;
@@ -292,8 +301,8 @@ export interface DetectGridResult {
   radius_px: number;
 }
 
-export function detectCustomGrid(id: number): Promise<DetectGridResult> {
-  return apiJsonBody(`/api/custom-templates/${id}/detect-grid`, 'POST', {});
+export function detectCustomGrid(id: number, page = 0): Promise<DetectGridResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/detect-grid?page=${page}`, 'POST', {});
 }
 
 // ─── Teste ───
@@ -371,6 +380,7 @@ export function emptyConfig(pageW: number, pageH: number): CustomConfig {
     schema_version: 1,
     page_w: pageW,
     page_h: pageH,
+    n_pages: 1,
     anchors: [],
     qr: null,
     info_regions: [],

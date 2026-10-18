@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import {
   ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
-  Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch,
+  Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -48,6 +48,7 @@ function defaultBlock(id: string, start: number, over: Partial<CustomBlock> = {}
     points: 1, annulled: false, overrides: {},
     pick_darkest_mark: false, darkest_mark_threshold: null,
     fallback_on_empty: false, fallback_floor: null, mark_style: 'filled',
+    page: 0,
     ...over,
   };
 }
@@ -312,6 +313,8 @@ function TemplateEditor({
   const [creating, setCreating] = useState<CreateBox | null>(null);
   const [dragKind, setDragKind] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  // Multi-página (mesma folha): página do modelo atualmente editada.
+  const [pageIdx, setPageIdx] = useState(0);
 
   const configRef = useRef(config);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -373,18 +376,32 @@ function TemplateEditor({
   const baseW = config.page_w || detail.image_w || 1000;
   const baseH = config.page_h || detail.image_h || 1400;
 
+  const nPages = Math.max(1, config.n_pages ?? 1);
+  // Página efetivamente editada (clampada ao número disponível).
+  const currentPage = Math.min(pageIdx, nPages - 1);
+  // Config recortada à página atual: o canvas/overlay/lista mostram só as
+  // regiões dessa página. QR, info e print_fields são compartilhados.
+  const pageConfig = useMemo<CustomConfig>(
+    () => ({
+      ...config,
+      anchors: config.anchors.filter((a) => (a.page ?? 0) === currentPage),
+      questions: config.questions.filter((b) => (b.page ?? 0) === currentPage),
+    }),
+    [config, currentPage],
+  );
+
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<DragState | null>(null);
   const snapRef = useRef<CustomConfig | null>(null);
   const creatingRef = useRef<CreateBox | null>(null);
-  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info'; anchorType: 'aruco' | 'quad'; arucoId: number }>(
-    { tool: 'anchor', anchorType: 'quad', arucoId: 0 },
+  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info'; anchorType: 'aruco' | 'quad'; arucoId: number; page: number }>(
+    { tool: 'anchor', anchorType: 'quad', arucoId: 0, page: 0 },
   );
   const pendingBlockRef = useRef<CustomBlock | null>(null);
 
   const bubbles = useMemo(
-    () => config.questions.flatMap((b) => expandBlock(b)),
-    [config.questions],
+    () => pageConfig.questions.flatMap((b) => expandBlock(b)),
+    [pageConfig.questions],
   );
 
   const toBase = useCallback((clientX: number, clientY: number) => {
@@ -444,7 +461,7 @@ function TemplateEditor({
           w, h,
         };
         const snap = clone(configRef.current);
-        const created = buildCreate(configRef.current, ctx.tool, rect, ctx.anchorType, ctx.arucoId);
+        const created = buildCreate(configRef.current, ctx.tool, rect, ctx.anchorType, ctx.arucoId, ctx.page);
         if (created) {
           setConfig(created.config);
           pushHistory(snap);
@@ -468,7 +485,7 @@ function TemplateEditor({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
-  }, [baseW, baseH, toBase, pushHistory]);
+  }, [baseW, baseH, toBase, pushHistory, currentPage]);
 
   const onSvgPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
     if (e.button === 1 || e.altKey) {
@@ -479,7 +496,7 @@ function TemplateEditor({
     if (tool === 'select') { setSelection(null); return; }
     if (tool === 'place-block') return;
     const p = toBase(e.clientX, e.clientY);
-    createCtxRef.current = { tool, anchorType, arucoId: anchorArucoId };
+    createCtxRef.current = { tool, anchorType, arucoId: anchorArucoId, page: currentPage };
     creatingRef.current = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
     setCreating(creatingRef.current);
   };
@@ -491,7 +508,7 @@ function TemplateEditor({
     if (block) {
       apply({
         ...configRef.current,
-        questions: [...configRef.current.questions, { ...block, first_x: p.x / baseW, first_y: p.y / baseH }],
+        questions: [...configRef.current.questions, { ...block, first_x: p.x / baseW, first_y: p.y / baseH, page: currentPage }],
       });
       setSelection({ kind: 'block', id: block.id });
       toast.success('Bloco de questões posicionado.');
@@ -539,13 +556,13 @@ function TemplateEditor({
   const detectGrid = async () => {
     setDetecting(true);
     try {
-      const res = await detectCustomGrid(detail.id);
+      const res = await detectCustomGrid(detail.id, currentPage);
       if (!res.ok || !res.blocks.length) {
         toast.info('Não encontrei uma grade de bolhas nesta imagem — posicione o bloco manualmente.');
         return;
       }
       const blocks = res.blocks.map((b) =>
-        defaultBlock(b.id || `blk_${rnd()}`, b.start_question, b));
+        defaultBlock(b.id || `blk_${rnd()}`, b.start_question, { ...b, page: b.page ?? currentPage }));
       apply({ ...configRef.current, questions: [...configRef.current.questions, ...blocks] });
       setSelection({ kind: 'block', id: blocks[0].id });
       toast.success(`Grade detectada: ${blocks.length} bloco(s) de questões. Ajuste se precisar.`);
@@ -554,6 +571,44 @@ function TemplateEditor({
     } finally {
       setDetecting(false);
     }
+  };
+
+  // Multi-página (mesma folha): adiciona uma página nova (copia as âncoras da
+  // 1ª página que as tenha — a folha é a mesma) e remove a página atual.
+  const addPage = () => {
+    const idx = nPages;
+    const srcPage: number | null = config.anchors.length
+      ? (config.anchors.find((a) => (a.page ?? 0) === 0) ? 0
+         : (config.anchors[0].page ?? 0))
+      : null;
+    const copied = srcPage == null
+      ? []
+      : config.anchors.filter((a) => (a.page ?? 0) === (srcPage as number))
+          .map((a) => ({ ...a, id: `anc_${rnd()}`, page: idx }));
+    apply({ ...configRef.current, n_pages: nPages + 1,
+            anchors: [...configRef.current.anchors, ...copied] });
+    setPageIdx(idx);
+    setSelection(null);
+    toast.info(copied.length
+      ? `Página ${idx + 1} criada com as âncoras copiadas da página ${(srcPage ?? 0) + 1}.`
+      : `Página ${idx + 1} criada.`);
+  };
+  const removePage = () => {
+    if (nPages <= 1) return;
+    const idx = currentPage;
+    const cfg = configRef.current;
+    apply({
+      ...cfg,
+      n_pages: nPages - 1,
+      anchors: cfg.anchors
+        .filter((a) => (a.page ?? 0) !== idx)
+        .map((a) => ((a.page ?? 0) > idx ? { ...a, page: (a.page ?? 0) - 1 } : a)),
+      questions: cfg.questions
+        .filter((b) => (b.page ?? 0) !== idx)
+        .map((b) => ((b.page ?? 0) > idx ? { ...b, page: (b.page ?? 0) - 1 } : b)),
+    });
+    setPageIdx(Math.max(0, idx - 1));
+    setSelection(null);
   };
 
   const save = useCallback(async (): Promise<boolean> => {
@@ -625,6 +680,36 @@ function TemplateEditor({
       <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)_300px] gap-3">
         {/* Painel esquerdo */}
         <div className="card space-y-3 max-h-[78vh] overflow-y-auto">
+          {/* Multi-página (mesma folha): abas de página */}
+          <div className="space-y-2">
+            <p className="label">Páginas do cartão</p>
+            <div className="flex flex-wrap items-center gap-1">
+              {Array.from({ length: nPages }, (_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => { setPageIdx(i); setSelection(null); }}
+                  className={`btn btn-sm min-h-[36px] px-3 ${i === currentPage ? 'btn-primary' : 'btn-secondary'}`}
+                >
+                  {i + 1}
+                </button>
+              ))}
+              <button type="button" onClick={addPage} title="Adicionar página (mesma folha)"
+                      className="btn btn-sm min-h-[36px] px-2 btn-secondary">
+                <Plus size={14} aria-hidden />
+              </button>
+              {nPages > 1 && (
+                <button type="button" onClick={removePage} title="Excluir a página atual"
+                        className="btn btn-sm min-h-[36px] px-2 btn-secondary text-red-600 dark:text-red-400">
+                  <Trash2 size={14} aria-hidden />
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Página {currentPage + 1} de {nPages}
+              {nPages > 1 ? ' · as regiões editadas pertencem a esta página' : ''}.
+            </p>
+          </div>
           <Toolbar tool={tool} setTool={setTool}
                    anchorType={anchorType} setAnchorType={setAnchorType}
                    anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
@@ -645,7 +730,7 @@ function TemplateEditor({
             </div>
           </div>
 
-          <RegionalList config={config} selection={selection} setSelection={setSelection}
+          <RegionalList config={pageConfig} selection={selection} setSelection={setSelection}
                         onDelete={(kind, id) => {
                           apply(removeRegion(configRef.current, kind, id));
                           setSelection(null);
@@ -686,7 +771,7 @@ function TemplateEditor({
                    className="absolute inset-0" style={{ touchAction: 'none' }}
                    onPointerDown={onSvgPointerDown} onClick={onSvgClick}>
                 <OverlayRegions
-                  config={config} show={show} selection={selection} zoom={zoom}
+                  config={pageConfig} show={show} selection={selection} zoom={zoom}
                   onSelect={setSelection} onStartDrag={startDragRegion} onStartResize={startResize}
                 />
                 {creating && (
@@ -723,6 +808,7 @@ function TemplateEditor({
 function buildCreate(
   cfg: CustomConfig, region: 'anchor' | 'qr' | 'info', rect: Rect,
   anchorType: 'aruco' | 'quad', arucoId: number,
+  page: number = 0,
 ): { config: CustomConfig; selection: Selection } | null {
   if (region === 'qr') {
     const qr: CustomQr = {
@@ -739,6 +825,7 @@ function buildCreate(
   const anchor: CustomAnchor = {
     id: `anc_${rnd()}`, type: anchorType, corner: null,
     aruco_id: anchorType === 'aruco' ? arucoId : null,
+    page,
     x: rect.x + rect.w / 2, y: rect.y + rect.h / 2,
     size, tolerance: 0.15, required: true,
   };
