@@ -418,6 +418,7 @@ def test_template(
         "low_confidence": result.low_confidence,
         "darkest_marks": result.darkest_marks or [],
         "fallback_marks": result.fallback_marks or [],
+        "multi_marks": {str(k): v for k, v in (result.multi_marks or {}).items()},
         "all_ratios": {str(k): v for k, v in result.all_ratios.items()},
         "qr_id": result.qr_id,
         "alignment": result.alignment,

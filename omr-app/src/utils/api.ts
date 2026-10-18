@@ -96,11 +96,13 @@ export interface ProcessResult {
   blankQuestions?: number[];
   duplicateQuestions?: number[];
   duplicateMarks?: Record<number, string[]>;
+  /** Gabarito Personalizado: questões de múltipla resposta (letras marcadas) */
+  multiMarks?: Record<number, string[]>;
   lowConfidence?: number[];
   allRatios?: Record<number, Record<string, number>>;
   cardId?: string;
   rectifiedImage?: string;
-  templateUsed?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
+  templateUsed?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado' | 'custom';
   thresholdsUsed?: { floor: number; margin: number; source: string };
   /** sanity pós-leitura (avisos que não bloqueiam) */
   warnings?: string[];
@@ -178,15 +180,17 @@ function mapProcessData(data: Record<string, unknown>): ProcessResult {
     duplicateMarks: data.duplicate_marks ? Object.fromEntries(
       Object.entries(data.duplicate_marks as Record<string, string[]>).map(([k, v]) => [Number(k), v])
     ) : undefined,
+    multiMarks: data.multi_marks ? Object.fromEntries(
+      Object.entries(data.multi_marks as Record<string, string[]>).map(([k, v]) => [Number(k), v])
+    ) : undefined,
     lowConfidence: data.low_confidence as number[] | undefined,
     allRatios: data.all_ratios ? Object.fromEntries(
       Object.entries(data.all_ratios as Record<string, unknown>).map(([k, v]) => [Number(k), v as Record<string, number>])
     ) : undefined,
     cardId: (data.card_id as string) || undefined,
     rectifiedImage: (data.rectified_image as string) || undefined,
-    templateUsed: data.template_used === 'sae' || data.template_used === 'colar' || data.template_used === 'saev'
-      || data.template_used === 'herby' || data.template_used === 'simulado'
-      ? data.template_used as 'sae' | 'colar' | 'saev' | 'herby' | 'simulado'
+    templateUsed: ['sae', 'colar', 'saev', 'herby', 'simulado', 'custom'].includes(String(data.template_used))
+      ? data.template_used as 'sae' | 'colar' | 'saev' | 'herby' | 'simulado' | 'custom'
       : data.template_used === 'padrao' ? 'padrao' : undefined,
     thresholdsUsed: data.thresholds_used ? {
       floor: Number((data.thresholds_used as Record<string, unknown>).floor ?? 0.3),

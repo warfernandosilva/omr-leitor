@@ -136,6 +136,7 @@ class ProcessResponse(BaseModel):
     blank_questions: list[int] | None = None
     duplicate_questions: list[int] | None = None
     duplicate_marks: dict[int, list[str]] | None = None
+    multi_marks: dict[int, list[str]] | None = None  # Gabarito Personalizado: múltipla resposta (letras marcadas)
     low_confidence: list[int] | None = None
     darkest_marks: list[int] | None = None   # Gabarito Personalizado: dupla resolvida pela marca mais escura
     fallback_marks: list[int] | None = None  # Gabarito Personalizado: vazia recuperada pelo fallback
@@ -490,14 +491,21 @@ def _debug_images(result: OMRResult, want: bool) -> dict | None:
 
 
 def _answer_string(result: OMRResult, total: int) -> str:
-    """String de respostas estilo Herby: letra, ' ' = branco, '*' = duplicada."""
+    """String de respostas estilo Herby: letra, ' ' = branco, '*' = duplicada.
+
+    Mantém 1 caractere por questão. Questões de múltipla resposta resolvidas
+    (letras concatenadas em `answers`) saem como '*', pois não cabem num único
+    caractere — as letras continuam em `answers`/`multi_marks`.
+    """
     out = []
     dups = set(result.duplicate_questions or [])
+    multis = set((result.multi_marks or {}).keys())
     for q in range(1, max(1, total) + 1):
-        if q in dups:
+        ans = result.answers.get(q)
+        if q in dups or q in multis or (ans is not None and len(ans) != 1):
             out.append("*")
         else:
-            out.append(result.answers.get(q, " "))
+            out.append(ans or " ")
     return "".join(out)
 
 
@@ -565,6 +573,7 @@ def _custom_process_response(result: OMRResult, debug: bool, tid: int) -> "Proce
         low_confidence=result.low_confidence,
         darkest_marks=result.darkest_marks or [],
         fallback_marks=result.fallback_marks or [],
+        multi_marks={str(q): letters for q, letters in (result.multi_marks or {}).items()},
         all_ratios={str(k): v for k, v in result.all_ratios.items()},
         card_id=result.qr_id,
         rectified_image=_rectified_data_url(result.rectified),

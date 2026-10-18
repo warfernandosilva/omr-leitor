@@ -364,9 +364,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // cruzado) e avisa se divergir do modelo da prova selecionada.
   // SAE e Colar têm a mesma geometria — são a mesma "família" no overlay;
   // SAEV tem família própria (quadrados). Mapeia para o modelo canônico.
-  const canonicalModel = (t?: string): 'sae' | 'saev' | 'herby' | 'simulado' | 'padrao' =>
+  const canonicalModel = (t?: string): 'sae' | 'saev' | 'herby' | 'simulado' | 'custom' | 'padrao' =>
     t === 'sae' || t === 'colar' ? 'sae' : t === 'saev' ? 'saev' : t === 'herby' ? 'herby'
-      : t === 'simulado' ? 'simulado' : 'padrao';
+      : t === 'simulado' ? 'simulado' : t === 'custom' ? 'custom' : 'padrao';
   const overlayModel = omrResult?.templateUsed
     ? canonicalModel(omrResult.templateUsed)
     : canonicalModel(activeExam?.templateType);

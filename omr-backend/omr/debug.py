@@ -15,6 +15,7 @@ VERDICT_COLOR = {
     "low": (245, 158, 11),
     "dup": (249, 115, 22),
     "blank": (148, 163, 184),
+    "multi": (202, 138, 4),  # múltipla resposta resolvida (âmbar escuro)
 }
 
 
@@ -33,11 +34,15 @@ def build_debug_points(
     blank: list[int],
     duplicates: list[int],
     low_conf: list[int],
+    multi: list[int] | None = None,
 ) -> list[dict]:
     """Junta geometria + scores + verdict por bolha (JSON-safe)."""
     out: list[dict] = []
+    multi_set = set(multi or [])
     for q, cells in geom.items():
-        if q in duplicates:
+        if q in multi_set:
+            verdict = "multi"
+        elif q in duplicates:
             verdict = "dup"
         elif q in blank:
             verdict = "blank"

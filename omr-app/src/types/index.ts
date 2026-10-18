@@ -114,12 +114,13 @@ export function isSaeFamilyExam(exam?: Pick<Exam, 'templateType'> | null): boole
   return exam?.templateType === 'sae' || exam?.templateType === 'colar';
 }
 
-export function templateLabel(t?: Exam['templateType']): string {
+export function templateLabel(t?: Exam['templateType'] | 'custom'): string {
   if (t === 'sae') return 'Avaliação Contínua';
   if (t === 'colar') return 'Colar em Avaliação';
   if (t === 'saev') return 'Gabarito SAEV';
   if (t === 'herby') return 'Gabarito Herby';
   if (t === 'simulado') return 'Simulado';
+  if (t === 'custom') return 'Gabarito Personalizado';
   return 'Padrão';
 }
 
@@ -141,6 +142,8 @@ export interface StudentResult {
   duplicateCount: number;
   duplicateQuestions?: number[];
   duplicateMarks?: Record<number, string[]>;
+  /** Gabarito Personalizado: questões de múltipla resposta (letras marcadas) */
+  multiMarks?: Record<number, string[]>;
   codigoUnico?: string;
   grade: number;
   timestamp: string;

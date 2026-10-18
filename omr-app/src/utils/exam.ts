@@ -28,6 +28,17 @@ export function getSubjectName(exam: Exam, subjectId: SubjectId): string {
   return subjectId === 'lp' ? exam.subjectLP : exam.subjectMat;
 }
 
+/**
+ * Forma canônica de uma resposta para COMPARAÇÃO: maiúsculas, só letras,
+ * em ordem alfabética. Torna a comparação insensível à ordem/separadores, o
+ * que é o que uma questão de múltipla resposta (ex.: "DA" vs "AD") exige.
+ * Para respostas de 1 letra é identidade — não muda o comportamento atual.
+ */
+export function canonicalAnswer(value?: string | null): string {
+  if (!value) return '';
+  return [...String(value).toUpperCase().replace(/[^A-Z]/g, '')].sort().join('');
+}
+
 export function computeSubjectStats(
   exam: Exam,
   answers: Record<number, string>,
@@ -51,7 +62,7 @@ export function computeSubjectStats(
         // Política: duplicada sem resposta resolvida conta como ERRO
         if (duplicateQuestions.includes(q)) incorrect++;
         else blank++;
-      } else if (key[q] && ans === key[q]) correct++;
+      } else if (key[q] && canonicalAnswer(ans) === canonicalAnswer(key[q])) correct++;
       else incorrect++;
     }
     result[sid].correctCount = correct;
@@ -83,7 +94,7 @@ export function scoreAnswers(
     if (!a) {
       if (duplicateQuestions.includes(q)) incorrect++;
       else blank++;
-    } else if (key[q] && a === key[q]) correct++;
+    } else if (key[q] && canonicalAnswer(a) === canonicalAnswer(key[q])) correct++;
     else incorrect++;
   }
   return { correct, incorrect, blank };

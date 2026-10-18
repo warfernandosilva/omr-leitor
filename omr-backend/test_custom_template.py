@@ -646,10 +646,15 @@ def test_process_pick_darkest_custom_threshold():
 
 
 def test_process_pick_darkest_ignored_when_multi_answer():
+    # Bloco de múltipla resposta ignora "marca mais escura" e resolve o
+    # CONJUNTO de letras marcadas (dentro dos limites) em vez de dupla.
     img = _make_card({1: "A"}, gray_marks={(1, "B"): 80})
     res = ct.process_custom_image(
         img, _config_p1(pick_darkest_mark=True, multi_answer=True), strict_alignment=False)
-    assert res is not None and 1 in res.duplicate_questions
+    assert res is not None
+    assert res.answers.get(1) == "AB"
+    assert res.multi_marks == {1: ["A", "B"]}
+    assert res.duplicate_questions == []
 
 
 def test_process_fallback_recovers_faint_mark():
@@ -933,4 +938,88 @@ def test_exam_batch_pdf_uses_custom_template(authed, db_session, monkeypatch):
     assert r.headers["content-type"] == "application/pdf"
     assert calls.get("n") == 3, "lote deve passar pelo renderizador do modelo personalizado"
     assert len(r.content) > 2000
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# P2: múltipla resposta (multi_answer aceita 2+ marcas como CONJUNTO)
+# ---------------------------------------------------------------------------
+
+def test_multi_answer_resolves_two_marks_as_set():
+    # A sólido + D preto: sem regra é DUPLA; com multi_answer vira conjunto "AD".
+    img = _make_card({1: "A"}, gray_marks={(1, "D"): 0})
+    base = ct.process_custom_image(img, _config(), strict_alignment=False)
+    assert base is not None and 1 in base.duplicate_questions
+
+    res = ct.process_custom_image(img, _config_p1(multi_answer=True), strict_alignment=False)
+    assert res is not None
+    assert res.answers.get(1) == "AD"
+    assert res.multi_marks == {1: ["A", "D"]}
+    assert res.duplicate_questions == []
+
+
+def test_multi_answer_out_of_range_stays_duplicate():
+    # Três marcas com máximo 2 → fora do intervalo, continua dupla.
+    img = _make_card({1: "A"}, gray_marks={(1, "B"): 0, (1, "D"): 0})
+    res = ct.process_custom_image(
+        img, _config_p1(multi_answer=True, multi_marks_max=2), strict_alignment=False)
+    assert res is not None
+    assert 1 in res.duplicate_questions
+    assert res.multi_marks == {}
+
+
+def test_multi_answer_single_letter_not_multi():
+    # Uma única marca é resposta normal — não entra como múltipla.
+    img = _make_card({1: "A"})
+    res = ct.process_custom_image(img, _config_p1(multi_answer=True), strict_alignment=False)
+    assert res is not None
+    assert res.answers.get(1) == "A"
+    assert res.multi_marks == {}
+
+
+def test_multi_bounds_defaults_to_labels():
+    cfg = ct.normalize_config(_config_p1(multi_answer=True))
+    b = cfg["questions"][0]
+    assert b["multi_marks_min"] is None and b["multi_marks_max"] is None
+    assert ct.multi_bounds(b) == (2, 4)  # min default 2, max = nº de alternativas
+
+
+def test_multi_bounds_normalize_and_clamp():
+    cfg = ct.normalize_config(_config_p1(multi_answer=True, multi_marks_min=3,
+                                         multi_marks_max=2))
+    b = cfg["questions"][0]
+    assert b["multi_marks_min"] == 3 and b["multi_marks_max"] == 2
+    assert ct.multi_bounds(b) == (3, 3)  # máximo nunca abaixo do mínimo
+
+
+def test_validate_warns_on_multi_edge_cases():
+    issues = ct.validate_config(_config_p1(multi_answer=False, multi_marks_min=1,
+                                           multi_marks_max=9))
+    codes = {i["code"] for i in issues}
+    assert "block_multi_bounds_unused" in codes
+    assert "block_multi_min" in codes
+    assert "block_multi_max" in codes
+    assert not ct.has_errors(issues)
+
+    issues2 = ct.validate_config(_config_p1(multi_answer=True, multi_marks_min=3,
+                                            multi_marks_max=2))
+    assert "block_multi_range" in {i["code"] for i in issues2}
+
+
+def test_api_test_endpoint_reports_multi_marks(authed):
+    client = authed
+    r = _create(client, _png_bytes(_make_card({})), "Múltipla resposta")
+    tid = r.json()["id"]
+    client.put(f"/api/custom-templates/{tid}",
+               json={"config": _config_p1(multi_answer=True)})
+
+    img = _make_card({1: "A"}, gray_marks={(1, "D"): 0})
+    r = client.post(f"/api/custom-templates/{tid}/test",
+                    files={"file": ("foto.png", _png_bytes(img), "image/png")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    assert body["multi_marks"] == {"1": ["A", "D"]}
+    assert body["answers"]["1"] == "AD"
+    assert 1 not in (body["duplicate_questions"] or [])
     client.delete(f"/api/custom-templates/{tid}")

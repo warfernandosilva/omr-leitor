@@ -96,6 +96,8 @@ class OMRResult:
     # Gabarito Personalizado: questões resolvidas por regra alternativa
     darkest_marks: list[int] | None = None   # dupla resolvida pela marca mais escura
     fallback_marks: list[int] | None = None  # vazia recuperada pelo método alternativo
+    # Gabarito Personalizado (múltipla resposta): questão -> letras marcadas (ordenadas)
+    multi_marks: dict[int, list[str]] | None = None
 
 
 def classify_question(

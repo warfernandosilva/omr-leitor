@@ -101,6 +101,11 @@ MARKS_INNER_FACTOR = 0.72        # região interna (ignora o contorno impresso)
 MARKS_INK_DELTA = 40             # quão mais escuro que o papel conta como tinta (0-255)
 MARKS_REFERENCE_COVERAGE = 0.35  # cobertura de referência de uma marca clara
 
+# --- Múltipla resposta (P2) -------------------------------------------------
+# Mínimo de marcas de uma questão de múltipla resposta quando o bloco não
+# informa `multi_marks_min`; o máximo default é o nº de alternativas do bloco.
+MULTI_MARKS_MIN_DEFAULT = 2
+
 
 # ---------------------------------------------------------------------------
 # Normalização / esquema
@@ -138,6 +143,16 @@ def _opt_clamp01(v: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return max(0.0, min(1.0, f))
+
+
+def _opt_int(v: Any) -> int | None:
+    """Inteiro opcional; None/'' preservam a ausência (o default é resolvido no uso)."""
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def normalize_config(config: dict | None) -> dict:
@@ -221,6 +236,9 @@ def normalize_config(config: dict | None) -> dict:
             "start_question": max(1, int(b.get("start_question") or 1)),
             "distribution": b.get("distribution") if b.get("distribution") in ("column", "row") else "column",
             "multi_answer": bool(b.get("multi_answer", False)),
+            # Múltipla resposta (P2): nº de marcas aceitas quando multi_answer=True
+            "multi_marks_min": _opt_int(b.get("multi_marks_min")),
+            "multi_marks_max": _opt_int(b.get("multi_marks_max")),
             "points": float(b.get("points", 1.0) or 0.0),
             "annulled": bool(b.get("annulled", False)),
             # Regras alternativas de decisão (P1)
@@ -346,6 +364,23 @@ def question_block_map(config: dict) -> dict[int, dict]:
     return out
 
 
+def multi_bounds(block: dict) -> tuple[int, int]:
+    """(mínimo, máximo) de marcas aceitas numa questão de múltipla resposta.
+
+    `multi_marks_min` default = 2 ("múltiplas" implica mais de uma) e
+    `multi_marks_max` default = nº de alternativas do bloco. O máximo nunca
+    fica abaixo do mínimo.
+    """
+    lo = block.get("multi_marks_min")
+    hi = block.get("multi_marks_max")
+    labels = block.get("labels") or []
+    lo_i = int(lo) if lo is not None else MULTI_MARKS_MIN_DEFAULT
+    hi_i = int(hi) if hi is not None else len(labels)
+    lo_i = max(1, lo_i)
+    hi_i = max(lo_i, hi_i)
+    return lo_i, hi_i
+
+
 def _block_bbox(block: dict) -> tuple[float, float, float, float] | None:
     bs = expand_block(block)
     if not bs:
@@ -427,6 +462,24 @@ def validate_config(config: dict) -> list[dict]:
         if b["fallback_floor"] is not None and b["fallback_floor"] <= 0:
             add("warning", "block_fallback_floor",
                 "Piso do fallback de questão vazia deve ser maior que zero.", b["id"])
+
+        # Múltipla resposta (P2) — avisos, não bloqueiam geometria.
+        lo, hi = b["multi_marks_min"], b["multi_marks_max"]
+        n_labels = len(b["labels"])
+        if not b["multi_answer"] and (lo is not None or hi is not None):
+            add("warning", "block_multi_bounds_unused",
+                "Limites de 'múltiplas marcações' definidos, mas o bloco não aceita "
+                "múltiplas respostas.", b["id"])
+        if lo is not None and lo < MULTI_MARKS_MIN_DEFAULT:
+            add("warning", "block_multi_min",
+                f"Mínimo de marcas de uma múltipla resposta deve ser ≥ {MULTI_MARKS_MIN_DEFAULT} "
+                "(uma só marca já é resposta normal).", b["id"])
+        if hi is not None and hi > n_labels:
+            add("warning", "block_multi_max",
+                f"Máximo de marcas ({hi}) maior que o número de alternativas ({n_labels}).", b["id"])
+        if lo is not None and hi is not None and lo > hi:
+            add("warning", "block_multi_range",
+                f"Mínimo ({lo}) maior que o máximo ({hi}) de marcas aceitas.", b["id"])
 
         for bubble in expand_block(b):
             if not (0.0 <= bubble["x"] <= 1.0 and 0.0 <= bubble["y"] <= 1.0):
@@ -1143,6 +1196,7 @@ def process_custom_image(
     low_conf: list[int] = []
     darkest: list[int] = []
     fallback_resolved: list[int] = []
+    multi_marks: dict[int, list[str]] = {}
 
     qmap = blk_of
 
@@ -1156,6 +1210,15 @@ def process_custom_image(
             pick_darkest=pick_darkest,
             darkest_gap=blk.get("darkest_mark_threshold"),
         )
+        # Múltipla resposta (P2): bloco que aceita mais de uma marca resolve a
+        # questão como CONJUNTO (letras ordenadas) quando o nº de marcas está
+        # dentro dos limites; fora dos limites continua sendo dupla.
+        if status == "duplicate" and blk.get("multi_answer"):
+            lo, hi = multi_bounds(blk)
+            if lo <= len(marks) <= hi:
+                multi_marks[q_num] = list(marks)
+                answers[q_num] = "".join(marks)
+                continue
         # Fallback de questão vazia: relê com limiar mais permissivo, exigindo
         # vencedor claro (gap próprio) para não inventar resposta.
         if status == "blank" and blk.get("fallback_on_empty"):
@@ -1195,7 +1258,8 @@ def process_custom_image(
     debug_points = None
     if debug:
         from .debug import build_debug_points
-        debug_points = build_debug_points(geom, all_ratios, answers, blank, duplicates, low_conf)
+        debug_points = build_debug_points(geom, all_ratios, answers, blank, duplicates, low_conf,
+                                          multi=sorted(multi_marks))
 
     return OMRResult(
         answers=answers,
@@ -1216,6 +1280,7 @@ def process_custom_image(
         alignment=alignment,
         darkest_marks=sorted(darkest),
         fallback_marks=sorted(fallback_resolved),
+        multi_marks=multi_marks,
     )
 
 

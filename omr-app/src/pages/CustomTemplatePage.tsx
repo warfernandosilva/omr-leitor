@@ -518,7 +518,8 @@ function TemplateEditor({
       option_step_x: 0.06, question_step_y: 0.035, column_step_x: null,
       columns: 1, n_questions: 10, labels: ['A', 'B', 'C', 'D'], radius: 0.012,
       shape: 'circle', start_question: Math.max(1, start), distribution: 'column',
-      multi_answer: false, points: 1, annulled: false, overrides: {},
+      multi_answer: false, multi_marks_min: null, multi_marks_max: null,
+      points: 1, annulled: false, overrides: {},
       pick_darkest_mark: false, darkest_mark_threshold: null,
       fallback_on_empty: false, fallback_floor: null, mark_style: 'filled',
     };
@@ -1163,6 +1164,20 @@ function PropertiesPanel({
           </label>
         </div>
       </div>
+      {b.multi_answer && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Mín. de marcas (2+)" htmlFor="p-blk-mmin">
+            <Input id="p-blk-mmin" type="number" min={2} placeholder="2"
+                   value={b.multi_marks_min ?? ''}
+                   onChange={(e) => upd({ multi_marks_min: e.target.value === '' ? null : Math.max(2, Number(e.target.value)) })} />
+          </Field>
+          <Field label="Máx. de marcas" htmlFor="p-blk-mmax">
+            <Input id="p-blk-mmax" type="number" min={2} placeholder={String(b.labels.length)}
+                   value={b.multi_marks_max ?? ''}
+                   onChange={(e) => upd({ multi_marks_max: e.target.value === '' ? null : Math.max(2, Number(e.target.value)) })} />
+          </Field>
+        </div>
+      )}
 
       <div className="space-y-1 rounded border border-gray-200 dark:border-gray-800 p-2">
         <p className="label mb-1">Regras de decisão</p>
@@ -1344,6 +1359,7 @@ function ActionsPanel({ detailId }: { detailId: number }) {
                 {' '}{(result.duplicate_questions ?? []).length} duplas · {(result.low_confidence ?? []).length} incertas
                 {(result.darkest_marks ?? []).length ? ` · ${(result.darkest_marks ?? []).length} por marca mais escura` : ''}
                 {(result.fallback_marks ?? []).length ? ` · ${(result.fallback_marks ?? []).length} por fallback` : ''}
+                {Object.keys(result.multi_marks ?? {}).length ? ` · ${Object.keys(result.multi_marks ?? {}).length} múltipla resposta` : ''}
                 {result.qr_id ? ` · QR: ${result.qr_id}` : ''}
               </p>
               {result.comparison?.mismatches?.length ? (

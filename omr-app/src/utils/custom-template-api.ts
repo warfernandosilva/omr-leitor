@@ -58,6 +58,8 @@ export interface CustomBlock {
   start_question: number;
   distribution: 'column' | 'row';
   multi_answer: boolean;
+  multi_marks_min: number | null;
+  multi_marks_max: number | null;
   points: number;
   annulled: boolean;
   pick_darkest_mark: boolean;
@@ -160,6 +162,7 @@ export interface CustomTestResult {
   blank_questions?: number[];
   duplicate_questions?: number[];
   duplicate_marks?: Record<string, string[]>;
+  multi_marks?: Record<string, string[]>;
   low_confidence?: number[];
   darkest_marks?: number[];
   fallback_marks?: number[];
