@@ -315,6 +315,11 @@ function TemplateEditor({
   const [detecting, setDetecting] = useState(false);
   // Multi-página (mesma folha): página do modelo atualmente editada.
   const [pageIdx, setPageIdx] = useState(0);
+  // Cópia de configuração de outro modelo
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyCandidates, setCopyCandidates] = useState<CustomTemplateSummary[]>([]);
+  const [copyFromId, setCopyFromId] = useState<number | null>(null);
+  const [copying, setCopying] = useState(false);
 
   const configRef = useRef(config);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -611,6 +616,40 @@ function TemplateEditor({
     setSelection(null);
   };
 
+  const openCopy = async () => {
+    try {
+      const res = await listCustomTemplates();
+      setCopyCandidates((res.templates ?? []).filter((t) => t.id !== detail.id));
+      setCopyFromId(null);
+      setCopyOpen(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao listar modelos');
+    }
+  };
+  const doCopy = async () => {
+    if (!copyFromId) return;
+    setCopying(true);
+    try {
+      const src = await getCustomTemplate(copyFromId);
+      const c = src.config;
+      // Clona regiões com novos ids (evita colisão com o modelo atual).
+      const cloned: CustomConfig = {
+        ...c,
+        anchors: (c.anchors ?? []).map((a) => ({ ...a, id: `anc_${rnd()}` })),
+        qr: c.qr ? { ...c.qr, id: `qr_${rnd()}` } : null,
+        info_regions: (c.info_regions ?? []).map((r) => ({ ...r, id: `info_${rnd()}` })),
+        questions: (c.questions ?? []).map((b) => ({ ...b, id: `blk_${rnd()}` })),
+      };
+      apply(cloned);
+      setCopyOpen(false);
+      toast.success('Configuração copiada. Revise e salve.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao copiar configuração');
+    } finally {
+      setCopying(false);
+    }
+  };
+
   const save = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     try {
@@ -709,6 +748,32 @@ function TemplateEditor({
               Página {currentPage + 1} de {nPages}
               {nPages > 1 ? ' · as regiões editadas pertencem a esta página' : ''}.
             </p>
+          </div>
+          {/* Cópia de configuração de outro modelo */}
+          <div className="space-y-2">
+            <button type="button" onClick={() => void openCopy()}
+                    className="btn btn-secondary btn-sm w-full justify-start">
+              Copiar configuração de outro modelo
+            </button>
+            {copyOpen && (
+              <div className="space-y-2 rounded border border-gray-200 dark:border-gray-700 p-2">
+                <Select value={copyFromId ?? ''} onChange={(e) => setCopyFromId(e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">Selecione o modelo...</option>
+                  {copyCandidates.map((t) => (
+                    <option key={t.id} value={t.id}>{t.nome} (v{t.version})</option>
+                  ))}
+                </Select>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => void doCopy()} loading={copying} disabled={!copyFromId}>
+                    Copiar
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setCopyOpen(false)}>Cancelar</Button>
+                </div>
+                {copyCandidates.length === 0 && (
+                  <p className="text-xs text-gray-500">Nenhum outro modelo disponível.</p>
+                )}
+              </div>
+            )}
           </div>
           <Toolbar tool={tool} setTool={setTool}
                    anchorType={anchorType} setAnchorType={setAnchorType}

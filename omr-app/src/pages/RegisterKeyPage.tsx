@@ -180,6 +180,17 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
       alert(`Preencha todas as ${totalQuestions} questões antes de salvar.`);
       return;
     }
+    // Multi-página: avisa se faltam páginas lidas do gabarito.
+    if (isCustomExam(activeExam) && customNPages > 1
+        && readPages.size < customNPages) {
+      const faltam = Array.from({ length: customNPages }, (_, i) => i)
+        .filter((i) => !readPages.has(i))
+        .map((i) => i + 1)
+        .join(', ');
+      if (!confirm(`Faltam as páginas ${faltam} do gabarito. Salvar mesmo assim?`)) {
+        return;
+      }
+    }
 
     saveExam({ ...activeExam, answerKey }, userId);
     setServerState('saving');

@@ -1040,6 +1040,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       alert('Esta prova ainda não tem gabarito cadastrado. Vá em "Cadastrar gabarito" e informe as respostas corretas antes de corrigir.');
       return;
     }
+    // Multi-página: avisa se faltam páginas lidas antes de salvar.
+    if (isCustom && (customGeom?.nPages ?? 1) > 1
+        && readPages.size < (customGeom?.nPages ?? 1)) {
+      const faltam = Array.from({ length: customGeom?.nPages ?? 1 }, (_, i) => i)
+        .filter((i) => !readPages.has(i))
+        .map((i) => i + 1)
+        .join(', ');
+      if (!confirm(`Faltam as páginas ${faltam} deste cartão. Salvar mesmo assim?`)) {
+        return;
+      }
+    }
     // §18 — gabarito de outra avaliação não pode ser corrigido aqui
     if (identified?.kind === 'wrong_exam') {
       setError(`Este cartão pertence à prova "${identified.examTitle}". Selecione a prova correta para corrigir.`);
@@ -1967,7 +1978,18 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     <CheckCircle2 size={18} strokeWidth={2.2} />
                   </span>
                   <h3 className="text-lg font-bold text-ink dark:text-white">Leitura concluída!</h3>
-                </div>
+                 </div>
+                 {isCustom && (customGeom?.nPages ?? 1) > 1
+                   && readPages.size < (customGeom?.nPages ?? 1) && (
+                   <div className="p-3 bg-amber-50 dark:bg-amber-700/15 border border-amber-400/40 rounded-lg text-amber-800 dark:text-amber-100 text-sm">
+                     Atenção: este cartão tem {customGeom?.nPages ?? 1} páginas e apenas {readPages.size} foi/foram lida(s).
+                     Faltam as páginas {Array.from({ length: customGeom?.nPages ?? 1 }, (_, i) => i)
+                       .filter((i) => !readPages.has(i))
+                       .map((i) => i + 1)
+                       .join(', ')}.
+                     Volte e leia as demais antes de salvar para não perder respostas.
+                   </div>
+                 )}
                 <dl className="text-sm space-y-1.5">
                   <div className="flex justify-between gap-3">
                     <dt className="text-gray-500 dark:text-gray-400">Aluno(a)</dt>
