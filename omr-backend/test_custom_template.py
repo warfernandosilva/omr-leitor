@@ -66,7 +66,9 @@ def _bubble_center(q: int, letter: str) -> tuple[float, float]:
 
 
 def _make_card(marks: dict[int, str], skip_anchor: int | None = None,
-               gray_marks: dict[tuple[int, str], int] | None = None) -> np.ndarray:
+               gray_marks: dict[tuple[int, str], int] | None = None,
+               x_marks: dict[int, str] | None = None,
+               check_marks: dict[int, str] | None = None) -> np.ndarray:
     img = np.ones((PAGE_H, PAGE_W, 3), dtype=np.uint8) * 255
     for mid, (nx, ny) in ANCHOR_POS.items():
         if mid == skip_anchor:
@@ -89,6 +91,18 @@ def _make_card(marks: dict[int, str], skip_anchor: int | None = None,
     for (q, letter), g in (gray_marks or {}).items():
         nx, ny = _bubble_center(q, letter)
         cv2.circle(img, (int(nx * PAGE_W), int(ny * PAGE_H)), r_px - 4, (g, g, g), -1)
+    for q, letter in (x_marks or {}).items():
+        nx, ny = _bubble_center(q, letter)
+        cx, cy = int(nx * PAGE_W), int(ny * PAGE_H)
+        r = r_px - 9
+        cv2.line(img, (cx - r, cy - r), (cx + r, cy + r), (0, 0, 0), 5)
+        cv2.line(img, (cx + r, cy - r), (cx - r, cy + r), (0, 0, 0), 5)
+    for q, letter in (check_marks or {}).items():
+        nx, ny = _bubble_center(q, letter)
+        cx, cy = int(nx * PAGE_W), int(ny * PAGE_H)
+        r = r_px - 9
+        pts = np.array([[cx - r, cy + 2], [cx - r // 3, cy + r], [cx + r, cy - r]], dtype=np.int32)
+        cv2.polylines(img, [pts], False, (0, 0, 0), 5)
     return img
 
 
@@ -705,4 +719,115 @@ def test_api_test_endpoint_reports_p1_marks(authed):
     assert body["success"] is True, body
     assert body["darkest_marks"] == [1]
     assert body["fallback_marks"] == [2]
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# P2: estilo de marcação (mark_style: "filled" | "marks" — check/X)
+# ---------------------------------------------------------------------------
+
+def _config_marks(style: str = "marks", **block_overrides) -> dict:
+    cfg = _config()
+    cfg["questions"][0].update(block_overrides)
+    cfg["questions"][0]["mark_style"] = style
+    return cfg
+
+
+def test_mark_coverage_distinguishes_empty_and_x():
+    img = np.ones((200, 200), dtype=np.uint8) * 255
+    x, y, r = 100, 100, 20
+    assert ct._mark_coverage(img, x, y, r) == 0.0
+    assert ct.marks_score(img, x, y, r) == 0.0
+
+    cv2.line(img, (x - 12, y - 12), (x + 12, y + 12), 0, 4)
+    cv2.line(img, (x + 12, y - 12), (x - 12, y + 12), 0, 4)
+    cov = ct._mark_coverage(img, x, y, r)
+    assert cov > 0.15
+    assert ct.marks_score(img, x, y, r) > 0.6
+
+
+def test_marks_score_saturates_like_a_clear_mark():
+    img = np.ones((200, 200), dtype=np.uint8) * 255
+    x, y, r = 100, 100, 20
+    cv2.circle(img, (x, y), int(r * 0.72), 0, -1)
+    assert ct.marks_score(img, x, y, r) == pytest.approx(1.0)
+
+
+def _draw_x_at(img: np.ndarray, q: int, letter: str) -> None:
+    nx, ny = _bubble_center(q, letter)
+    cx, cy = int(nx * PAGE_W), int(ny * PAGE_H)
+    r = int(B_RADIUS * max(PAGE_W, PAGE_H)) - 9
+    cv2.line(img, (cx - r, cy - r), (cx + r, cy + r), (0, 0, 0), 5)
+    cv2.line(img, (cx + r, cy - r), (cx - r, cy + r), (0, 0, 0), 5)
+
+
+def test_marks_style_reads_x_and_check():
+    for drawer in ("x_marks", "check_marks"):
+        img = _make_card({}, **{drawer: {1: "A"}})
+        res = ct.process_custom_image(img, _config_marks("marks"), strict_alignment=False)
+        assert res is not None, drawer
+        assert res.answers.get(1) == "A", drawer
+        assert 1 not in res.blank_questions, drawer
+
+
+def test_marks_style_keeps_blank_blank():
+    img = _make_card({})
+    res = ct.process_custom_image(img, _config_marks("marks"), strict_alignment=False)
+    assert res is not None
+    assert 1 in res.blank_questions
+    assert res.answers == {}
+    assert res.all_ratios[1]["A"] == pytest.approx(0.0)
+
+
+def test_marks_style_reports_duplicate_for_two_marks():
+    # Duas X em questões diferentes → ambas lidas
+    img = _make_card({}, x_marks={1: "A", 2: "C"})
+    res = ct.process_custom_image(img, _config_marks("marks"), strict_alignment=False)
+    assert res is not None
+    assert res.answers.get(1) == "A" and res.answers.get(2) == "C"
+    # Duas X NA MESMA questão → dupla
+    img2 = _make_card({})
+    _draw_x_at(img2, 1, "A")
+    _draw_x_at(img2, 1, "C")
+    res2 = ct.process_custom_image(img2, _config_marks("marks"), strict_alignment=False)
+    assert res2 is not None and 1 in res2.duplicate_questions
+
+
+def test_marks_style_reads_filled_mark_too():
+    img = _make_card({1: "B"})
+    res = ct.process_custom_image(img, _config_marks("marks"), strict_alignment=False)
+    assert res is not None and res.answers.get(1) == "B"
+
+
+def test_marks_style_square_shape():
+    img = _make_card({}, x_marks={1: "A"})
+    cfg = _config_marks("marks", shape="square")
+    res = ct.process_custom_image(img, cfg, strict_alignment=False)
+    assert res is not None and res.answers.get(1) == "A"
+
+
+def test_mark_style_normalize_defaults_to_filled():
+    b = ct.normalize_config(_config())["questions"][0]
+    assert b["mark_style"] == "filled"
+    b2 = ct.normalize_config(_config_marks("marks"))["questions"][0]
+    assert b2["mark_style"] == "marks"
+    # valor inválido cai no padrão
+    cfg = _config()
+    cfg["questions"][0]["mark_style"] = "rabisco"
+    assert ct.normalize_config(cfg)["questions"][0]["mark_style"] == "filled"
+
+
+def test_api_test_endpoint_reports_marks_style(authed):
+    client = authed
+    r = _create(client, _png_bytes(_make_card({})), "Marcas")
+    tid = r.json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_marks("marks")})
+
+    img = _make_card({}, x_marks={1: "A"}, check_marks={2: "D"})
+    r = client.post(f"/api/custom-templates/{tid}/test",
+                    files={"file": ("foto.png", _png_bytes(img), "image/png")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    assert body["answers"].get("1") == "A" and body["answers"].get("2") == "D"
     client.delete(f"/api/custom-templates/{tid}")

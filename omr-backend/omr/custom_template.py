@@ -20,7 +20,9 @@ Estratégia de alinhamento (em ordem, para no primeiro que fecha 4 cantos):
 
 A leitura reusa `_bubble_metrics`/`_square_metrics`, `classify_question`
 e `compute_floor_for`, então os scores e a classificação batem com os
-modelos nativos.
+modelos nativos. Blocos podem optar pelo estilo de marcação "marks"
+(check/X esparso), que usa uma métrica de tinta interior com limiar
+absoluto reescalada para a mesma faixa do estilo "filled".
 """
 
 from __future__ import annotations
@@ -86,6 +88,18 @@ ALIGN_INFERRED_MIN_ENRICHMENT = 1.5
 FALLBACK_FLOOR_FACTOR = 0.65   # piso alternativo = floor × fator
 FALLBACK_MIN_SCORE = 0.20      # e nunca abaixo deste absoluto
 FALLBACK_MIN_GAP = 0.12        # 1ª marca precisa abrir isto sobre a 2ª
+
+# --- Estilo de marcação (P2) -----------------------------------------------
+# "filled": bolha preenchida — score = `_bubble_metrics` (comportamento atual).
+# "marks": marca esparsa (check/X). Uma marca em X cobre pouca área, então a
+#   média de intensidade fica alta (clara) e o score atual cai ABAIXO do piso;
+#   além disso o Otsu é instável numa ROI quase uniforme. Por isso o estilo
+#   "marks" mede a fração de tinta no INTERIOR da bolha com limiar ABSOLUTO
+#   relativo ao papel local, e a reescala para a mesma faixa do "filled"
+#   (vazio ≈ 0, marca clara ≈ 1) — assim piso/margem seguem válidos.
+MARKS_INNER_FACTOR = 0.72        # região interna (ignora o contorno impresso)
+MARKS_INK_DELTA = 40             # quão mais escuro que o papel conta como tinta (0-255)
+MARKS_REFERENCE_COVERAGE = 0.35  # cobertura de referência de uma marca clara
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +228,8 @@ def normalize_config(config: dict | None) -> dict:
             "darkest_mark_threshold": _opt_clamp01(b.get("darkest_mark_threshold")),
             "fallback_on_empty": bool(b.get("fallback_on_empty", False)),
             "fallback_floor": _opt_clamp01(b.get("fallback_floor")),
+            # Estilo de marcação (P2): "filled" (bolha preenchida) | "marks" (check/X)
+            "mark_style": b.get("mark_style") if b.get("mark_style") in ("filled", "marks") else "filled",
             "overrides": overrides,
         })
     out["questions"] = questions
@@ -958,6 +974,70 @@ def check_alignment(
     }
 
 
+def _local_paper(gray: np.ndarray, x: float, y: float, r_px: float) -> float:
+    """Brilho do papel em volta da bolha (mediana do anel FORA do contorno).
+
+    A mediana absorve respingos/sujeira, e o anel fica fora do contorno
+    impresso para não escurecer a estimativa.
+    """
+    h, w = gray.shape[:2]
+    ri = int(max(2, round(r_px + 3)))
+    ro = int(max(ri + 2, round(r_px + 16)))
+    x0, y0 = int(max(0, x - ro)), int(max(0, y - ro))
+    x1, y1 = int(min(w, x + ro + 1)), int(min(h, y + ro + 1))
+    roi = gray[y0:y1, x0:x1]
+    if roi.size == 0:
+        return 200.0
+    yy, xx = np.ogrid[:roi.shape[0], :roi.shape[1]]
+    d2 = (xx - (x - x0)) ** 2 + (yy - (y - y0)) ** 2
+    ring = (d2 >= ri * ri) & (d2 <= ro * ro)
+    if not ring.any():
+        return float(np.median(roi))
+    return float(np.median(roi[ring]))
+
+
+def _mark_coverage(gray: np.ndarray, x: float, y: float, r_px: float,
+                   square: bool = False) -> float:
+    """Fração de tinta na região INTERNA da bolha (marca esparsa: check/X).
+
+    Usa limiar ABSOLUTO relativo ao papel local (`MARKS_INK_DELTA`), e não o
+    Otsu: numa ROI quase uniforme (bolha vazia ou com traço fino) o Otsu
+    "inventa" um corte no ruído. A região interna fica num fator do raio para
+    ignorar o contorno impresso da bolha.
+    """
+    h, w = gray.shape[:2]
+    r_in = int(max(2, round(MARKS_INNER_FACTOR * r_px)))
+    x0, y0 = int(max(0, x - r_in)), int(max(0, y - r_in))
+    x1, y1 = int(min(w, x + r_in + 1)), int(min(h, y + r_in + 1))
+    roi = gray[y0:y1, x0:x1]
+    if roi.size == 0:
+        return 0.0
+    dx = np.abs(np.arange(roi.shape[1]) - (x - x0))
+    dy = np.abs(np.arange(roi.shape[0]) - (y - y0))
+    if square:
+        inside = (dy[:, None] <= r_in) & (dx[None, :] <= r_in)
+    else:
+        inside = (dy[:, None] ** 2 + dx[None, :] ** 2) <= (r_in * r_in)
+    total = int(inside.sum())
+    if total == 0:
+        return 0.0
+    paper = _local_paper(gray, x, y, r_px)
+    ink = (roi < (paper - MARKS_INK_DELTA)) & inside
+    return float(ink.sum()) / float(total)
+
+
+def marks_score(gray: np.ndarray, x: float, y: float, r_px: float,
+                square: bool = False) -> float:
+    """Score 0..1 da marca esparsa, na MESMA faixa do estilo preenchido.
+
+    Cobertura de tinta no interior reescalada por `MARKS_REFERENCE_COVERAGE`
+    (bolha vazia ≈ 0, marca clara ≈ 1), para que piso/margem e as regras de
+    decisão continuem válidos sem tratar o estilo "marks" à parte.
+    """
+    cov = _mark_coverage(gray, x, y, r_px, square=square)
+    return float(min(1.0, cov / MARKS_REFERENCE_COVERAGE))
+
+
 def process_custom_image(
     image: np.ndarray,
     config: dict,
@@ -1030,18 +1110,24 @@ def process_custom_image(
     all_ratios: dict[int, dict[str, float]] = {}
     geom: dict[int, list] = {}
 
+    blk_of = question_block_map(cfg)
+
     for b in expand_bubbles(cfg):
         q = b["question"]
         cx = b["x"] * cw
         cy = b["y"] * ch
         r_px = max(3.0, b["r"] * max(cw, ch))
-        if b["shape"] == "square":
+        style = (blk_of.get(q) or {}).get("mark_style", "filled")
+        if style == "marks":
+            # Marca esparsa (check/X): tinta no interior, limiar absoluto.
+            score = marks_score(gray, cx, cy, r_px, square=(b["shape"] == "square"))
+        elif b["shape"] == "square":
             inset = p.square_inset if p.square_inset is not None else 6
-            m = _square_metrics(gray, cx, cy, side=r_px * 2.0, inset=inset, weights=weights)
+            score = _square_metrics(gray, cx, cy, side=r_px * 2.0, inset=inset, weights=weights).score
         else:
             inner = p.inner_radius if p.inner_radius is not None else max(3, int(round(r_px)) - 2)
-            m = _bubble_metrics(gray, int(round(cx)), int(round(cy)), radius=inner, weights=weights)
-        all_ratios.setdefault(q, {})[b["option"]] = m.score
+            score = _bubble_metrics(gray, int(round(cx)), int(round(cy)), radius=inner, weights=weights).score
+        all_ratios.setdefault(q, {})[b["option"]] = score
         if debug:
             geom.setdefault(q, []).append((cx, cy, r_px, b["option"]))
 
@@ -1058,7 +1144,7 @@ def process_custom_image(
     darkest: list[int] = []
     fallback_resolved: list[int] = []
 
-    qmap = question_block_map(cfg)
+    qmap = blk_of
 
     for q_num, ratios in all_ratios.items():
         blk = qmap.get(q_num) or {}

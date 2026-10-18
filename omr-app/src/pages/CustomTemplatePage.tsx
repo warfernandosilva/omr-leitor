@@ -520,7 +520,7 @@ function TemplateEditor({
       shape: 'circle', start_question: Math.max(1, start), distribution: 'column',
       multi_answer: false, points: 1, annulled: false, overrides: {},
       pick_darkest_mark: false, darkest_mark_threshold: null,
-      fallback_on_empty: false, fallback_floor: null,
+      fallback_on_empty: false, fallback_floor: null, mark_style: 'filled',
     };
     setTool('place-block');
     toast.info('Clique no cartão para posicionar a 1ª alternativa (A) da 1ª questão.');
@@ -1138,6 +1138,13 @@ function PropertiesPanel({
         <Select id="p-blk-shape" value={b.shape} onChange={(e) => upd({ shape: e.target.value as 'circle' | 'square' })}>
           <option value="circle">Círculo</option>
           <option value="square">Quadrado</option>
+        </Select>
+      </Field>
+      <Field label="Estilo de marcação" htmlFor="p-blk-mark">
+        <Select id="p-blk-mark" value={b.mark_style}
+                onChange={(e) => upd({ mark_style: e.target.value as 'filled' | 'marks' })}>
+          <option value="filled">Bolha preenchida</option>
+          <option value="marks">Marca (X / check)</option>
         </Select>
       </Field>
       <div className="grid grid-cols-2 gap-2">

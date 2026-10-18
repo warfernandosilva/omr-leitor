@@ -64,6 +64,7 @@ export interface CustomBlock {
   darkest_mark_threshold: number | null;
   fallback_on_empty: boolean;
   fallback_floor: number | null;
+  mark_style: 'filled' | 'marks';
   overrides: Record<string, Record<string, { x?: number; y?: number }>>;
 }
 
