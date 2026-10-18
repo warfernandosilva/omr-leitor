@@ -1132,3 +1132,84 @@ def test_api_detect_grid_endpoint(authed):
     cfg["questions"] = body["blocks"]
     assert not ct.has_errors(ct.validate_config(cfg))
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# Prévia do lote de impressão (não grava nada)
+# ---------------------------------------------------------------------------
+
+def test_print_preview_blank(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Prévia").json()["id"]
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "blank", "format": "PNG"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["count"] == 1 and body["shown"] == 1
+    assert body["pages"][0]["image"].startswith("data:image/jpeg;base64,")
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_print_preview_students_limits_thumbnails(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Prévia lista").json()["id"]
+    students = [{"nome": n} for n in ("Ana", "Bia", "Caio", "Dora")]
+    r = client.post(f"/api/custom-templates/{tid}/print-preview?limit=2",
+                    json={"mode": "students", "format": "PDF", "students": students})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["count"] == 4            # total real
+    assert body["shown"] == 2            # só as 2 primeiras miniaturas
+    assert [p["title"] for p in body["pages"]] == ["Ana", "Bia"]
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_print_preview_students_empty(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Prévia vazia").json()["id"]
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "students", "format": "PDF", "students": []})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False and "vazia" in r.json()["error"].lower()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_print_preview_avaliacao_does_not_create_gabaritos(authed, db_session):
+    """A prévia do lote da turma NÃO pode gravar GabaritoNomeado (só o print grava)."""
+    client = authed
+    from models import Aluno, Avaliacao, GabaritoNomeado
+
+    tid = _exam_with_custom_template(client, "ex-custom-prev", ("Ana", "Bia"))
+    db = db_session()
+    try:
+        av = db.query(Avaliacao).filter(Avaliacao.external_id == "ex-custom-prev").one()
+        for i, nome in enumerate(("Ana", "Bia"), start=1):
+            db.add(Aluno(avaliacao_id=av.id, nome=nome, matricula=f"20{i}"))
+        db.commit()
+        before = db.query(GabaritoNomeado).count()
+    finally:
+        db.close()
+
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "avaliacao", "format": "PDF"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True and body["count"] == 2 and body["shown"] == 2
+
+    db = db_session()
+    try:
+        assert db.query(GabaritoNomeado).count() == before, "prévia não deve emitir cartões"
+    finally:
+        db.close()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_print_preview_avaliacao_without_alunos(authed):
+    client = authed
+    tid = _exam_with_custom_template(client, "ex-custom-prev-empty", ())
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "avaliacao", "format": "PDF"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False and "nenhum aluno" in r.json()["error"].lower()
+    client.delete(f"/api/custom-templates/{tid}")

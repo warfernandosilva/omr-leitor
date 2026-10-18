@@ -336,6 +336,34 @@ export async function printCustomTemplate(
   saveBlob(blob, `gabarito-personalizado-${id}.${format === 'PNG' ? 'png' : 'pdf'}`);
 }
 
+// ─── Prévia do lote (não gera arquivo nem grava gabaritos) ───
+
+export interface PrintPreviewPage {
+  title: string;
+  code: string;
+  image: string; // data URL (JPEG)
+}
+
+export interface PrintPreviewResult {
+  ok: boolean;
+  error: string | null;
+  count: number;
+  shown: number;
+  mode: string;
+  pages: PrintPreviewPage[];
+}
+
+export function printPreviewCustomTemplate(
+  id: number,
+  mode: 'blank' | 'students' | 'avaliacao',
+  format: 'PDF' | 'PNG',
+  students?: PrintStudent[],
+  limit = 6,
+): Promise<PrintPreviewResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/print-preview?limit=${limit}`, 'POST',
+    { mode, format, students });
+}
+
 // ─── Utilidades do editor ───
 
 export function emptyConfig(pageW: number, pageH: number): CustomConfig {

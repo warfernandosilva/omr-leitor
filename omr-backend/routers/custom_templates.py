@@ -512,8 +512,15 @@ def list_versions(tid: int, current_user: User = Depends(auth.get_current_user),
 # Impressão (seção 7)
 # ---------------------------------------------------------------------------
 
-def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session) -> list[tuple[str, str, np.ndarray]]:
-    """Devolve [(titulo, codigo, imagem_bgr)] — uma página por cartão."""
+def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
+                  persist: bool = True, max_pages: int | None = None
+                  ) -> list[tuple[str, str, np.ndarray]]:
+    """Devolve [(titulo, codigo, imagem_bgr)] — uma página por cartão.
+
+    `persist=False` é usado pela PRÉVIA: não cria/atualiza `GabaritoNomeado`
+    (códigos temporários para quem ainda não tem gabarito). `max_pages` limita
+    a renderização (a contagem total é feita à parte em `_print_count`).
+    """
     base = _load_image(tpl)
     if base is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
@@ -529,6 +536,8 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session) -> list[t
         ).scalars().all()
         if not alunos:
             raise HTTPException(status_code=400, detail="Nenhum aluno importado nesta avaliação")
+        if max_pages is not None:
+            alunos = alunos[:max_pages]
         pages = []
         av = db.get(Avaliacao, tpl.avaliacao_id)
         for aluno in alunos:
@@ -538,7 +547,9 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session) -> list[t
                     GabaritoNomeado.avaliacao_id == tpl.avaliacao_id,
                 )
             )
-            if gab is None:
+            if gab is not None:
+                codigo = gab.codigo_unico
+            elif persist:
                 gab = GabaritoNomeado(
                     avaliacao_id=tpl.avaliacao_id,
                     aluno_id=aluno.id,
@@ -549,21 +560,27 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session) -> list[t
                 gab.qr_code_payload = gab.codigo_unico
                 db.add(gab)
                 db.flush()
+                codigo = gab.codigo_unico
+            else:  # prévia: código temporário, nada é gravado
+                codigo = f"TMP-{uuid.uuid4().hex[:8].upper()}"
             fields = {
                 "student_name": aluno.nome,
                 "matricula": aluno.matricula or "",
                 "turma": (av.turma if av else "") or "",
                 "exam_title": (av.titulo if av else "") or "",
             }
-            img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=gab.codigo_unico)
-            pages.append((aluno.nome, gab.codigo_unico, img))
-        db.commit()
+            img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=codigo)
+            pages.append((aluno.nome, codigo, img))
+        if persist:
+            db.commit()
         return pages
 
     # mode == students (lista enviada pelo cliente)
     students = [s for s in (req.students or []) if s.nome.strip()]
     if not students:
         raise HTTPException(status_code=400, detail="Lista de alunos vazia")
+    if max_pages is not None:
+        students = students[:max_pages]
     pages = []
     for s in students:
         codigo = (s.codigo or "").strip() or f"TMP-{uuid.uuid4().hex[:8].upper()}"
@@ -575,6 +592,25 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session) -> list[t
         img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=codigo)
         pages.append((s.nome.strip(), codigo, img))
     return pages
+
+
+def _print_count(tpl: CustomTemplate, req: PrintRequest, db: Session) -> int:
+    """Nº de cartões que `req` geraria (sem renderizar)."""
+    if req.mode == "blank":
+        return 1
+    if req.mode == "avaliacao":
+        if not tpl.avaliacao_id:
+            raise HTTPException(status_code=400, detail="Modelo sem avaliação vinculada")
+        n = db.scalar(
+            select(func.count()).select_from(Aluno).where(Aluno.avaliacao_id == tpl.avaliacao_id)
+        ) or 0
+        if not n:
+            raise HTTPException(status_code=400, detail="Nenhum aluno importado nesta avaliação")
+        return int(n)
+    n = len([s for s in (req.students or []) if s.nome.strip()])
+    if not n:
+        raise HTTPException(status_code=400, detail="Lista de alunos vazia")
+    return n
 
 
 @router.post("/api/custom-templates/{tid}/print")
@@ -611,6 +647,35 @@ def print_template(
     out.seek(0)
     return StreamingResponse(out, media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{safe}.pdf"'})
+
+
+@router.post("/api/custom-templates/{tid}/print-preview")
+def print_preview(
+    tid: int,
+    req: PrintRequest,
+    limit: int = 6,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Prévia dos cartões que seriam impressos (NÃO grava nada).
+
+    Devolve a contagem total e miniaturas (JPEG) das primeiras `limit` páginas
+    para o usuário conferir antes de gerar o lote.
+    """
+    tpl = _get_template(db, tid, current_user)
+    try:
+        total = _print_count(tpl, req, db)
+        pages = _render_pages(tpl, req, db, persist=False, max_pages=max(1, min(limit, 24)))
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail), "count": 0, "shown": 0,
+                "mode": req.mode, "pages": []}
+
+    shown = [
+        {"title": title, "code": code, "image": _data_url_jpeg(img, max_side=520)}
+        for title, code, img in pages
+    ]
+    return {"ok": True, "error": None, "count": total, "shown": len(shown),
+            "mode": req.mode, "pages": shown}
 
 
 # ---------------------------------------------------------------------------

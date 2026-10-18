@@ -21,9 +21,10 @@ import {
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
   createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, expandBlock,
-  getCustomTemplate, listCustomTemplates, printCustomTemplate, testCustomTemplate,
-  updateCustomTemplate, validateCustomTemplate,
+  getCustomTemplate, listCustomTemplates, printCustomTemplate, printPreviewCustomTemplate,
+  testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
 } from '../utils/custom-template-api';
+import type { PrintPreviewResult } from '../utils/custom-template-api';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block';
@@ -1439,16 +1440,25 @@ function PrintModal({ open, onClose, detailId }: { open: boolean; onClose: () =>
   const [format, setFormat] = useState<'PDF' | 'PNG'>('PDF');
   const [studentsText, setStudentsText] = useState('');
   const [busy, setBusy] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [preview, setPreview] = useState<PrintPreviewResult | null>(null);
+
+  const parseStudents = (): { nome: string; matricula?: string }[] | undefined => {
+    if (mode !== 'students') return undefined;
+    const list = studentsText.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+      const [nome, matricula] = l.split(/[,;\t]/).map((s) => s.trim());
+      return { nome, matricula };
+    });
+    return list.length ? list : undefined;
+  };
+
+  // qualquer mudança no que será gerado invalida a prévia
+  useEffect(() => { setPreview(null); }, [mode, format, studentsText]);
 
   const handlePrint = async () => {
     setBusy(true);
     try {
-      const students = mode === 'students'
-        ? studentsText.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
-          const [nome, matricula] = l.split(/[,;\t]/).map((s) => s.trim());
-          return { nome, matricula };
-        })
-        : undefined;
+      const students = parseStudents();
       const fmt = mode === 'students' && students && students.length > 1 ? 'PDF' : format;
       await printCustomTemplate(detailId, mode, fmt, students);
       toast.success('Arquivo gerado.');
@@ -1457,6 +1467,24 @@ function PrintModal({ open, onClose, detailId }: { open: boolean; onClose: () =>
       toast.error(e instanceof Error ? e.message : 'Falha ao gerar');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handlePreview = async () => {
+    const students = parseStudents();
+    if (mode === 'students' && !students) {
+      toast.info('Informe ao menos um aluno para pré-visualizar.');
+      return;
+    }
+    setPreviewBusy(true);
+    try {
+      const res = await printPreviewCustomTemplate(detailId, mode, format, students);
+      setPreview(res);
+      if (!res.ok) toast.error(res.error ?? 'Não foi possível gerar a prévia.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha na prévia');
+    } finally {
+      setPreviewBusy(false);
     }
   };
 
@@ -1497,6 +1525,44 @@ function PrintModal({ open, onClose, detailId }: { open: boolean; onClose: () =>
             com QR Code por aluno.
           </p>
         )}
+
+        {/* Prévia do lote — confira antes de gerar/imprimir */}
+        <div className="space-y-2 border-t border-gray-200 dark:border-gray-700 pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="label mb-0">Prévia</span>
+            <Button variant="secondary" size="sm" loading={previewBusy}
+                    onClick={() => void handlePreview()} icon={<Eye size={15} aria-hidden />}>
+              Ver prévia
+            </Button>
+          </div>
+
+          {!preview && (
+            <p className="text-xs text-gray-500">
+              Mostra os primeiros cartões do lote antes de gerar o arquivo.
+            </p>
+          )}
+          {preview && !preview.ok && (
+            <p className="text-xs text-red-600 dark:text-red-400">{preview.error}</p>
+          )}
+          {preview && preview.ok && (
+            <>
+              <p className="text-xs text-gray-500">
+                {preview.count === 1 ? '1 cartão' : `${preview.count} cartões`}
+                {preview.shown < preview.count ? ` · exibindo os ${preview.shown} primeiros` : ''}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {preview.pages.map((p, i) => (
+                  <figure key={`${p.code}-${i}`}>
+                    <img src={p.image} alt={`Cartão ${p.title || i + 1}`}
+                         className="w-full rounded border border-gray-200 dark:border-gray-700" />
+                    <figcaption className="text-[10px] text-center text-gray-500 truncate"
+                                title={p.title}>{p.title || 'Sem nome'}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </Modal>
   );
