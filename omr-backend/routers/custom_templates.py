@@ -613,6 +613,21 @@ def _print_count(tpl: CustomTemplate, req: PrintRequest, db: Session) -> int:
     return n
 
 
+def _fit_page_rect(img_w: int, img_h: int, page_w: float, page_h: float) -> tuple[float, float, float, float]:
+    """Retângulo `(x, y, w, h)` para desenhar a imagem SEM distorção, centrada.
+
+    O cartão personalizado pode ter proporção diferente de A4; esticá-lo para a
+    página inteira deformaria a geometria impressa (e a leitura). Aqui ele é
+    escalado uniformemente para caber e centralizado na página.
+    """
+    if img_w <= 0 or img_h <= 0 or page_w <= 0 or page_h <= 0:
+        return 0.0, 0.0, page_w, page_h
+    scale = min(page_w / img_w, page_h / img_h)
+    w = img_w * scale
+    h = img_h * scale
+    return (page_w - w) / 2.0, (page_h - h) / 2.0, w, h
+
+
 @router.post("/api/custom-templates/{tid}/print")
 def print_template(
     tid: int,
@@ -641,7 +656,11 @@ def print_template(
     w_pt, h_pt = A4
     for _title, _code, img in pages:
         ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), 0, 0, width=w_pt, height=h_pt)
+        if not ok:
+            continue
+        ih, iw = img.shape[:2]
+        x, y, dw, dh = _fit_page_rect(iw, ih, w_pt, h_pt)
+        c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), x, y, width=dw, height=dh)
         c.showPage()
     c.save()
     out.seek(0)

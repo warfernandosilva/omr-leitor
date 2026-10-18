@@ -1213,3 +1213,46 @@ def test_print_preview_avaliacao_without_alunos(authed):
     assert r.status_code == 200
     assert r.json()["ok"] is False and "nenhum aluno" in r.json()["error"].lower()
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# Impressão: preservar a proporção do cartão (não esticar para A4)
+# ---------------------------------------------------------------------------
+
+def test_fit_page_rect_preserves_aspect_and_centers():
+    from routers.custom_templates import _fit_page_rect
+    PW, PH = 595.28, 841.89
+
+    # cartão em proporção A4: cobre a página, sem sobra
+    x, y, w, h = _fit_page_rect(1000, 1414, PW, PH)
+    assert w / h == pytest.approx(1000 / 1414, rel=1e-9)
+    assert w == pytest.approx(PW, rel=1e-3)
+    assert x == pytest.approx((PW - w) / 2) and y == pytest.approx((PH - h) / 2)
+
+    # cartão LARGO (2:1): limitado pela largura, centralizado na vertical
+    x, y, w, h = _fit_page_rect(2000, 1000, PW, PH)
+    assert w == pytest.approx(PW, rel=1e-9)
+    assert h == pytest.approx(PW / 2, rel=1e-9)   # não estica a altura
+    assert y == pytest.approx((PH - h) / 2, rel=1e-9)
+
+    # cartão ALTO (1:3): limitado pela altura, centralizado na horizontal
+    x, y, w, h = _fit_page_rect(500, 1500, PW, PH)
+    assert h == pytest.approx(PH, rel=1e-9)
+    assert w == pytest.approx(PH / 3, rel=1e-9)
+    assert x == pytest.approx((PW - w) / 2, rel=1e-9)
+
+    # entradas degeneradas não estouram
+    assert _fit_page_rect(0, 0, PW, PH)[2:] == (PW, PH)
+
+
+def test_print_pdf_accepts_non_a4_card(authed):
+    """Cartão quadrado (fora do A4) imprime sem erro e devolve um PDF válido."""
+    client = authed
+    img = np.ones((1000, 1000, 3), np.uint8) * 255
+    tid = _create(client, _png_bytes(img), "Quadrado").json()["id"]
+    r = client.post(f"/api/custom-templates/{tid}/print",
+                    json={"mode": "blank", "format": "PDF"})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content[:4] == b"%PDF"
+    client.delete(f"/api/custom-templates/{tid}")

@@ -1510,6 +1510,7 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas as pdf_canvas
+    from routers.custom_templates import _fit_page_rect
 
     c = pdf_canvas.Canvas(out_buf, pagesize=A4)
     w_pt, h_pt = A4
@@ -1526,7 +1527,10 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
         ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
         if not ok:
             continue
-        c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), 0, 0, width=w_pt, height=h_pt)
+        # preserva a proporção do cartão (não estica para A4)
+        ih, iw = img.shape[:2]
+        x, y, dw, dh = _fit_page_rect(iw, ih, w_pt, h_pt)
+        c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), x, y, width=dw, height=dh)
         c.showPage()
         drawn += 1
     c.save()
