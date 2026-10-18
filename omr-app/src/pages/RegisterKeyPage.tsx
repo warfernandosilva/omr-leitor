@@ -5,6 +5,7 @@ import { AppView, isCustomExam, isSaeExam, isSaevExam, isHerbyExam, isSimuladoEx
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
 import { putAnswerKeyDB, processImage as apiProcessImage, loadAdaptiveFlag } from '../utils/api';
+import { getCustomTemplate } from '../utils/custom-template-api';
 import { keyFromProcessResult, KeyFlag } from '../utils/key-from-photo';
 import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
@@ -41,6 +42,10 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   // Custom: guarda a última foto p/ reler marcando os cantos à mão
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [cornerEdit, setCornerEdit] = useState(false);
+  // Multi-página (mesma folha): página do gabarito sendo lida.
+  const [customPage, setCustomPage] = useState(0);
+  const [customNPages, setCustomNPages] = useState(1);
+  const [readPages, setReadPages] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     if (examId) {
@@ -59,10 +64,24 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
       setReadError(null);
       setReadSummary(null);
       setPhotoUrl(null);
+      setCustomPage(0);
+      setReadPages(new Set());
     }
   }, [selectedExamId, userId]);
 
   const activeExam = selectedExamId ? exams.find(e => e.id === selectedExamId) : exam;
+  // Multi-página: descobre o nº de páginas do modelo custom vinculado.
+  useEffect(() => {
+    if (!activeExam || !isCustomExam(activeExam) || activeExam.customTemplateId == null) {
+      setCustomNPages(1);
+      return;
+    }
+    let alive = true;
+    getCustomTemplate(activeExam.customTemplateId)
+      .then((d) => { if (alive) setCustomNPages(Math.max(1, d.config.n_pages ?? 1)); })
+      .catch(() => { if (alive) setCustomNPages(1); });
+    return () => { alive = false; };
+  }, [activeExam?.customTemplateId, activeExam]);
   const questionsPerSubject = activeExam?.questionsPerSubject || 22;
   const totalQuestions = activeExam?.totalQuestions || questionsPerSubject * 2;
 
@@ -80,7 +99,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   };
 
   // ─── Gabarito por foto: lê um cartão-espelho marcado pelo professor ───
-  const readKeyFromFile = async (file: File, corners?: [number, number][]) => {
+  const readKeyFromFile = async (file: File, corners?: [number, number][], page?: number) => {
     if (!activeExam) return;
     setReading(true);
     setReadError(null);
@@ -96,13 +115,20 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
         false,
         activeExam.customTemplateId,
         corners ?? null,
+        isCustomExam(activeExam) ? (page ?? customPage) : undefined,
       );
       if (!res.success || !res.answers) {
         setReadError(res.error || 'Falha na leitura da foto — tente novamente com melhor iluminação.');
         return;
       }
       const k = keyFromProcessResult(res, totalQuestions, template);
-      setAnswerKey(k.key);
+      // Multi-página: acumula as respostas por página.
+      if (isCustomExam(activeExam) && customNPages > 1) {
+        setAnswerKey((prev) => ({ ...prev, ...k.key }));
+        setReadPages((s) => new Set(s).add(customPage));
+      } else {
+        setAnswerKey(k.key);
+      }
       setFlags(k.flags);
       const parts: string[] = [`${k.readCount} resposta(s) lida(s)`];
       if (k.blankCount) parts.push(`${k.blankCount} em branco`);
@@ -273,6 +299,26 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
                   <span className="text-sm text-gray-600 dark:text-gray-300">
                     Progresso: <strong className="text-ink dark:text-white tabular-nums">{filledCount}/{totalQuestions}</strong> questões
                   </span>
+                  {isCustomExam(activeExam) && customNPages > 1 && (
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <span className="text-sm text-gray-600 dark:text-gray-300">Página do gabarito:</span>
+                      {Array.from({ length: customNPages }, (_, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setCustomPage(i)}
+                          className={`btn btn-sm min-h-[36px] px-3 ${i === customPage ? 'btn-primary' : 'btn-secondary'}`}
+                        >
+                          {i + 1}{readPages.has(i) ? ' ✓' : ''}
+                        </button>
+                      ))}
+                      {readPages.size > 0 && readPages.size < customNPages && (
+                        <span className="text-xs text-brand-600 dark:text-brand-200">
+                          {readPages.size} de {customNPages} página(s) lida(s).
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <Button
                       size="sm"

@@ -229,6 +229,7 @@ export async function processImage(
   debug?: boolean,
   customTemplateId?: number,
   corners?: [number, number][] | null,
+  page?: number,
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('file', file);
@@ -238,6 +239,7 @@ export async function processImage(
   if (customTemplateId != null) formData.append('custom_template_id', String(customTemplateId));
   // Custom: 4 cantos da página (TL, TR, BR, BL) normalizados 0..1 — alinhamento manual
   if (corners && corners.length === 4) formData.append('corners', JSON.stringify(corners));
+  if (page != null) formData.append('page', String(page));
   formData.append('adaptive', adaptive ? 'true' : 'false');
   formData.append('debug', debug ? 'true' : 'false');
 

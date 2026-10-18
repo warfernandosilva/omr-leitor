@@ -50,4 +50,18 @@ describe('processImage envia os cantos manuais (Gabarito Personalizado)', () => 
     const fd = captured[0].init.body as FormData;
     expect(fd.get('corners')).toBeNull();
   });
+
+  it('envia o campo page quando informado (multi-página)', async () => {
+    stubFetch(OK);
+    await processImage(file(), 22, 'dual', 'custom', false, false, 7, null, 2);
+    const fd = captured[0].init.body as FormData;
+    expect(fd.get('page')).toBe('2');
+  });
+
+  it('sem page o campo não é enviado (modelo de 1 página)', async () => {
+    stubFetch(OK);
+    await processImage(file(), 22, 'dual', 'custom', false, false, 7);
+    const fd = captured[0].init.body as FormData;
+    expect(fd.get('page')).toBeNull();
+  });
 });
