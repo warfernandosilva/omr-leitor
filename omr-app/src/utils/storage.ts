@@ -33,6 +33,7 @@ function migrateExam(raw: unknown): Exam {
     answerKey: e.answerKey || null,
     layoutMode: e.layoutMode === 'single' ? 'single' : 'dual',
     templateType: e.templateType === 'sae' || e.templateType === 'colar' || e.templateType === 'saev' || e.templateType === 'herby' || e.templateType === 'simulado' ? e.templateType : undefined,
+    customTemplateId: e.customTemplateId,
     saeSpec: e.saeSpec,
     herbySpec: e.herbySpec,
   };
@@ -158,6 +159,7 @@ export function mergeRemoteExams(local: Exam[], remote: DBExam[]): { merged: Exa
       answerKey: remoteKey ?? prev?.answerKey ?? null,
       layoutMode,
       templateType,
+      customTemplateId: db.custom_template_id ?? (templateType ? undefined : prev?.customTemplateId),
       saeSpec: templateType === 'sae' ? remoteSaeSpec(db.sae_spec) ?? prev?.saeSpec : prev?.saeSpec,
       herbySpec: templateType === 'herby' ? remoteHerbySpec(db.herby_spec as Record<string, unknown> | null) ?? prev?.herbySpec : prev?.herbySpec,
     };

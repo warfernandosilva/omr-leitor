@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
-import { AppView, Exam, StudentResult, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
+import { AppView, Exam, StudentResult, isCustomExam, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
 import { saeBubbleCenter, SAE_BUBBLE_RADIUS } from '../utils/sae-template';
 import { getExams, saveResult, applyRemoteExams } from '../utils/storage';
 import {
@@ -327,7 +327,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // ─── Guia de captura adaptado ao gabarito da prova ───
   // SAEV usa adaptativo sempre (evidência: fotos reais 43-44/44 vs 18/41 no fixo)
   const useAdaptive = adaptive || isSaevExam(activeExam) || isHerbyExam(activeExam) || isSimuladoExam(activeExam);
-  const captureTemplate = activeExam?.templateType === 'colar'
+  // Gabarito Personalizado: prova vinculada a um cartão importado (lido pelo
+  // motor custom, não pelos modelos nativos).
+  const isCustom = isCustomExam(activeExam);
+  // Rótulo do modelo considerando o personalizado (chips/avisos).
+  const examModelLabel = isCustom ? templateLabel('custom') : templateLabel(activeExam?.templateType);
+  const captureTemplate = isCustom ? 'padrao' : activeExam?.templateType === 'colar'
     ? 'colar'
     : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : isHerbyExam(activeExam) ? 'herby'
     : isSimuladoExam(activeExam) ? 'simulado' : 'padrao';
@@ -369,13 +374,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       : t === 'simulado' ? 'simulado' : t === 'custom' ? 'custom' : 'padrao';
   const overlayModel = omrResult?.templateUsed
     ? canonicalModel(omrResult.templateUsed)
-    : canonicalModel(activeExam?.templateType);
+    : isCustom ? 'custom' : canonicalModel(activeExam?.templateType);
+  const examCanonicalModel = isCustom ? 'custom' as const : canonicalModel(activeExam?.templateType);
   const overlaySae = overlayModel === 'sae';
   const overlaySaev = overlayModel === 'saev';
   const overlayHerby = overlayModel === 'herby';
   const overlaySimulado = overlayModel === 'simulado';
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
-    && canonicalModel(omrResult.templateUsed) !== canonicalModel(activeExam.templateType);
+    && canonicalModel(omrResult.templateUsed) !== examCanonicalModel;
 
   // Recorte do gabarito: mesma decisão de modelo do overlay (detectado
   // vence) — a visualização mostra só a grade de bolhas, não a folha toda.
@@ -658,7 +664,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       const templateUsado = activeExam?.templateType === 'colar' ? 'colar' : isSaevExam(activeExam) ? 'saev' : isSaeExam(activeExam) ? 'sae' : activeExam?.templateType === 'herby' ? 'herby' : isSimuladoExam(activeExam) ? 'simulado' : 'padrao';
 
       let result: ProcessResult;
-      if (frames.length > 1) {
+      if (frames.length > 1 && !isCustom) {
         // Votação multi-frame: N frames da rajada → 1 resultado (divergência vira low_conf)
         const files = await Promise.all(frames.map(async (url) => {
           const res = await fetch(url);
@@ -668,10 +674,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         result = await processMulti(files, qpsUsado, modoUsado, templateUsado, useAdaptive, debugMode);
       } else {
         // Converter dataUrl para File para enviar à API Python
-        const res = await fetch(dataUrl);
+        // (Gabarito Personalizado usa sempre 1 frame: o motor custom não vota múltiplos frames)
+        const source = isCustom && frames.length > 1 ? frames[0] : dataUrl;
+        const res = await fetch(source);
         const blob = await res.blob();
         const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
-        result = await apiProcessImage(file, qpsUsado, modoUsado, templateUsado, useAdaptive, debugMode);
+        result = await apiProcessImage(file, qpsUsado, modoUsado,
+                                       isCustom ? 'custom' : templateUsado,
+                                       useAdaptive, debugMode, activeExam?.customTemplateId);
       }
       // 2–5. concluíram no servidor (âncoras, perspectiva, regiões, marcações)
       setStageDone(5);
@@ -1037,9 +1047,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       try {
         // 1. Leitura OMR + QR (usa o modelo da prova; fallback cruzado no backend)
-        const tpl = exam.templateType === 'saev' ? 'saev' : exam.templateType === 'herby' ? 'herby'
+        const tpl = isCustomExam(exam) ? 'custom'
+          : exam.templateType === 'saev' ? 'saev' : exam.templateType === 'herby' ? 'herby'
           : exam.templateType === 'simulado' ? 'simulado' : undefined;
-        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado', debugMode);
+        const result = await apiProcessImage(item.file, qps, layoutMode, tpl, adaptive || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado', debugMode, exam.customTemplateId);
         if (!result.success || !result.answers) {
           patchItem(item.fileName, { status: 'error', detail: result.error || 'Falha na leitura' });
           continue;
@@ -1458,7 +1469,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             {/* chip do modelo da prova */}
             {autoMode && !confirmUrl && (
               <span className="absolute top-2 left-2 z-10 text-[11px] font-semibold text-white bg-black/55 rounded-full px-2.5 py-1 pointer-events-none">
-                {templateLabel(activeExam?.templateType)}
+                {examModelLabel}
               </span>
             )}
             {/* ajustes ficam no header (ícone) e no sheet; visor limpo como na referência */}
@@ -2059,7 +2070,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               <strong>Atenção:</strong> o cartão fotografado é do modelo{' '}
               <strong>{templateLabel(omrResult?.templateUsed)}</strong>,
               mas a prova selecionada usa o modelo{' '}
-              <strong>{templateLabel(activeExam?.templateType)}</strong>.
+              <strong>{examModelLabel}</strong>.
               A leitura foi feita no modelo detectado — confira se a prova está correta antes de salvar.
             </div>
           )}

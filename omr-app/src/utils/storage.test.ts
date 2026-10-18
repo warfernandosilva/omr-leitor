@@ -136,6 +136,31 @@ describe('mergeRemoteExams (servidor vence)', () => {
     expect(merged[0].herbySpec?.n_questoes).toBe(22);
     expect(merged[0].totalQuestions).toBe(44);
   });
+
+  it('carrega custom_template_id do servidor como customTemplateId', () => {
+    const { merged } = mergeRemoteExams([], [
+      dbExam({ external_id: 'C1', template: 'custom', custom_template_id: 7 }),
+    ]);
+    expect(merged[0].templateType).toBeUndefined();
+    expect(merged[0].customTemplateId).toBe(7);
+  });
+
+  it('limpa o customTemplateId quando o servidor volta para um modelo nativo', () => {
+    const { merged } = mergeRemoteExams(
+      [localExam({ id: 'C1', customTemplateId: 7 })],
+      [dbExam({ external_id: 'C1', template: 'sae', sae_spec: {} })],
+    );
+    expect(merged[0].customTemplateId).toBeUndefined();
+    expect(merged[0].templateType).toBe('sae');
+  });
+
+  it('preserva o customTemplateId local quando o servidor não informa modelo', () => {
+    const { merged } = mergeRemoteExams(
+      [localExam({ id: 'C1', customTemplateId: 7 })],
+      [dbExam({ external_id: 'C1', template: 'padrao' })],
+    );
+    expect(merged[0].customTemplateId).toBe(7);
+  });
 });
 
 const UID = 'test-ciclo-uid';

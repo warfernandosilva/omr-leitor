@@ -196,6 +196,7 @@ export function examsWithRemoteFallback(local: Exam[], db: DBResultado[]): Exam[
       answerKey: null,
       layoutMode,
       templateType: remoteTemplate(d.avaliacao.template),
+      customTemplateId: typeof d.avaliacao.custom_template_id === 'number' ? d.avaliacao.custom_template_id : undefined,
     };
     byId.set(id, exam);
     out.push(exam);

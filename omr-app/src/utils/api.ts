@@ -224,15 +224,17 @@ export async function processImage(
   file: File,
   questionsPerSubject?: number,
   layoutMode?: 'dual' | 'single',
-  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado',
+  template?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado' | 'custom',
   adaptive?: boolean,
   debug?: boolean,
+  customTemplateId?: number,
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('questions_per_subject', String(questionsPerSubject ?? 22));
   formData.append('layout_mode', layoutMode ?? 'dual');
   formData.append('template', template ?? 'padrao');
+  if (customTemplateId != null) formData.append('custom_template_id', String(customTemplateId));
   formData.append('adaptive', adaptive ? 'true' : 'false');
   formData.append('debug', debug ? 'true' : 'false');
 
@@ -768,7 +770,8 @@ export interface DBExam {
   subject_mat: string;
   questions_per_subject: number;
   layout_mode: 'dual' | 'single';
-  template: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
+  template: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado' | 'custom';
+  custom_template_id?: number | null;
   sae_spec: Record<string, unknown> | null;
   herby_spec?: Record<string, unknown> | null;
   grade_scale: string;
@@ -823,7 +826,7 @@ export interface DBResultado {
   observacoes: string | null;
   data_correcao: string | null;
   aluno: { id: number; nome: string; matricula: string | null };
-  avaliacao: { id: number; external_id: string; titulo: string; questions_per_subject: number; layout_mode: string; grade_scale: string; template: string | null; turma: string | null; turma_id: number | null };
+  avaliacao: { id: number; external_id: string; titulo: string; questions_per_subject: number; layout_mode: string; grade_scale: string; template: string | null; custom_template_id?: number | null; turma: string | null; turma_id: number | null };
 }
 
 export async function getResultadosFromDB(): Promise<DBResultado[]> {
