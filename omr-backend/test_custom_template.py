@@ -1023,3 +1023,32 @@ def test_api_test_endpoint_reports_multi_marks(authed):
     assert body["answers"]["1"] == "AD"
     assert 1 not in (body["duplicate_questions"] or [])
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# Integração prova↔modelo: identidade do cartão personalizado nos endpoints
+# ---------------------------------------------------------------------------
+
+def test_exam_endpoints_expose_custom_template_id(authed):
+    """A prova precisa chegar ao app marcada como custom (template + id)."""
+    client = authed
+    tid = _exam_with_custom_template(client, "ex-custom-ident", ("Ana",))
+
+    exams = client.get("/api/exams").json()
+    entry = next(e for e in exams if e["external_id"] == "ex-custom-ident")
+    assert entry["template"] == "custom"
+    assert entry["custom_template_id"] == tid
+
+    detail = client.get("/api/exams/ex-custom-ident").json()
+    assert detail["template"] == "custom"
+    assert detail["custom_template_id"] == tid
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_exam_without_custom_template_has_null_id(authed):
+    client = authed
+    client.post("/api/exams/sync", json={"external_id": "ex-native-1", "titulo": "Prova nativa"})
+    entry = next(e for e in client.get("/api/exams").json()
+                 if e["external_id"] == "ex-native-1")
+    assert entry["template"] != "custom"
+    assert entry["custom_template_id"] is None
