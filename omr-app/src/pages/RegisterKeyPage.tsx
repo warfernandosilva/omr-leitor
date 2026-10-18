@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Camera, CheckCircle2, Save, Wand2, XCircle } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Camera, CheckCircle2, Focus, Save, Wand2, XCircle } from 'lucide-react';
 import { AppView, isCustomExam, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { getSubjectName, getSubjectIds, getSubjectRange } from '../utils/exam';
@@ -12,6 +13,7 @@ import Select from '../components/ui/Select';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
+import CornerEditor from '../components/CornerEditor';
 
 interface Props {
   examId: string | null;
@@ -36,6 +38,9 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   const [readError, setReadError] = useState<string | null>(null);
   const [readSummary, setReadSummary] = useState<string | null>(null);
   const [flags, setFlags] = useState<Record<number, KeyFlag>>({});
+  // Custom: guarda a última foto p/ reler marcando os cantos à mão
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [cornerEdit, setCornerEdit] = useState(false);
 
   useEffect(() => {
     if (examId) {
@@ -53,6 +58,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
       setFlags({});
       setReadError(null);
       setReadSummary(null);
+      setPhotoUrl(null);
     }
   }, [selectedExamId, userId]);
 
@@ -74,10 +80,8 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   };
 
   // ─── Gabarito por foto: lê um cartão-espelho marcado pelo professor ───
-  const handleReadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file || !activeExam) return;
+  const readKeyFromFile = async (file: File, corners?: [number, number][]) => {
+    if (!activeExam) return;
     setReading(true);
     setReadError(null);
     setReadSummary(null);
@@ -91,6 +95,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
         loadAdaptiveFlag() || isSaevExam(activeExam) || isHerbyExam(activeExam) || isSimuladoExam(activeExam),
         false,
         activeExam.customTemplateId,
+        corners ?? null,
       );
       if (!res.success || !res.answers) {
         setReadError(res.error || 'Falha na leitura da foto — tente novamente com melhor iluminação.');
@@ -115,6 +120,30 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
       setReadError('Erro ao enviar a foto. Verifique o backend no PC (porta 8010 / ngrok ativo).');
     } finally {
       setReading(false);
+    }
+  };
+
+  const handleReadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !activeExam) return;
+    // guarda a foto: se a leitura falhar, dá para tentar de novo marcando os cantos
+    const reader = new FileReader();
+    reader.onload = () => setPhotoUrl(reader.result as string);
+    reader.readAsDataURL(file);
+    await readKeyFromFile(file);
+  };
+
+  // Custom: relê a MESMA foto usando os 4 cantos marcados à mão
+  const handleReadWithCorners = async (corners: [number, number][]) => {
+    setCornerEdit(false);
+    if (!photoUrl) return;
+    try {
+      const blob = await (await fetch(photoUrl)).blob();
+      await readKeyFromFile(
+        new File([blob], 'gabarito.jpg', { type: blob.type || 'image/jpeg' }), corners);
+    } catch {
+      setReadError('Não foi possível reprocessar a foto. Envie novamente.');
     }
   };
 
@@ -280,6 +309,16 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
               {readError && (
                 <div className="callout-danger">{readError}</div>
               )}
+              {readError && activeExam && isCustomExam(activeExam) && photoUrl && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setCornerEdit(true)}
+                  icon={<Focus size={15} aria-hidden />}
+                >
+                  Ajustar cantos manualmente e tentar de novo
+                </Button>
+              )}
 
               {saved && (
                 <div className="callout-success">
@@ -313,6 +352,15 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
           )}
         </div>
       </div>
+
+      {cornerEdit && photoUrl && createPortal(
+        <CornerEditor
+          src={photoUrl}
+          onCancel={() => setCornerEdit(false)}
+          onConfirm={handleReadWithCorners}
+        />,
+        document.body,
+      )}
     </div>
   );
 }
