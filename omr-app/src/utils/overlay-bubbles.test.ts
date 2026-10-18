@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { overlayRowFor, overlayBubbleFor, isSingleLayout, overlayHerbyRowFor, overlayHerbyBubbleFor } from './overlay-bubbles';
+import { overlayRowFor, overlayBubbleFor, isSingleLayout, overlayHerbyRowFor, overlayHerbyBubbleFor, customBubbleShape } from './overlay-bubbles';
 import {
   SINGLE_X, SINGLE_BUBBLE_RADIUS, singleQuestionYFor,
   PORTUGUESE_X, MATHEMATICS_X, BUBBLE_RADIUS, questionYFor,
@@ -64,5 +64,34 @@ describe('overlay-bubbles', () => {
     expect(pos).toEqual({ x: bx, y: by, side: HERBY_SIDE });
     expect(overlayHerbyBubbleFor(22, 99, 'A')).toBeNull();
     expect(overlayHerbyBubbleFor(22, 1, 'X')).toBeNull();
+  });
+});
+
+describe('customBubbleShape (Gabarito Personalizado)', () => {
+  it('página quadrada: rx = ry = r', () => {
+    const s = customBubbleShape({ x: 0.3, y: 0.7, r: 0.02 }, 1000, 1000);
+    expect(s).toEqual({ cx: 0.3, cy: 0.7, rx: 0.02, ry: 0.02 });
+  });
+
+  it('página retrato: raio vira elipse no viewBox 0..1 mas é círculo na imagem', () => {
+    const r = 0.02, w = 1000, h = 2000;
+    const s = customBubbleShape({ x: 0.1, y: 0.2, r }, w, h);
+    expect(s.rx).toBeCloseTo((r * h) / w); // 2r
+    expect(s.ry).toBeCloseTo(r);
+    // mesmo raio físico na imagem (fração × dimensão)
+    expect(s.rx * w).toBeCloseTo(s.ry * h);
+  });
+
+  it('página paisagem', () => {
+    const r = 0.03, w = 2000, h = 1000;
+    const s = customBubbleShape({ x: 0.5, y: 0.5, r }, w, h);
+    expect(s.rx).toBeCloseTo(r);
+    expect(s.ry).toBeCloseTo((r * w) / h);
+  });
+
+  it('dimensões zero não explodem (guarda)', () => {
+    const s = customBubbleShape({ x: 0, y: 0, r: 0.01 }, 0, 0);
+    expect(s.rx).toBeCloseTo(0.01);
+    expect(s.ry).toBeCloseTo(0.01);
   });
 });

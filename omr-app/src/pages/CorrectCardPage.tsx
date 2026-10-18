@@ -23,7 +23,8 @@ import {
   guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide, tapToFocusPoint,
 } from '../utils/capture-guide';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
-import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor } from '../utils/overlay-bubbles';
+import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor, customBubbleShape } from '../utils/overlay-bubbles';
+import { getCustomTemplate, expandBlock, ExpandedBubble } from '../utils/custom-template-api';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
@@ -176,6 +177,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [step, setStep] = useState<'form' | 'capture' | 'processing' | 'review' | 'saved'>('form');
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [omrResult, setOmrResult] = useState<ProcessResult | null>(null);
+  /** Geometria do Gabarito Personalizado (bolhas normalizadas + tamanho da página). */
+  const [customGeom, setCustomGeom] = useState<{ pageW: number; pageH: number; bubbles: ExpandedBubble[] } | null>(null);
   const [manualAnswers, setManualAnswers] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   /** Etapas concluídas da leitura (0–8): marcos reais, nunca temporizador. */
@@ -380,6 +383,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const overlaySaev = overlayModel === 'saev';
   const overlayHerby = overlayModel === 'herby';
   const overlaySimulado = overlayModel === 'simulado';
+  const overlayCustom = overlayModel === 'custom';
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
     && canonicalModel(omrResult.templateUsed) !== examCanonicalModel;
 
@@ -397,6 +401,22 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         : overlayModel === 'simulado' ? 'simulado' : 'padrao',
     });
   }, [activeExam, overlayModel]);
+
+  // Geometria do Gabarito Personalizado para o overlay: carrega a config do
+  // modelo e expande as bolhas (coordenadas normalizadas 0..1).
+  useEffect(() => {
+    if (!isCustom || activeExam?.customTemplateId == null) { setCustomGeom(null); return; }
+    let alive = true;
+    getCustomTemplate(activeExam.customTemplateId)
+      .then(detail => {
+        if (!alive) return;
+        const cfg = detail.config;
+        const bubbles = cfg.questions.flatMap(expandBlock);
+        setCustomGeom({ pageW: cfg.page_w || 1, pageH: cfg.page_h || 1, bubbles });
+      })
+      .catch(() => { if (alive) setCustomGeom(null); });
+    return () => { alive = false; };
+  }, [isCustom, activeExam?.customTemplateId]);
 
   const startCamera = async (preferredDeviceId?: string | null, allowFileFallback = true) => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -1898,7 +1918,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           )}
 
           {/* Overlay gabarito na captura — verde=correto, vermelho=incorreto */}
-          {capturedImage && activeExam?.answerKey && (
+          {capturedImage && activeExam?.answerKey && !overlayCustom && (
             <div className="card">
               <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Gabarito recortado</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada</p>
@@ -2062,6 +2082,48 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   })}
                 </svg>
               </div>
+            </div>
+          )}
+
+          {/* Overlay do Gabarito Personalizado: bolhas normalizadas do modelo
+              (viewBox 0..1) sobre o retificado; radius normalizado ao maior lado. */}
+          {capturedImage && activeExam?.answerKey && overlayCustom && (
+            <div className="card">
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Gabarito personalizado</h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada · âmbar = múltipla resposta</p>
+              {!customGeom ? (
+                <p className="text-xs text-gray-500 dark:text-gray-400">Carregando o modelo do cartão…</p>
+              ) : (
+                <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: `${customGeom.pageW}/${customGeom.pageH}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                  <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
+                  <svg viewBox="0 0 1 1" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+                    {customGeom.bubbles.map((b) => {
+                      const m = Math.max(customGeom.pageW, customGeom.pageH);
+                      const inv = 1 / m;
+                      const { rx, ry } = customBubbleShape(b, customGeom.pageW, customGeom.pageH);
+                      const ans = manualAnswers[b.question] ?? '';
+                      const key = activeExam.answerKey?.[b.question] ?? '';
+                      const isMarked = ans.includes(b.option);
+                      const isCorrect = key.includes(b.option);
+                      let stroke = '#333'; let fill = 'none'; let sw = 2;
+                      if (isMarked && isCorrect) { stroke = '#16a34a'; fill = 'rgba(22,163,74,0.18)'; sw = 3; }
+                      else if (isMarked && !isCorrect) { stroke = '#dc2626'; fill = 'rgba(220,38,38,0.18)'; sw = 3; }
+                      else if (!isMarked && isCorrect) { stroke = '#16a34a'; sw = 2; }
+                      const isDup = !!omrResult?.duplicateMarks?.[b.question]?.includes(b.option);
+                      const isMulti = !!omrResult?.multiMarks?.[b.question]?.includes(b.option);
+                      return (
+                        <g key={`${b.question}-${b.option}`}>
+                          {b.shape === 'square'
+                            ? <rect x={b.x - rx} y={b.y - ry} width={rx * 2} height={ry * 2} fill={fill} stroke={stroke} strokeWidth={sw * inv} />
+                            : <ellipse cx={b.x} cy={b.y} rx={rx} ry={ry} fill={fill} stroke={stroke} strokeWidth={sw * inv} />}
+                          {isDup && <ellipse cx={b.x} cy={b.y} rx={rx * 1.3} ry={ry * 1.3} fill="none" stroke="#f97316" strokeWidth={2 * inv} strokeDasharray={`${4 * inv} ${3 * inv}`} />}
+                          {isMulti && <ellipse cx={b.x} cy={b.y} rx={rx * 1.3} ry={ry * 1.3} fill="none" stroke="#ca8a04" strokeWidth={2 * inv} />}
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              )}
             </div>
           )}
 

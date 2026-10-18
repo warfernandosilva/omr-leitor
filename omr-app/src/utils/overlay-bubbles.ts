@@ -180,3 +180,29 @@ export function overlayBubbleFor(
   const xs = q > qps ? MATHEMATICS_X : PORTUGUESE_X;
   return { x: xs[ci], y, r: BUBBLE_RADIUS };
 }
+
+// ─── Gabarito Personalizado ───
+export interface CustomBubbleShape {
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+}
+
+/**
+ * Converte uma bolha normalizada (0..1) do modelo personalizado para a
+ * geometria do overlay em viewBox `0 0 1 1`. O raio do modelo é normalizado ao
+ * MAIOR lado da página (igual ao backend: `r_px = r * max(w,h)`), então rx/ry
+ * são o raio como fração da largura/altura — mantendo a bolha circular na
+ * imagem, que é esticada no mesmo fator (`preserveAspectRatio="none"`).
+ */
+export function customBubbleShape(
+  bubble: { x: number; y: number; r: number },
+  pageW: number,
+  pageH: number,
+): CustomBubbleShape {
+  const w = pageW || 1;
+  const h = pageH || 1;
+  const m = Math.max(w, h);
+  return { cx: bubble.x, cy: bubble.y, rx: (bubble.r * m) / w, ry: (bubble.r * m) / h };
+}
