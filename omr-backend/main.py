@@ -633,6 +633,7 @@ def process_omr(
     custom_template_id: int | None = Form(None),  # obrigatório quando template=custom
     corners: str | None = Form(None),  # custom: 4 cantos [TL,TR,BR,BL] normalizados (JSON)
     page: int = Form(0),  # custom multi-página: página do modelo sendo lida (0-based)
+    omr_overrides: str | None = Form(None),  # custom: overrides globais de OMR (JSON)
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -665,11 +666,35 @@ def process_omr(
         custom_cfg = _load_custom_config(db, custom_template_id, current_user)
         if custom_cfg is None:
             return ProcessResponse(success=False, error="Gabarito personalizado não encontrado.")
-        from omr.custom_template import process_custom_image
+        from omr.custom_template import process_custom_image, omr_params_from_config
+        from omr.params import OmrParams
+        import json as _json
         diag: dict = {}
+        base_params, _ = omr_params_from_config(custom_cfg)
+        # Overrides globais (do cliente) têm prioridade sobre os do modelo.
+        merged_params = base_params
+        if omr_overrides:
+            try:
+                raw = _json.loads(omr_overrides)
+                if isinstance(raw, dict):
+                    def _g(k):
+                        return raw.get(k, None)
+                    merged_params = OmrParams(
+                        floor=_g("floor") if _g("floor") is not None else base_params.floor,
+                        margin=_g("margin") if _g("margin") is not None else base_params.margin,
+                        low_conf_threshold=_g("low_conf_threshold") if _g("low_conf_threshold") is not None else base_params.low_conf_threshold,
+                        weights=tuple(_g("weights")) if _g("weights") is not None else base_params.weights,
+                        inner_radius=_g("inner_radius") if _g("inner_radius") is not None else base_params.inner_radius,
+                        square_inset=_g("square_inset") if _g("square_inset") is not None else base_params.square_inset,
+                        clahe_clip=_g("clahe_clip") if _g("clahe_clip") is not None else base_params.clahe_clip,
+                        clahe_tiles=tuple(_g("clahe_tiles")) if _g("clahe_tiles") is not None else base_params.clahe_tiles,
+                    )
+            except (ValueError, TypeError):
+                merged_params = base_params
         c_result = process_custom_image(image, custom_cfg, adaptive=adaptive, debug=debug,
                                         corners=_parse_manual_corners(corners),
-                                        diagnostics=diag, page=page)
+                                        diagnostics=diag, page=page,
+                                        overrides=merged_params if not merged_params.is_empty() else None)
         if c_result is None:
             detail = diag.get("detail") or ""
             base = ("Não foi possível alinhar/ler o gabarito personalizado. "

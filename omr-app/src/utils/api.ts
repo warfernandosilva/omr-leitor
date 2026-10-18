@@ -230,6 +230,7 @@ export async function processImage(
   customTemplateId?: number,
   corners?: [number, number][] | null,
   page?: number,
+  omrOverrides?: Record<string, unknown> | null,
 ): Promise<ProcessResult> {
   const formData = new FormData();
   formData.append('file', file);
@@ -240,6 +241,7 @@ export async function processImage(
   // Custom: 4 cantos da página (TL, TR, BR, BL) normalizados 0..1 — alinhamento manual
   if (corners && corners.length === 4) formData.append('corners', JSON.stringify(corners));
   if (page != null) formData.append('page', String(page));
+  if (omrOverrides && Object.keys(omrOverrides).length) formData.append('omr_overrides', JSON.stringify(omrOverrides));
   formData.append('adaptive', adaptive ? 'true' : 'false');
   formData.append('debug', debug ? 'true' : 'false');
 

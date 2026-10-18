@@ -186,6 +186,18 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [customPage, setCustomPage] = useState(0);
   // Multi-página: quais páginas já foram lidas para o cartão atual.
   const [readPages, setReadPages] = useState<Set<number>>(new Set());
+  // Configurações globais de detecção (item 5 da Fase 2)
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchFiles, setBatchFiles] = useState<File[][]>([]);
+  const [batchResults, setBatchResults] = useState<{ idx: number; answers: Record<string, string>; error?: string }[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [globalSettings, setGlobalSettings] = useState<Record<string, unknown>>(() => {
+    try {
+      const raw = localStorage.getItem('omr_global_settings');
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  });
   const [manualAnswers, setManualAnswers] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   /** Etapas concluídas da leitura (0–8): marcos reais, nunca temporizador. */
@@ -762,7 +774,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                                        isCustom ? 'custom' : templateUsado,
                                        useAdaptive, debugMode, activeExam?.customTemplateId,
                                        corners ?? null,
-                                        isCustom ? (page ?? customPage) : undefined);
+                                        isCustom ? (page ?? customPage) : undefined,
+                                        isCustom ? globalSettings : null);
       }
       // 2–5. concluíram no servidor (âncoras, perspectiva, regiões, marcações)
       setStageDone(5);
@@ -1518,6 +1531,27 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               )}
             </div>
           )}
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="btn btn-secondary btn-sm w-full justify-start"
+          >
+            Configurações de detecção (globais)
+          </button>
+          {isCustom && (customGeom?.nPages ?? 1) > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                const n = customGeom?.nPages ?? 1;
+                setBatchFiles(Array.from({ length: n }, () => []));
+                setBatchResults([]);
+                setBatchOpen(true);
+              }}
+              className="btn btn-secondary btn-sm w-full justify-start"
+            >
+              Lote multi-página (page order)
+            </button>
+          )}
           <div className="flex gap-2">
             <Button
               onClick={() => startCamera()}
@@ -1948,6 +1982,172 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           onCancel={() => setCornerEdit(null)}
           onConfirm={confirmManualCorners}
         />,
+        document.body,
+      )}
+
+      {settingsOpen && createPortal(
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-4 space-y-3">
+            <h3 className="font-bold text-lg">Configurações de detecção (globais)</h3>
+            <p className="text-xs text-gray-500">Valores vazios usam o padrão do modelo.</p>
+            {[
+              { key: 'floor', label: 'Piso (floor)', step: 0.01 },
+              { key: 'margin', label: 'Margem (margin)', step: 0.01 },
+              { key: 'low_conf_threshold', label: 'Limiar baixa confiança', step: 0.01 },
+              { key: 'clahe_clip', label: 'CLAHE clip', step: 0.1 },
+            ].map(({ key, label, step }) => (
+              <div key={key} className="flex items-center gap-2">
+                <label className="text-sm flex-1">{label}</label>
+                <input
+                  type="number"
+                  step={step}
+                  className="border rounded px-2 py-1 w-24 text-sm"
+                  value={String(globalSettings[key] ?? '')}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setGlobalSettings((s) => {
+                      const next = { ...s };
+                      if (v === '') delete next[key];
+                      else next[key] = Number(v);
+                      return next;
+                    });
+                  }}
+                />
+              </div>
+            ))}
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => setSettingsOpen(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  localStorage.setItem('omr_global_settings', JSON.stringify(globalSettings));
+                  setSettingsOpen(false);
+                }}
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {batchOpen && createPortal(
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-4 space-y-3 max-h-[80vh] overflow-y-auto">
+            <h3 className="font-bold text-lg">Lote multi-página (page order)</h3>
+            <p className="text-xs text-gray-500">
+              Envie, para cada página, a lista de fotos na mesma ordem. As respostas são casadas por posição.
+            </p>
+            {Array.from({ length: customGeom?.nPages ?? 1 }, (_, p) => (
+              <div key={p} className="space-y-1">
+                <label className="text-sm font-medium">Página {p + 1}</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    setBatchFiles((prev) => {
+                      const next = [...prev];
+                      next[p] = files;
+                      return next;
+                    });
+                  }}
+                  className="block w-full text-sm"
+                />
+                <span className="text-xs text-gray-500">{(batchFiles[p]?.length ?? 0)} arquivo(s)</span>
+              </div>
+            ))}
+            <div className="flex gap-2 justify-end">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setBatchOpen(false)} disabled={batchBusy}>
+                Fechar
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={batchBusy || batchFiles.some((f) => !f.length)}
+                onClick={async () => {
+                  setBatchBusy(true);
+                  setBatchResults([]);
+                  const nPages = customGeom?.nPages ?? 1;
+                  const minLen = Math.min(...batchFiles.map((f) => f.length));
+                  const out: { idx: number; answers: Record<string, string>; error?: string }[] = [];
+                  for (let i = 0; i < minLen; i++) {
+                    const merged: Record<string, string> = {};
+                    let err: string | undefined;
+                    for (let pg = 0; pg < nPages; pg++) {
+                      try {
+                        const file = batchFiles[pg][i];
+                        const res = await apiProcessImage(
+                          file,
+                          activeExam?.questionsPerSubject ?? 22,
+                          activeExam?.layoutMode ?? 'dual',
+                          'custom',
+                          useAdaptive,
+                          debugMode,
+                          activeExam?.customTemplateId,
+                          null,
+                          pg,
+                          globalSettings,
+                        );
+                        if (res.success && res.answers) {
+                          Object.assign(merged, res.answers);
+                        } else {
+                          err = res.error || 'Falha na leitura';
+                        }
+                      } catch (e) {
+                        err = e instanceof Error ? e.message : 'Erro';
+                      }
+                    }
+                    out.push({ idx: i + 1, answers: merged, error: err });
+                  }
+                  setBatchResults(out);
+                  setBatchBusy(false);
+                }}
+              >
+                {batchBusy ? 'Processando...' : 'Processar lote'}
+              </button>
+            </div>
+            {batchFiles.some((f, i) => i > 0 && f.length !== batchFiles[0].length) && (
+              <p className="text-xs text-amber-600">
+                Atenção: as páginas têm quantidades diferentes de arquivos. Serão processados os primeiros {Math.min(...batchFiles.map((f) => f.length))} de cada.
+              </p>
+            )}
+            {batchResults.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="font-semibold text-sm">Resultados ({batchResults.length})</h4>
+                <div className="overflow-x-auto">
+                  <table className="text-xs w-full border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="border px-2 py-1 text-left">#</th>
+                        <th className="border px-2 py-1 text-left">Respostas</th>
+                        <th className="border px-2 py-1 text-left">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batchResults.map((r) => (
+                        <tr key={r.idx}>
+                          <td className="border px-2 py-1">{r.idx}</td>
+                          <td className="border px-2 py-1 font-mono">{Object.entries(r.answers).map(([q, a]) => `${q}:${a}`).join(' ') || '—'}</td>
+                          <td className="border px-2 py-1">{r.error ? <span className="text-red-600">{r.error}</span> : 'OK'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>,
         document.body,
       )}
 

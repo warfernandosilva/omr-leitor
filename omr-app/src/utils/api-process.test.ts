@@ -64,4 +64,11 @@ describe('processImage envia os cantos manuais (Gabarito Personalizado)', () => 
     const fd = captured[0].init.body as FormData;
     expect(fd.get('page')).toBeNull();
   });
+
+  it('envia omr_overrides quando informado (configurações globais)', async () => {
+    stubFetch(OK);
+    await processImage(file(), 22, 'dual', 'custom', false, false, 7, null, undefined, { floor: 0.3 });
+    const fd = captured[0].init.body as FormData;
+    expect(JSON.parse(String(fd.get('omr_overrides')))).toEqual({ floor: 0.3 });
+  });
 });

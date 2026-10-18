@@ -569,6 +569,16 @@ def test_api_process_endpoint_with_custom_template(authed):
     assert r.status_code == 200
     assert r.json()["success"] is False
 
+    # overrides globais de OMR (JSON) são aceitos e não quebram a leitura
+    r = client.post(
+        "/api/omr/process",
+        files={"file": ("foto.png", _png_bytes(filled), "image/png")},
+        data={"template": "custom", "custom_template_id": str(tid),
+              "omr_overrides": json.dumps({"floor": 0.3, "margin": 0.1})},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["success"] is True
+
     client.delete(f"/api/custom-templates/{tid}")
 
 
