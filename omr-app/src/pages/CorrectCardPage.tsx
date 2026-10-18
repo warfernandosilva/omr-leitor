@@ -20,8 +20,10 @@ import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange, sc
 import { useAutoCapture } from '../hooks/useAutoCapture';
 import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
 import {
-  guideRectFor, anchorTargetsFor, thresholdsFor, fallbackGuide, tapToFocusPoint,
+  guideRectFor, guideRectForAspect, anchorTargetsFor, anchorTargetsForBox, customAnchorBox,
+  thresholdsFor, fallbackGuide, tapToFocusPoint,
 } from '../utils/capture-guide';
+import type { AnchorBox } from '../utils/anchors';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
 import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor, customBubbleShape } from '../utils/overlay-bubbles';
 import { getCustomTemplate, expandBlock, ExpandedBubble } from '../utils/custom-template-api';
@@ -177,8 +179,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [step, setStep] = useState<'form' | 'capture' | 'processing' | 'review' | 'saved'>('form');
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [omrResult, setOmrResult] = useState<ProcessResult | null>(null);
-  /** Geometria do Gabarito Personalizado (bolhas normalizadas + tamanho da página). */
-  const [customGeom, setCustomGeom] = useState<{ pageW: number; pageH: number; bubbles: ExpandedBubble[] } | null>(null);
+  /** Geometria do Gabarito Personalizado (bolhas normalizadas + âncoras + página). */
+  const [customGeom, setCustomGeom] = useState<{ pageW: number; pageH: number; bubbles: ExpandedBubble[]; anchorBox: AnchorBox } | null>(null);
   const [manualAnswers, setManualAnswers] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   /** Etapas concluídas da leitura (0–8): marcos reais, nunca temporizador. */
@@ -357,15 +359,23 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     ro.observe(el);
     return () => ro.disconnect();
   }, [step]);
+  // Gabarito Personalizado: o quadro do guia usa a proporção da página do
+  // modelo importado e os alvos ficam nas âncoras do próprio modelo.
+  const customAspect = isCustom && customGeom && customGeom.pageH > 0
+    ? customGeom.pageW / customGeom.pageH : null;
   const guide = useMemo(
     () => (viewSize.w > 0 && viewSize.h > 0
-      ? guideRectFor(viewSize.w, viewSize.h)
+      ? (customAspect
+        ? guideRectForAspect(viewSize.w, viewSize.h, customAspect)
+        : guideRectFor(viewSize.w, viewSize.h))
       : fallbackGuide()),
-    [viewSize],
+    [viewSize, customAspect],
   );
   const anchorTargets = useMemo(
-    () => anchorTargetsFor(captureTemplate, guide),
-    [guide, captureTemplate],
+    () => (isCustom
+      ? anchorTargetsForBox(customGeom?.anchorBox ?? { x0: 0, y0: 0, x1: 1, y1: 1 }, guide)
+      : anchorTargetsFor(captureTemplate, guide)),
+    [guide, captureTemplate, isCustom, customGeom],
   );
 
   // Geometria do overlay: prefere o modelo DETECTADO pelo backend (fallback
@@ -412,7 +422,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         if (!alive) return;
         const cfg = detail.config;
         const bubbles = cfg.questions.flatMap(expandBlock);
-        setCustomGeom({ pageW: cfg.page_w || 1, pageH: cfg.page_h || 1, bubbles });
+        setCustomGeom({
+          pageW: cfg.page_w || 1,
+          pageH: cfg.page_h || 1,
+          bubbles,
+          anchorBox: customAnchorBox(cfg.anchors ?? []),
+        });
       })
       .catch(() => { if (alive) setCustomGeom(null); });
     return () => { alive = false; };

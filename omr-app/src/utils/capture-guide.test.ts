@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  guideRectFor, anchorTargetsFor, thresholdsFor, captureTemplateFor,
-  fallbackGuide, CARD_ASPECT, tapToFocusPoint,
+  guideRectFor, guideRectForAspect, anchorTargetsFor, anchorTargetsForBox, customAnchorBox,
+  thresholdsFor, captureTemplateFor, fallbackGuide, CARD_ASPECT, tapToFocusPoint,
 } from './capture-guide';
 import { DEFAULT_THRESHOLDS } from './frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT } from './card-template';
@@ -141,6 +141,56 @@ describe('thresholdsFor / captureTemplateFor', () => {
     const sae = anchorTargetsFor('sae', guide);
     expect(saev.TL.y).toBeLessThan(sae.TL.y);
     expect(thresholdsFor('saev')).toEqual(DEFAULT_THRESHOLDS);
+  });
+});
+
+describe('guideRectForAspect / customAnchorBox / anchorTargetsForBox (Gabarito Personalizado)', () => {
+  const anchors = [
+    { x: 0.1, y: 0.1, size: 0.05 },
+    { x: 0.9, y: 0.1, size: 0.05 },
+    { x: 0.9, y: 0.9, size: 0.05 },
+    { x: 0.1, y: 0.9, size: 0.05 },
+  ];
+
+  it('guideRectForAspect respeita a proporção da página do modelo', () => {
+    // página retrato 1000×2000 → aspecto 0.5 (mais estreita que A4 ≈0.707)
+    const g = guideRectForAspect(360, 640, 0.5);
+    expect(pixelAspect(g, 360, 640)).toBeCloseTo(0.5, 3);
+    // mais estreita que o guia A4 no mesmo visor (ambos limitados pela altura)
+    expect(g.w).toBeLessThan(guideRectFor(360, 640).w);
+  });
+
+  it('guideRectFor equivale a guideRectForAspect com CARD_ASPECT', () => {
+    expect(guideRectFor(360, 640)).toEqual(guideRectForAspect(360, 640, CARD_ASPECT));
+  });
+
+  it('customAnchorBox: BBox das âncoras com meia-largura (size/2) e clamp 0..1', () => {
+    const b = customAnchorBox(anchors);
+    expect(b.x0).toBeCloseTo(0.075, 10);
+    expect(b.y0).toBeCloseTo(0.075, 10);
+    expect(b.x1).toBeCloseTo(0.925, 10);
+    expect(b.y1).toBeCloseTo(0.925, 10);
+    // sem âncoras → página inteira
+    expect(customAnchorBox([])).toEqual({ x0: 0, y0: 0, x1: 1, y1: 1 });
+    // âncoras nas bordas não estouram 0..1
+    expect(customAnchorBox([{ x: 0.0, y: 0.0, size: 0.1 }]))
+      .toEqual({ x0: 0, y0: 0, x1: 0.05, y1: 0.05 });
+  });
+
+  it('anchorTargetsForBox projeta o BBox nas bordas do guia', () => {
+    const box = customAnchorBox(anchors);
+    const g = guideRectForAspect(360, 640, 0.5);
+    const a = anchorTargetsForBox(box, g);
+    expect(a.TL.x).toBeCloseTo(g.x + box.x0 * g.w, 10);
+    expect(a.TL.y).toBeCloseTo(g.y + box.y0 * g.h, 10);
+    expect(a.BR.x).toBeCloseTo(g.x + box.x1 * g.w, 10);
+    expect(a.BR.y).toBeCloseTo(g.y + box.y1 * g.h, 10);
+    for (const k of ['TL', 'TR', 'BR', 'BL'] as const) {
+      expect(a[k].x).toBeGreaterThanOrEqual(g.x);
+      expect(a[k].x).toBeLessThanOrEqual(g.x + g.w);
+      expect(a[k].y).toBeGreaterThanOrEqual(g.y);
+      expect(a[k].y).toBeLessThanOrEqual(g.y + g.h);
+    }
   });
 });
 

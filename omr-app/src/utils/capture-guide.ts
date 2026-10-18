@@ -8,7 +8,7 @@
 // mesma fonte usada pelo recorte do "Gabarito recortado" (gabarito-crop.ts).
 import { GuideThresholds, DEFAULT_THRESHOLDS } from './frame-guides';
 import { CARD_WIDTH, CARD_HEIGHT } from './card-template';
-import { CaptureTemplate, normalizedAnchorBox } from './anchors';
+import { CaptureTemplate, AnchorBox, normalizedAnchorBox } from './anchors';
 
 export type { CaptureTemplate } from './anchors';
 
@@ -33,20 +33,24 @@ export interface AnchorTargets {
 
 const VIEW_MARGIN = 4; // % livre em cada borda do visor
 
-// Maior A4 (proporção real, sem distorção) que cabe no visor viewW×viewH
-export function guideRectFor(viewW: number, viewH: number): GuideRect {
-  if (!(viewW > 0) || !(viewH > 0)) return fallbackGuide();
+// Maior retângulo com a proporção `aspect` (w/h) que cabe no visor viewW×viewH
+export function guideRectForAspect(viewW: number, viewH: number, aspect: number): GuideRect {
+  if (!(viewW > 0) || !(viewH > 0) || !(aspect > 0)) return fallbackGuide();
   const avail = 100 - VIEW_MARGIN * 2;
   const viewAspect = viewW / viewH; // w/h em pixels
-  // largura-fw → altura-fh mantendo A4 em pixels: w_px/h_px = CARD_ASPECT
-  // (w/100*viewW) / (h/100*viewH) = CARD_ASPECT  →  h = w * viewAspect / CARD_ASPECT
+  // (w/100*viewW) / (h/100*viewH) = aspect  →  h = w * viewAspect / aspect
   let w = avail;
-  let h = (w * viewAspect) / CARD_ASPECT;
+  let h = (w * viewAspect) / aspect;
   if (h > avail) {
     h = avail;
-    w = (h * CARD_ASPECT) / viewAspect;
+    w = (h * aspect) / viewAspect;
   }
   return { x: (100 - w) / 2, y: (100 - h) / 2, w, h };
+}
+
+// Maior A4 (proporção real, sem distorção) que cabe no visor viewW×viewH
+export function guideRectFor(viewW: number, viewH: number): GuideRect {
+  return guideRectForAspect(viewW, viewH, CARD_ASPECT);
 }
 
 // Guia padrão quando o visor ainda não foi medido (celular retrato típico)
@@ -55,8 +59,7 @@ export function fallbackGuide(): GuideRect {
 }
 
 // Posição das 4 âncoras projetadas dentro do guia (coords 0..100 do overlay)
-export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): AnchorTargets {
-  const box = normalizedAnchorBox(template);
+export function anchorTargetsForBox(box: AnchorBox, guide: GuideRect): AnchorTargets {
   const px = (fx: number) => guide.x + fx * guide.w;
   const py = (fy: number) => guide.y + fy * guide.h;
   return {
@@ -65,6 +68,38 @@ export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): A
     BR: { x: px(box.x1), y: py(box.y1) },
     BL: { x: px(box.x0), y: py(box.y1) },
   };
+}
+
+// Posição das 4 âncoras de um modelo nativo projetadas dentro do guia
+export function anchorTargetsFor(template: CaptureTemplate, guide: GuideRect): AnchorTargets {
+  return anchorTargetsForBox(normalizedAnchorBox(template), guide);
+}
+
+// Âncora mínima do guia (posições/quadrado já normalizados 0..1)
+export interface GuideAnchor {
+  x: number;
+  y: number;
+  size?: number;
+}
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/**
+ * BBox normalizado (0..1) das âncoras de um Gabarito Personalizado, para o
+ * guia de captura. Espelha o render do preview do backend (quadrado de lado
+ * `size` em coords normalizadas). Sem âncoras → página inteira (quadro cheio).
+ */
+export function customAnchorBox(anchors: readonly GuideAnchor[]): AnchorBox {
+  if (!anchors || anchors.length === 0) return { x0: 0, y0: 0, x1: 1, y1: 1 };
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const a of anchors) {
+    const h = (a.size ?? 0) / 2;
+    x0 = Math.min(x0, a.x - h);
+    y0 = Math.min(y0, a.y - h);
+    x1 = Math.max(x1, a.x + h);
+    y1 = Math.max(y1, a.y + h);
+  }
+  return { x0: clamp01(x0), y0: clamp01(y0), x1: clamp01(x1), y1: clamp01(y1) };
 }
 
 // Limiares do detector por modelo (SAE/Colar: âncoras pequenas, quad menor;
