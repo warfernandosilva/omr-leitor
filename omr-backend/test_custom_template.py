@@ -1256,3 +1256,115 @@ def test_print_pdf_accepts_non_a4_card(authed):
     assert r.headers["content-type"] == "application/pdf"
     assert r.content[:4] == b"%PDF"
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# Alinhamento manual: o usuário marca os 4 cantos da página
+# ---------------------------------------------------------------------------
+
+def _warp_photo(img: np.ndarray, dst_quad: list, out_size: tuple[int, int]) -> np.ndarray:
+    """Simula uma foto torta: leva a página do cartão para um quadrilátero."""
+    h, w = img.shape[:2]
+    src = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    M = cv2.getPerspectiveTransform(src, np.float32(dst_quad))
+    return cv2.warpPerspective(img, M, out_size, borderValue=(170, 170, 170))
+
+
+def _normalized(quad: list, out_size: tuple[int, int]) -> list:
+    ow, oh = out_size
+    return [[x / ow, y / oh] for x, y in quad]
+
+
+def test_manual_corners_px_validates_and_clamps():
+    px = ct.manual_corners_px([[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]], 100, 200)
+    assert px == {"TL": (10.0, 20.0), "TR": (90.0, 20.0),
+                  "BR": (90.0, 180.0), "BL": (10.0, 180.0)}
+    # fora do intervalo é grampeado (não rejeitado)
+    px = ct.manual_corners_px([[-0.5, -1], [1.5, 0], [1, 1], [0, 2]], 100, 100)
+    assert px["TL"] == (0.0, 0.0) and px["TR"] == (100.0, 0.0)
+    # inválidos → None
+    assert ct.manual_corners_px(None, 100, 100) is None
+    assert ct.manual_corners_px([[0.1, 0.1], [0.9, 0.1], [0.9, 0.9]], 100, 100) is None
+    assert ct.manual_corners_px([[0.1, 0.1]] * 4, 100, 100) is None          # degenerado
+    assert ct.manual_corners_px([[0, 0], [1, 0], [0.4, 0.4], [0, 1]], 100, 100) is None  # côncavo
+    assert ct.manual_corners_px([["a", 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]],
+                                100, 100) is None
+
+
+def test_process_with_manual_corners_reads_skewed_photo():
+    marks = {1: "C", 2: "A", 3: "D", 4: "B", 5: "A"}
+    dst = [[120, 90], [1060, 40], [1150, 1480], [70, 1430]]
+    out_size = (1250, 1600)
+    photo = _warp_photo(_make_card(marks), dst, out_size)
+
+    res = ct.process_custom_image(photo, _config(), corners=_normalized(dst, out_size))
+    assert res is not None
+    for q, letter in marks.items():
+        assert res.answers.get(q) == letter, f"Q{q}: esperado {letter}, obtido {res.answers.get(q)}"
+
+
+def test_manual_corners_rescue_when_auto_alignment_fails(monkeypatch):
+    """Sem âncoras detectáveis, os cantos manuais ainda permitem ler o cartão."""
+    marks = {1: "A", 2: "B", 3: "C"}
+    dst = [[100, 100], [1100, 120], [1090, 1520], [90, 1500]]
+    out_size = (1200, 1650)
+    photo = _warp_photo(_make_card(marks), dst, out_size)
+
+    class _NoMarkers:
+        markers: list = []
+
+    monkeypatch.setattr(ct, "detect_markers", lambda *a, **k: _NoMarkers())
+    monkeypatch.setattr(ct, "_detect_page_corners", lambda *a, **k: None)
+
+    diag: dict = {}
+    assert ct.process_custom_image(photo, _config(), diagnostics=diag) is None
+    assert diag["reason"] == "anchors"
+
+    res = ct.process_custom_image(photo, _config(), corners=_normalized(dst, out_size))
+    assert res is not None
+    for q, letter in marks.items():
+        assert res.answers.get(q) == letter
+
+
+def test_process_manual_corners_invalid_reports_diagnostics():
+    card = _make_card({1: "A"})
+    diag: dict = {}
+    res = ct.process_custom_image(card, _config(),
+                                  corners=[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+                                  diagnostics=diag)
+    assert res is None
+    assert diag["reason"] == "manual_corners"
+    assert "convexo" in diag["detail"]
+
+
+def test_api_process_with_manual_corners(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Manual").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+    client.post(f"/api/custom-templates/{tid}/activate")
+
+    marks = {1: "B", 2: "D", 3: "A", 4: "C", 5: "B"}
+    dst = [[100, 60], [1090, 110], [1160, 1470], [60, 1520]]
+    out_size = (1220, 1600)
+    photo = _warp_photo(_make_card(marks), dst, out_size)
+    corners = json.dumps(_normalized(dst, out_size))
+
+    r = client.post(
+        "/api/omr/process",
+        files={"file": ("foto.png", _png_bytes(photo), "image/png")},
+        data={"template": "custom", "custom_template_id": str(tid), "corners": corners},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    for q, letter in marks.items():
+        assert body["answers"][str(q)] == letter
+
+    # corners malformados não quebram a rota (cai no alinhamento automático)
+    r = client.post(
+        "/api/omr/process",
+        files={"file": ("foto.png", _png_bytes(photo), "image/png")},
+        data={"template": "custom", "custom_template_id": str(tid), "corners": "not-json"},
+    )
+    assert r.status_code == 200
+    client.delete(f"/api/custom-templates/{tid}")

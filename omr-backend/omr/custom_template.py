@@ -651,6 +651,37 @@ def _is_convex_quad(pts: list[tuple[float, float]]) -> bool:
     return all(s > 0 for s in signs) or all(s < 0 for s in signs)
 
 
+def manual_corners_px(
+    corners: list, w: int, h: int
+) -> dict[str, tuple[float, float]] | None:
+    """4 cantos (TL, TR, BR, BL) em coords NORMALIZADAS 0..1 → dict em px.
+
+    Usado quando o usuário marca os cantos da PÁGINA à mão (foto torta / falha
+    do alinhamento automático). Devolve None se não forem 4 pontos convexos.
+    """
+    if not corners or len(corners) != 4:
+        return None
+    pts: list[tuple[float, float]] = []
+    for p in corners:
+        try:
+            x = float(p[0])
+            y = float(p[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        if not (math.isfinite(x) and math.isfinite(y)):
+            return None
+        pts.append((min(1.0, max(0.0, x)) * w, min(1.0, max(0.0, y)) * h))
+    if not _is_convex_quad(pts):
+        return None
+    return {c: pts[i] for i, c in enumerate(CORNERS)}
+
+
+def _page_rect_dst(cw: int, ch: int) -> dict[str, tuple[float, float]]:
+    """Destino canônico: a PÁGINA inteira (cantos da folha)."""
+    return {"TL": (0.0, 0.0), "TR": (float(cw), 0.0),
+            "BR": (float(cw), float(ch)), "BL": (0.0, float(ch))}
+
+
 def _infer_missing_corner(
     found: dict[str, tuple[float, float]],
     w: int,
@@ -774,11 +805,27 @@ def detect_anchor_corners(image: np.ndarray, config: dict) -> tuple[dict[str, tu
 
 
 def build_homography_ex(
-    image: np.ndarray, config: dict
+    image: np.ndarray, config: dict,
+    manual_corners: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[np.ndarray | None, int, int, str, dict]:
-    """Como `build_homography`, mas devolve também os metadados de detecção."""
-    corners, reason, meta = _detect_anchor_corners_ex(image, config)
+    """Como `build_homography`, mas devolve também os metadados de detecção.
+
+    `manual_corners` (px, {TL,TR,BR,BL}) tem prioridade sobre a detecção: são os
+    4 cantos da PÁGINA marcados pelo usuário, mapeados para a página canônica.
+    """
     cw, ch = canonical_size(config)
+    if manual_corners is not None:
+        meta = {"method": "manual", "detected": list(CORNERS), "inferred": []}
+        dst_map = _page_rect_dst(cw, ch)
+        src = np.array([manual_corners[c] for c in CORNERS], dtype=np.float32)
+        dst = np.array([dst_map[c] for c in CORNERS], dtype=np.float32)
+        try:
+            M = cv2.getPerspectiveTransform(src, dst)
+        except cv2.error:
+            return None, cw, ch, "Cantos manuais inválidos (não foi possível retificar).", meta
+        return M, cw, ch, "", meta
+
+    corners, reason, meta = _detect_anchor_corners_ex(image, config)
     if corners is None:
         return None, cw, ch, reason, meta
 
@@ -786,11 +833,7 @@ def build_homography_ex(
     # Pontos de destino: as posições médias das âncoras (se houver) ou a
     # página inteira quando o alinhamento veio da borda.
     expected = _expected_corners_px(cfg, cw, ch)
-    if len(expected) == 4:
-        dst_map = expected
-    else:
-        dst_map = {"TL": (0.0, 0.0), "TR": (float(cw), 0.0),
-                   "BR": (float(cw), float(ch)), "BL": (0.0, float(ch))}
+    dst_map = expected if len(expected) == 4 else _page_rect_dst(cw, ch)
 
     src = np.array([corners[c] for c in CORNERS], dtype=np.float32)
     dst = np.array([dst_map[c] for c in CORNERS], dtype=np.float32)
@@ -801,9 +844,12 @@ def build_homography_ex(
     return M, cw, ch, "", meta
 
 
-def build_homography(image: np.ndarray, config: dict) -> tuple[np.ndarray | None, int, int, str]:
+def build_homography(
+    image: np.ndarray, config: dict,
+    manual_corners: dict[str, tuple[float, float]] | None = None,
+) -> tuple[np.ndarray | None, int, int, str]:
     """Matriz foto→canônico + dimensões do alvo. (None, 0, 0, motivo) em falha."""
-    M, cw, ch, reason, _meta = build_homography_ex(image, config)
+    M, cw, ch, reason, _meta = build_homography_ex(image, config, manual_corners)
     return M, cw, ch, reason
 
 
@@ -1342,9 +1388,14 @@ def process_custom_image(
     debug: bool = False,
     overrides: OmrParams | None = None,
     strict_alignment: bool = True,
+    corners: list | None = None,
     diagnostics: dict | None = None,
 ) -> OMRResult | None:
     """Lê um cartão personalizado. None = não foi possível retificar/ler.
+
+    `corners`, se informado, são os 4 cantos (TL, TR, BR, BL) da PÁGINA em
+    coords normalizadas 0..1 — alinhamento MANUAL que substitui a detecção de
+    âncoras (útil em fotos tortas em que o alinhamento automático falha).
 
     `diagnostics`, se fornecido, recebe {"reason", "detail", "alignment"} para
     explicar a falha (None = sucesso).
@@ -1362,11 +1413,20 @@ def process_custom_image(
     p = overrides if overrides is not None else p_base
     adaptive = adaptive or cfg_adaptive
 
+    manual = None
+    if corners:
+        manual = manual_corners_px(corners, image.shape[1], image.shape[0])
+        if manual is None:
+            _fail("manual_corners",
+                  "Cantos manuais inválidos: marque 4 pontos (TL, TR, BR, BL) "
+                  "formando um quadrilátero convexo.")
+            return None
+
     _t0 = _time.perf_counter()
-    M, cw, ch, reason, anchor_meta = build_homography_ex(image, cfg)
+    M, cw, ch, reason, anchor_meta = build_homography_ex(image, cfg, manual_corners=manual)
     t_detect = _time.perf_counter() - _t0
     if M is None:
-        _fail("anchors", reason)
+        _fail("manual_corners" if manual is not None else "anchors", reason)
         return None
 
     _t1 = _time.perf_counter()

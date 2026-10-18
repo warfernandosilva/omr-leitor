@@ -478,6 +478,30 @@ def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
             return None
 
 
+def _parse_manual_corners(raw: str | None) -> list | None:
+    """JSON `[[x,y]×4]` (TL, TR, BR, BL, normalizados 0..1) → lista, ou None.
+
+    Tolerante a lixo: qualquer formato inesperado vira None (o motor decide).
+    """
+    if not raw:
+        return None
+    try:
+        data = _json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(data, list) or len(data) != 4:
+        return None
+    out: list[list[float]] = []
+    for p in data:
+        if not isinstance(p, (list, tuple)) or len(p) != 2:
+            return None
+        try:
+            out.append([float(p[0]), float(p[1])])
+        except (TypeError, ValueError):
+            return None
+    return out
+
+
 def _debug_images(result: OMRResult, want: bool) -> dict | None:
     """Heatmap de diagnóstico (só quando debug=true)."""
     if not want or result.rectified is None or not result.debug_points:
@@ -607,6 +631,7 @@ def process_omr(
     debug: bool = Form(False),  # heatmap de diagnóstico (default off = zero custo)
     client_duration_ms: int | None = Form(None),  # Herby: tempo client-side por foto (diagnóstico)
     custom_template_id: int | None = Form(None),  # obrigatório quando template=custom
+    corners: str | None = Form(None),  # custom: 4 cantos [TL,TR,BR,BL] normalizados (JSON)
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -642,6 +667,7 @@ def process_omr(
         from omr.custom_template import process_custom_image
         diag: dict = {}
         c_result = process_custom_image(image, custom_cfg, adaptive=adaptive, debug=debug,
+                                        corners=_parse_manual_corners(corners),
                                         diagnostics=diag)
         if c_result is None:
             detail = diag.get("detail") or ""

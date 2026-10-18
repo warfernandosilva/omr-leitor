@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { AppView, Exam, StudentResult, isCustomExam, isSaeExam, isSaevExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
@@ -197,6 +197,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // Captura automática por enquadramento
   const [autoMode, setAutoMode] = useState(true);
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
+  // Custom: editor de cantos manuais sobre a prévia (fallback p/ foto torta)
+  const [cornerEdit, setCornerEdit] = useState(false);
   // Layout de captura: grade de terços + painel "Ajustes" (lateral/inline)
   const [showThirds, setShowThirds] = useState(false);
   const [showAdjust, setShowAdjust] = useState(false);
@@ -637,6 +639,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     processOMR(confirmUrl, frames);
   };
 
+  // Custom: lê a prévia travada usando os 4 cantos marcados à mão
+  const confirmManualCorners = (corners: [number, number][]) => {
+    if (!confirmUrl) return;
+    setCornerEdit(false);
+    setCapturedImage(confirmUrl);
+    setConfirmUrl(null);
+    stopCamera();
+    burstFramesRef.current = [];
+    processOMR(confirmUrl, [], corners);
+  };
+
   const retryAutoCapture = () => {
     setConfirmUrl(null);
     setSharpRetry(null);
@@ -688,7 +701,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     reader.readAsDataURL(file);
   };
 
-  const processOMR = async (dataUrl: string, frames: string[] = []) => {
+  const processOMR = async (dataUrl: string, frames: string[] = [], corners?: [number, number][]) => {
     setStep('processing');
     setError(null);
     setStageDone(1); // 1. imagem recebida
@@ -716,7 +729,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         const file = new File([blob], 'card.jpg', { type: 'image/jpeg' });
         result = await apiProcessImage(file, qpsUsado, modoUsado,
                                        isCustom ? 'custom' : templateUsado,
-                                       useAdaptive, debugMode, activeExam?.customTemplateId);
+                                       useAdaptive, debugMode, activeExam?.customTemplateId,
+                                       corners ?? null);
       }
       // 2–5. concluíram no servidor (âncoras, perspectiva, regiões, marcações)
       setStageDone(5);
@@ -1735,21 +1749,33 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           <canvas ref={canvasRef} className="hidden" />
 
           {confirmUrl ? (
-            <div className="flex shrink-0 gap-2 bg-[#051C34] px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <button
-                type="button"
-                onClick={confirmAutoCapture}
-                className="min-h-[52px] flex-1 rounded-xl bg-[#0B6BFB] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0959d6]"
-              >
-                Enviar para correção
-              </button>
-              <button
-                type="button"
-                onClick={retryAutoCapture}
-                className="min-h-[52px] rounded-xl bg-white/10 px-4 text-sm font-medium text-white transition-colors hover:bg-white/20"
-              >
-                Repetir
-              </button>
+            <div className="flex shrink-0 flex-col gap-2 bg-[#051C34] px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+              {isCustom && (
+                <button
+                  type="button"
+                  onClick={() => setCornerEdit(true)}
+                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 text-sm font-medium text-white transition-colors hover:bg-white/20"
+                >
+                  <Focus size={16} aria-hidden />
+                  Ajustar cantos manualmente
+                </button>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={confirmAutoCapture}
+                  className="min-h-[52px] flex-1 rounded-xl bg-[#0B6BFB] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0959d6]"
+                >
+                  Enviar para correção
+                </button>
+                <button
+                  type="button"
+                  onClick={retryAutoCapture}
+                  className="min-h-[52px] rounded-xl bg-white/10 px-4 text-sm font-medium text-white transition-colors hover:bg-white/20"
+                >
+                  Repetir
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-start bg-[#051C34] px-6 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -1814,6 +1840,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 )}
               </div>
             </div>
+          )}
+
+          {cornerEdit && confirmUrl && (
+            <CornerEditor
+              src={confirmUrl}
+              onCancel={() => setCornerEdit(false)}
+              onConfirm={confirmManualCorners}
+            />
           )}
         </div>,
         document.body,
@@ -2683,6 +2717,120 @@ function BatchPanel({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+type Pt = [number, number];
+
+/**
+ * Editor de cantos (Gabarito Personalizado): o usuário arrasta 4 pontos até as
+ * quinas da folha do cartão quando o alinhamento automático falha (foto torta).
+ * Ordem TL, TR, BR, BL em coords normalizadas 0..1 sobre a FOTO capturada.
+ */
+function CornerEditor({
+  src, onCancel, onConfirm,
+}: {
+  src: string;
+  onCancel: () => void;
+  onConfirm: (corners: Pt[]) => void;
+}) {
+  const [pts, setPts] = useState<Pt[]>([[0.05, 0.05], [0.95, 0.05], [0.95, 0.95], [0.05, 0.95]]);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<number | null>(null);
+
+  const move = useCallback((clientX: number, clientY: number) => {
+    const box = boxRef.current;
+    const i = dragRef.current;
+    if (!box || i == null) return;
+    const r = box.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
+    const x = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    const y = Math.min(1, Math.max(0, (clientY - r.top) / r.height));
+    setPts(prev => prev.map((p, j) => (j === i ? [x, y] as Pt : p)));
+  }, []);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => move(e.clientX, e.clientY);
+    const onUp = () => { dragRef.current = null; };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+    };
+  }, [move]);
+
+  const labels = ['Canto superior esquerdo', 'Canto superior direito',
+                  'Canto inferior direito', 'Canto inferior esquerdo'];
+
+  return (
+    <div className="fixed inset-0 z-[90] flex flex-col bg-[#04192E] text-white">
+      <div className="flex shrink-0 items-start justify-between gap-2 px-4 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold leading-tight">Ajustar cantos</h2>
+          <p className="mt-0.5 text-[11px] text-white/70">
+            Arraste os 4 pontos até as quinas da folha do cartão.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="Fechar"
+          className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/10"
+        >
+          <X size={20} aria-hidden />
+        </button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto px-4 pb-2">
+        <div ref={boxRef} className="relative mx-auto w-full max-w-xl touch-none select-none">
+          <img src={src} alt="Foto capturada" className="block w-full rounded-lg" draggable={false} />
+          <svg
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            viewBox="0 0 1 1"
+            preserveAspectRatio="none"
+            aria-hidden
+          >
+            <polygon
+              points={pts.map(p => `${p[0]},${p[1]}`).join(' ')}
+              fill="rgba(11,107,251,0.18)"
+              stroke="#38bdf8"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+          {pts.map((p, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={labels[i]}
+              onPointerDown={(e) => { e.preventDefault(); dragRef.current = i; }}
+              className="absolute h-9 w-9 -translate-x-1/2 -translate-y-1/2 touch-none rounded-full border-2 border-white bg-[#0B6BFB] shadow-lg active:bg-[#0959d6]"
+              style={{ left: `${p[0] * 100}%`, top: `${p[1] * 100}%` }}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 gap-2 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="min-h-[52px] flex-1 rounded-xl bg-white/10 px-4 text-sm font-medium text-white transition-colors hover:bg-white/20"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          onClick={() => onConfirm(pts)}
+          className="min-h-[52px] flex-1 rounded-xl bg-[#0B6BFB] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0959d6]"
+        >
+          Ler com estes cantos
+        </button>
+      </div>
     </div>
   );
 }
