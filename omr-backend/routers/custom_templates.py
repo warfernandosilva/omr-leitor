@@ -469,7 +469,11 @@ def activate_template(tid: int, current_user: User = Depends(auth.get_current_us
             content={"ok": False, "detail": "Corrija os erros antes de ativar.", "issues": issues},
         )
 
-    tpl.version = (tpl.version or 1)
+    tpl.version = int(db.scalar(
+        select(func.max(CustomTemplateVersion.version)).where(
+            CustomTemplateVersion.template_id == tpl.id
+        )
+    ) or 0) + 1
     version = CustomTemplateVersion(
         template_id=tpl.id,
         version=tpl.version,

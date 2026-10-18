@@ -831,3 +831,106 @@ def test_api_test_endpoint_reports_marks_style(authed):
     assert body["success"] is True, body
     assert body["answers"].get("1") == "A" and body["answers"].get("2") == "D"
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# Integração com a prova: versionamento, vínculo e LOTE DE IMPRESSÃO
+# ---------------------------------------------------------------------------
+
+def test_activate_versions_are_monotonic(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Versionado").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+
+    r1 = client.post(f"/api/custom-templates/{tid}/activate")
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["version"] == 1
+
+    # edita o layout e reativa → nova versão imutável (não repete o número)
+    cfg = _config()
+    cfg["questions"][0]["n_questions"] = 3
+    client.put(f"/api/custom-templates/{tid}", json={"config": cfg})
+    r2 = client.post(f"/api/custom-templates/{tid}/activate")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["version"] == 2
+    assert r2.json()["version_id"] != r1.json()["version_id"]
+
+    versions = client.get(f"/api/custom-templates/{tid}/versions").json()["versions"]
+    assert [v["version"] for v in versions] == [2, 1]
+    # o snapshot da v1 preserva o layout antigo (5 questões), a v2 tem 3
+    assert versions[1]["summary"]["n_questions"] == 5
+    assert versions[0]["summary"]["n_questions"] == 3
+    assert client.get(f"/api/custom-templates/{tid}").json()["version"] == 2
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def _exam_with_custom_template(client, ext: str, alunos: tuple[str, ...]) -> int:
+    client.post("/api/exams/sync", json={"external_id": ext, "titulo": f"Prova {ext}"})
+    tid = _create(client, _png_bytes(_make_card({})), f"Cartão {ext}",
+                  avaliacao_external_id=ext).json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+    return tid
+
+
+def test_generate_gabaritos_binds_active_version(authed, db_session):
+    client = authed
+    from models import Aluno, Avaliacao, GabaritoNomeado
+
+    tid = _exam_with_custom_template(client, "ex-custom-ver", ("Ana", "Bia"))
+    db = db_session()
+    try:
+        av = db.query(Avaliacao).filter(Avaliacao.external_id == "ex-custom-ver").one()
+        for i, nome in enumerate(("Ana", "Bia"), start=1):
+            db.add(Aluno(avaliacao_id=av.id, nome=nome, matricula=f"10{i}"))
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.post("/api/exams/ex-custom-ver/gabaritos/generate")
+    assert r.status_code == 200, r.text
+    assert r.json()["total_gabaritos"] == 2
+
+    active_vid = client.get(f"/api/custom-templates/{tid}/versions").json()["versions"][0]["id"]
+    db = db_session()
+    try:
+        vids = {g.custom_template_version_id for g in db.query(GabaritoNomeado).all()}
+        assert vids == {active_vid}, "cada cartão emitido referencia a versão ativa"
+    finally:
+        db.close()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_exam_batch_pdf_uses_custom_template(authed, db_session, monkeypatch):
+    """Regressão: o lote da prova deve sair no cartão do MODELO, não no nativo."""
+    client = authed
+    from models import Aluno, Avaliacao
+
+    tid = _exam_with_custom_template(client, "ex-custom-pdf", ("Ana", "Bia", "Caio"))
+    db = db_session()
+    try:
+        av = db.query(Avaliacao).filter(Avaliacao.external_id == "ex-custom-pdf").one()
+        for i, nome in enumerate(("Ana", "Bia", "Caio"), start=1):
+            db.add(Aluno(avaliacao_id=av.id, nome=nome, matricula=f"10{i}"))
+        db.commit()
+    finally:
+        db.close()
+
+    assert client.post("/api/exams/ex-custom-pdf/gabaritos/generate").status_code == 200
+
+    calls: dict = {}
+    import main
+    real = main._custom_batch_pdf
+
+    def spy(db_, av_, gabaritos_, out_):
+        calls["n"] = len(gabaritos_)
+        return real(db_, av_, gabaritos_, out_)
+
+    monkeypatch.setattr(main, "_custom_batch_pdf", spy)
+
+    r = client.post("/api/exams/ex-custom-pdf/gabaritos/pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert calls.get("n") == 3, "lote deve passar pelo renderizador do modelo personalizado"
+    assert len(r.content) > 2000
+    client.delete(f"/api/custom-templates/{tid}")

@@ -524,6 +524,22 @@ def _load_custom_config(db: Session, tid: int, user: User) -> dict | None:
     return tpl.config or {}
 
 
+def _custom_active_version_id(db: Session, av: "Avaliacao") -> int | None:
+    """Id do snapshot (CustomTemplateVersion) ativo do Gabarito Personalizado da prova."""
+    if av.custom_template_id is None:
+        return None
+    from models import CustomTemplate, CustomTemplateVersion
+    tpl = db.get(CustomTemplate, av.custom_template_id)
+    if tpl is None:
+        return None
+    return db.scalar(
+        select(CustomTemplateVersion.id).where(
+            CustomTemplateVersion.template_id == tpl.id,
+            CustomTemplateVersion.version == tpl.version,
+        )
+    )
+
+
 def _custom_process_response(result: OMRResult, debug: bool, tid: int) -> "ProcessResponse":
     """Resposta do /api/omr/process para template='custom'."""
     total = len(result.answers) + len(result.blank_questions) + len(result.duplicate_questions)
@@ -1399,6 +1415,10 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
         for g in db.scalars(select(GabaritoNomeado).where(GabaritoNomeado.avaliacao_id == av.id)).all()
     }
 
+    # Gabarito Personalizado: cada cartão emitido referencia a versão ATIVA,
+    # para que editar o layout depois não corrompa cartões já impressos.
+    custom_version_id = _custom_active_version_id(db, av)
+
     novos = 0
     # Herby: magic link do cabeçalho segue a base cadastrada na prova
     herby_base = ""
@@ -1422,6 +1442,8 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
             db.flush()
             novos += 1
         g.numero_pagina = idx
+        if custom_version_id is not None and g.custom_template_version_id is None:
+            g.custom_template_version_id = custom_version_id
         if herby_base and not g.magic_link:
             from omr.template_herby import herby_magic_link
             g.magic_link = herby_magic_link(g.codigo_unico, herby_base)
@@ -1449,6 +1471,57 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
         "novos_gabaritos": novos,
         "gabaritos": [g.to_dict() for g in gabaritos],
     }
+
+
+def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> int:
+    """Imprime o cartão do Gabarito Personalizado no out_buf (1 página por cartão).
+
+    Usa a config da VERSÃO vinculada aos gabaritos (fallback: config atual) e o
+    `codigo_unico` de cada um no QR. Sem isto, o lote de uma prova personalizada
+    sairia no cartão NATIVO e a leitura/correção por QR não casaria com o modelo.
+    """
+    from models import CustomTemplate, CustomTemplateVersion
+    from omr.custom_template import render_overlay
+    from routers.custom_templates import _load_image
+
+    tpl = db.get(CustomTemplate, av.custom_template_id)
+    if tpl is None:
+        raise HTTPException(status_code=404, detail="Gabarito personalizado vinculado não encontrado")
+    base = _load_image(tpl)
+    if base is None:
+        raise HTTPException(status_code=404, detail="Imagem do gabarito personalizado não encontrada")
+
+    cfg = tpl.config or {}
+    vid = next((g.custom_template_version_id for g in gabaritos if g.custom_template_version_id), None)
+    if vid is not None:
+        ver = db.get(CustomTemplateVersion, vid)
+        if ver is not None and ver.config:
+            cfg = ver.config
+
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas as pdf_canvas
+
+    c = pdf_canvas.Canvas(out_buf, pagesize=A4)
+    w_pt, h_pt = A4
+    drawn = 0
+    for g in gabaritos:
+        aluno = g.aluno
+        fields = {
+            "student_name": (aluno.nome if aluno else "") or "",
+            "matricula": (aluno.matricula if aluno else "") or "",
+            "turma": (av.turma or "") or "",
+            "exam_title": av.titulo or "",
+        }
+        img = render_overlay(cfg, base, fields=fields, qr_payload=g.codigo_unico)
+        ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if not ok:
+            continue
+        c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), 0, 0, width=w_pt, height=h_pt)
+        c.showPage()
+        drawn += 1
+    c.save()
+    return drawn
 
 
 @app.post("/api/exams/{external_id}/gabaritos/pdf")
@@ -1531,6 +1604,9 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
     elif (av.template or "padrao") == "simulado":
         # Cartao Simulado: sem identificacao impressa, copia identica por aluno
         pages_drawn = build_simulado_batch_pdf(registros, out_buf)
+    elif (av.template or "padrao") == "custom" and av.custom_template_id:
+        # Gabarito Personalizado: cartao do modelo vinculado, 1 por aluno
+        pages_drawn = _custom_batch_pdf(db, av, list(gabaritos), out_buf)
     else:
         pages_drawn = build_batch_pdf(
             registros, av.subject_lp, av.subject_mat, out_buf,
