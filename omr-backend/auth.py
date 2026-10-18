@@ -29,7 +29,9 @@ SECRET_KEY = _get_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 72
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# auto_error=False: sem header Authorization o token vira None e a decisão
+# (401 padrão ou bypass de dev) fica em get_current_user.
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -50,12 +52,36 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
+def dev_anonymous_enabled() -> bool:
+    """Bypass de autenticação SÓ para desenvolvimento local (nunca em produção).
+
+    Liga com `OMR_DEV_ANONYMOUS=1` (ver .env.example). É SEMPRE ignorado quando
+    `OMR_ENV=production`, para que um env vazado não abra o sistema em produção.
+    """
+    if os.environ.get("OMR_ENV", "development") == "production":
+        return False
+    return os.environ.get("OMR_DEV_ANONYMOUS", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _dev_anonymous_user() -> models.User:
+    """Usuário admin sintético (transiente, não persistido) do modo dev anônimo."""
+    return models.User(id=1, email="dev@clone.local", nome="Desenvolvedor",
+                       role="admin", is_active=True)
+
+
+def get_current_user(
+    token: str | None = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> models.User:
+    if dev_anonymous_enabled():
+        return _dev_anonymous_user()
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token inválido ou expirado",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    if not token:
+        raise credentials_exception
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str | None = payload.get("sub")
