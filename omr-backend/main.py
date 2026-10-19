@@ -1398,6 +1398,51 @@ def import_students(external_id: str, req: ImportStudentsRequest, db: Session = 
     }
 
 
+def _alunos_da_turma(db: Session, avaliacao_id: int, turma_id: int) -> list[Aluno]:
+    """Alunos da prova que pertencem ao catálogo da turma.
+
+    Casa pela proveniência (`origem_turma_aluno_id`) e também pelas mesmas
+    chaves usadas na deduplicação da materialização (matrícula/identificador
+    externo): um aluno já existente na prova que foi reaproveitado por outra
+    turma conta para esta também.
+    """
+    catalogo = db.scalars(
+        select(TurmaAluno).where(TurmaAluno.turma_id == turma_id)
+    ).all()
+    if not catalogo:
+        return []
+    ids = {c.id for c in catalogo}
+    matriculas = {c.matricula for c in catalogo if c.matricula}
+    identifs = {c.identificador_externo for c in catalogo if c.identificador_externo}
+    alunos = db.scalars(
+        select(Aluno).where(Aluno.avaliacao_id == avaliacao_id).order_by(Aluno.id)
+    ).all()
+    return [
+        a for a in alunos
+        if (
+            a.origem_turma_aluno_id in ids
+            or (a.matricula and a.matricula in matriculas)
+            or (a.identificador_externo and a.identificador_externo in identifs)
+        )
+    ]
+
+
+def _turma_scope(db: Session, av: Avaliacao, turma_id: int | None,
+                 current_user: User) -> set[int] | None:
+    """IDs dos alunos da prova que pertencem à turma (None = sem filtro).
+
+    Usado por gerar/PDF/listar para que "gabaritos da turma X" não misture
+    alunos materializados de outras turmas na mesma prova.
+    """
+    if turma_id is None:
+        return None
+    turma = db.get(Turma, turma_id)
+    if turma is None:
+        raise HTTPException(status_code=404, detail="Turma não encontrada")
+    auth.require_turma_owner_or_admin(turma, current_user)
+    return {a.id for a in _alunos_da_turma(db, av.id, turma_id)}
+
+
 class FromTurmaRequest(BaseModel):
     turma_id: int
 
@@ -1474,12 +1519,19 @@ def materialize_from_turma(external_id: str, req: FromTurmaRequest, db: Session 
 
 
 @app.post("/api/exams/{external_id}/gabaritos/generate")
-def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+def generate_gabaritos(external_id: str, turma_id: int | None = None,
+                       db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """
-    Cria os GabaritosNomeados persistentes para todos os alunos da avaliação.
+    Cria os GabaritosNomeados persistentes para os alunos da avaliação.
+
+    `turma_id` (opcional) restringe o lote aos alunos daquela turma — é o que
+    a tela "Cartões por lista" usa ao gerar "gabaritos da turma": sem o filtro,
+    alunos de turmas anteriores (já materializados na mesma prova) entrariam
+    no PDF.
 
     Idempotente: aluno com gabarito existente mantém o mesmo codigo_unico.
-    Valida antes de retornar: todos os alunos possuem gabarito + código único.
+    Valida antes de retornar: todos os alunos do escopo possuem gabarito +
+    código único.
     """
     av = _get_avaliacao(db, external_id)
     auth.require_owner_or_admin(av, current_user)
@@ -1489,6 +1541,19 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
 
     if not alunos:
         raise HTTPException(status_code=400, detail="Avaliação sem alunos importados")
+
+    escopo = _turma_scope(db, av, turma_id, current_user)
+    if escopo is None:
+        alvo = alunos
+    else:
+        alvo = [a for a in alunos if a.id in escopo]
+        if not alvo:
+            raise HTTPException(
+                status_code=400,
+                detail=("Nenhum aluno desta turma está na prova. Materialize o "
+                        "catálogo da turma antes de gerar os gabaritos."),
+            )
+    alvo_ids = {a.id for a in alvo}
 
     existentes = {
         g.aluno_id: g
@@ -1504,7 +1569,11 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
     herby_base = ""
     if (av.template or "padrao") == "herby":
         herby_base = (dict(getattr(av, "herby_spec", None) or {}).get("magic_base") or "").strip()
+    # A numeração é global na prova (não reinicia ao gerar por turma), para
+    # não colidir com cartões de outras turmas já emitidos.
     for idx, aluno in enumerate(alunos, start=1):
+        if aluno.id not in alvo_ids:
+            continue
         g = existentes.get(aluno.id)
         if g is None:
             codigo = _next_codigo(db)
@@ -1532,23 +1601,27 @@ def generate_gabaritos(external_id: str, db: Session = Depends(get_db), current_
 
     # ─── Validação obrigatória (§10) ───
     gabaritos = db.scalars(
-        select(GabaritoNomeado).where(GabaritoNomeado.avaliacao_id == av.id).order_by(GabaritoNomeado.numero_pagina)
+        select(GabaritoNomeado)
+        .where(GabaritoNomeado.avaliacao_id == av.id,
+               GabaritoNomeado.aluno_id.in_(alvo_ids))
+        .order_by(GabaritoNomeado.numero_pagina)
     ).all()
     codigos = {g.codigo_unico for g in gabaritos}
-    if not (len(gabaritos) == len(alunos) == len(codigos)):
+    if not (len(gabaritos) == len(alvo) == len(codigos)):
         raise HTTPException(
             status_code=500,
             detail=(
-                f"Validação falhou: {len(alunos)} alunos, {len(gabaritos)} gabaritos, "
+                f"Validação falhou: {len(alvo)} alunos, {len(gabaritos)} gabaritos, "
                 f"{len(codigos)} códigos únicos."
             ),
         )
 
     return {
         "avaliacao_id": av.id,
-        "total_alunos": len(alunos),
+        "total_alunos": len(alvo),
         "total_gabaritos": len(gabaritos),
         "novos_gabaritos": novos,
+        "turma_id": turma_id,
         "gabaritos": [g.to_dict() for g in gabaritos],
     }
 
@@ -1609,10 +1682,13 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
 
 
 @app.post("/api/exams/{external_id}/gabaritos/pdf")
-def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+def generate_gabaritos_pdf(external_id: str, turma_id: int | None = None,
+                           db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """
     Gera o PDF oficial a partir dos registros PERSISTIDOS no banco (§11).
     Nunca a partir de listas temporárias do frontend.
+
+    `turma_id` (opcional) imprime só os cartões dos alunos daquela turma.
     """
     av = _get_avaliacao(db, external_id)
     auth.require_owner_or_admin(av, current_user)
@@ -1626,9 +1702,20 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
         .where(GabaritoNomeado.avaliacao_id == av.id)
         .order_by(GabaritoNomeado.numero_pagina)
     ).all()
-    alunos_count = db.scalar(
-        select(func.count()).select_from(Aluno).where(Aluno.avaliacao_id == av.id)
-    )
+    escopo = _turma_scope(db, av, turma_id, current_user)
+    if escopo is None:
+        alunos_count = db.scalar(
+            select(func.count()).select_from(Aluno).where(Aluno.avaliacao_id == av.id)
+        )
+    else:
+        if not escopo:
+            raise HTTPException(
+                status_code=400,
+                detail=("Nenhum aluno desta turma está na prova. Materialize o "
+                        "catálogo da turma antes de gerar o PDF."),
+            )
+        gabaritos = [g for g in gabaritos if g.aluno_id in escopo]
+        alunos_count = len(escopo)
     codigos = {g.codigo_unico for g in gabaritos}
 
     # ─── §10: alunos persistidos = gabaritos = códigos únicos ───
@@ -1717,8 +1804,13 @@ def generate_gabaritos_pdf(external_id: str, db: Session = Depends(get_db), curr
 
 
 @app.get("/api/exams/{external_id}/gabaritos")
-def list_gabaritos(external_id: str, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    """Tela de gerenciamento: alunos + gabaritos + status (§21)."""
+def list_gabaritos(external_id: str, turma_id: int | None = None,
+                   db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    """Tela de gerenciamento: alunos + gabaritos + status (§21).
+
+    `turma_id` (opcional) mostra só os alunos/gabaritos da turma — usado pelo
+    painel de conclusão da geração por turma.
+    """
     av = _get_avaliacao(db, external_id)
     auth.require_owner_or_admin(av, current_user)
     gabaritos = db.scalars(
@@ -1726,12 +1818,18 @@ def list_gabaritos(external_id: str, db: Session = Depends(get_db), current_user
         .where(GabaritoNomeado.avaliacao_id == av.id)
         .order_by(GabaritoNomeado.numero_pagina)
     ).all()
-    alunos_sem_gabarito = db.scalar(
+    escopo = _turma_scope(db, av, turma_id, current_user)
+    if escopo is not None:
+        gabaritos = [g for g in gabaritos if g.aluno_id in escopo]
+    sem_gabarito_q = (
         select(func.count())
         .select_from(Aluno)
         .outerjoin(GabaritoNomeado, GabaritoNomeado.aluno_id == Aluno.id)
         .where(Aluno.avaliacao_id == av.id, GabaritoNomeado.id.is_(None))
-    ) or 0
+    )
+    if escopo is not None:
+        sem_gabarito_q = sem_gabarito_q.where(Aluno.id.in_(escopo))
+    alunos_sem_gabarito = db.scalar(sem_gabarito_q) or 0
 
     lidos = sum(1 for g in gabaritos if g.status in (GabaritoNomeado.STATUS_LIDO, GabaritoNomeado.STATUS_CORRIGIDO))
     corrigidos = sum(1 for g in gabaritos if g.status == GabaritoNomeado.STATUS_CORRIGIDO)

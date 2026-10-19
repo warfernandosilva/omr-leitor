@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   syncExam, listTurmas, createTurma, getTurma, renameTurma,
   deleteTurma, importTurmaAlunos, materializeFromTurma,
+  generateGabaritos, generateGabaritosPDF, fetchGabaritos,
 } from './api';
 
 interface Captured {
@@ -133,5 +134,24 @@ describe('cliente de turmas', () => {
     nextStatus = 400;
     nextPayload = { detail: 'Turma sem alunos no catálogo' };
     await expect(materializeFromTurma('ex-1', 2)).rejects.toThrow('Turma sem alunos no catálogo');
+  });
+
+  it('gerar/PDF/listar por turma enviam turma_id (não mistura outras turmas)', async () => {
+    stubFetch();
+    nextPayload = { avaliacao_id: 1, total_alunos: 2, total_gabaritos: 2, novos_gabaritos: 2 };
+    await generateGabaritos('ex-1', 7);
+    expect(captured[0].url).toMatch(/\/api\/exams\/ex-1\/gabaritos\/generate\?turma_id=7$/);
+
+    await generateGabaritosPDF('ex-1', 7);
+    expect(captured[1].url).toMatch(/\/api\/exams\/ex-1\/gabaritos\/pdf\?turma_id=7$/);
+
+    nextPayload = { avaliacao: {}, stats: {}, gabaritos: [] };
+    await fetchGabaritos('ex-1', 7);
+    expect(captured[2].url).toMatch(/\/api\/exams\/ex-1\/gabaritos\?turma_id=7$/);
+
+    // sem turma mantém o comportamento anterior (todos os alunos da prova)
+    nextPayload = { avaliacao_id: 1, total_alunos: 3, total_gabaritos: 3, novos_gabaritos: 0 };
+    await generateGabaritos('ex-1');
+    expect(captured[3].url).toMatch(/\/gabaritos\/generate$/);
   });
 });

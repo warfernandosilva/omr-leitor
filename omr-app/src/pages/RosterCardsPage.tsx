@@ -263,14 +263,16 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       saveExam(examToSync, userId);
       setStage(`Materializando ${turmaDetail.alunos.length} aluno(s) da turma "${turmaDetail.nome}"...`);
       const mat = await materializeFromTurma(sync.external_id, turmaDetail.id);
-      setStage('Gerando gabaritos e códigos únicos...');
-      await generateGabaritos(sync.external_id);
-      setStage(`Gerando PDF com ${mat.total_alunos} páginas a partir do banco...`);
-      const blob = await generateGabaritosPDF(sync.external_id);
+      setStage(`Turma sincronizada (${mat.materializados} novo(s), ${mat.reaproveitados} reaproveitado(s)). Gerando gabaritos...`);
+      // O lote é filtrado pela turma: uma prova que já recebeu alunos de
+      // outras turmas não pode imprimir os nomes delas neste PDF.
+      const gen = await generateGabaritos(sync.external_id, turmaDetail.id);
+      setStage(`Gerando PDF com ${gen.total_alunos} páginas a partir do banco...`);
+      const blob = await generateGabaritosPDF(sync.external_id, turmaDetail.id);
       const pdfText = await blob.text();
       const pages = countPdfPages(pdfText);
-      if (pages !== mat.total_alunos) {
-        throw new Error(`Validação falhou: ${mat.total_alunos} alunos na prova, ${pages} páginas no PDF. O arquivo NÃO foi disponibilizado.`);
+      if (pages !== gen.total_alunos) {
+        throw new Error(`Validação falhou: ${gen.total_alunos} alunos na turma, ${pages} páginas no PDF. O arquivo NÃO foi disponibilizado.`);
       }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -283,7 +285,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       setTimeout(() => URL.revokeObjectURL(url), 5000);
       let lista: Awaited<ReturnType<typeof fetchGabaritos>> | null = null;
       try {
-        lista = await fetchGabaritos(sync.external_id);
+        lista = await fetchGabaritos(sync.external_id, turmaDetail.id);
       } catch { /* painel de detalhe opcional */ }
       const alunosPersistidos = lista?.gabaritos.map(g => ({ id: g.aluno.id, nome: g.aluno.nome, matricula: g.aluno.matricula })) ?? [];
       const codigos = lista?.gabaritos.map(g => g.codigo_unico) ?? [];

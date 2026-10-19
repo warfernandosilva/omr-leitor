@@ -657,8 +657,9 @@ export interface GenerateGabaritosResult {
   novos_gabaritos: number;
 }
 
-export async function generateGabaritos(examExternalId: string): Promise<GenerateGabaritosResult> {
-  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/generate`, {
+export async function generateGabaritos(examExternalId: string, turmaId?: number): Promise<GenerateGabaritosResult> {
+  const qs = turmaId != null ? `?turma_id=${turmaId}` : '';
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/generate${qs}`, {
     method: 'POST',
     headers: authHeaders(),
   });
@@ -670,8 +671,9 @@ export async function generateGabaritos(examExternalId: string): Promise<Generat
   return res.json();
 }
 
-export async function generateGabaritosPDF(examExternalId: string): Promise<Blob> {
-  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/pdf`, {
+export async function generateGabaritosPDF(examExternalId: string, turmaId?: number): Promise<Blob> {
+  const qs = turmaId != null ? `?turma_id=${turmaId}` : '';
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos/pdf${qs}`, {
     method: 'POST',
     headers: authHeaders(),
   }, 120000);
@@ -683,8 +685,9 @@ export async function generateGabaritosPDF(examExternalId: string): Promise<Blob
   return res.blob();
 }
 
-export async function fetchGabaritos(examExternalId: string): Promise<GabaritosListResult> {
-  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos`, {
+export async function fetchGabaritos(examExternalId: string, turmaId?: number): Promise<GabaritosListResult> {
+  const qs = turmaId != null ? `?turma_id=${turmaId}` : '';
+  const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/gabaritos${qs}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error(`Falha ao consultar gabaritos (${res.status})`);

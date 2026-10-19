@@ -148,6 +148,53 @@ def test_from_turma_materializa_e_idempotente(isolated, client, db_session):
     assert gen.json()["total_gabaritos"] == 3
 
 
+def test_gerar_da_turma_nao_mistura_outras_turmas(isolated, client):
+    """Trocar de turma não pode imprimir nomes da turma anterior.
+
+    Reproduz a tela "Cartões por lista": a prova já tinha alunos da turma A;
+    ao gerar pela turma B, só os alunos de B entram no lote/PDF.
+    """
+    c = _authed(client)
+    ta = _cria_turma(c, "Turma A")
+    tb = _cria_turma(c, "Turma B")
+    c.post(f"/api/turmas/{ta['id']}/alunos/import", json={"alunos": [
+        {"nome": "Ana de A", "matricula": "a1"},
+        {"nome": "Beto de A", "matricula": "a2"},
+    ]})
+    c.post(f"/api/turmas/{tb['id']}/alunos/import", json={"alunos": [
+        {"nome": "Caio de B", "matricula": "b1"},
+    ]})
+    c.post("/api/exams/sync", json={"external_id": "ex-turma-mix", "titulo": "Mix"})
+
+    # 1ª geração: turma A (sem filtro = todos os alunos da prova)
+    c.post("/api/exams/ex-turma-mix/students/from-turma", json={"turma_id": ta["id"]})
+    gen_a = c.post("/api/exams/ex-turma-mix/gabaritos/generate")
+    assert gen_a.json()["total_gabaritos"] == 2
+
+    # troca para a turma B e gera SÓ a turma B
+    c.post("/api/exams/ex-turma-mix/students/from-turma", json={"turma_id": tb["id"]})
+    gen_b = c.post(f"/api/exams/ex-turma-mix/gabaritos/generate?turma_id={tb['id']}")
+    assert gen_b.status_code == 200, gen_b.text
+    j = gen_b.json()
+    assert j["total_alunos"] == 1 and j["total_gabaritos"] == 1, j
+    assert [g["aluno"]["nome"] for g in j["gabaritos"]] == ["Caio de B"], j
+
+    # PDF filtrado: 1 página (apenas a turma B)
+    pdf = c.post(f"/api/exams/ex-turma-mix/gabaritos/pdf?turma_id={tb['id']}")
+    assert pdf.status_code == 200, pdf.text
+    pages = pdf.content.count(b"/Type /Page") - pdf.content.count(b"/Type /Pages")
+    assert pages == 1, f"PDF da turma B deve ter 1 página, veio {pages}"
+
+    # lista filtrada: só B (painel de conclusão)
+    lst = c.get(f"/api/exams/ex-turma-mix/gabaritos?turma_id={tb['id']}")
+    assert lst.status_code == 200, lst.text
+    nomes = [g["aluno"]["nome"] for g in lst.json()["gabaritos"]]
+    assert nomes == ["Caio de B"], nomes
+
+    # sem filtro, o comportamento legado continua: os 3 alunos
+    assert c.get("/api/exams/ex-turma-mix/gabaritos").json()["stats"]["gabaritos_gerados"] == 3
+
+
 def test_from_turma_vazia_ou_inexistente(isolated, client):
     c = _authed(client)
     c.post("/api/exams/sync", json={"external_id": "ex-turma-vazia", "titulo": "V"})
