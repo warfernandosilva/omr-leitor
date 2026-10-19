@@ -549,12 +549,20 @@ def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
 def _load_custom_config(db: Session, tid: int, user: User) -> dict | None:
     """Config normalizada do Gabarito Personalizado (com checagem de acesso)."""
     from models import CustomTemplate
+    from omr.custom_template import image_size_from_path, normalize_config
     tpl = db.get(CustomTemplate, tid)
     if tpl is None:
         return None
     if tpl.owner_id is not None and tpl.owner_id != user.id and user.role != "admin":
         return None
-    return tpl.config or {}
+    cfg = normalize_config(tpl.config or {})
+    # O arquivo é a fonte de verdade: `page_w/page_h` defasados mudam o
+    # aspecto canônico e degradam (ou desalinham) a leitura. As coordenadas
+    # são normalizadas, então corrigir só as dimensões é seguro.
+    real = image_size_from_path(tpl.image_path)
+    if real is not None:
+        cfg["page_w"], cfg["page_h"] = real
+    return cfg
 
 
 def _custom_active_version_id(db: Session, av: "Avaliacao") -> int | None:

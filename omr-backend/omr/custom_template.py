@@ -28,6 +28,8 @@ absoluto reescalada para a mesma faixa do estilo "filled".
 from __future__ import annotations
 
 import math
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -675,6 +677,35 @@ def _corner_by_quadrant(x: float, y: float) -> str:
     return "BL"
 
 
+@lru_cache(maxsize=64)
+def _cached_image_size(path: str, mtime_ns: int, size: int) -> tuple[int, int] | None:
+    try:
+        img = cv2.imread(path)
+    except Exception:
+        return None
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    return int(w), int(h)
+
+
+def image_size_from_path(path: str | None) -> tuple[int, int] | None:
+    """Dimensões reais (w, h) do arquivo de imagem, com cache por mtime/tamanho.
+
+    `page_w/page_h` da config pode ficar defasado quando a imagem é trocada
+    fora do fluxo da API; o arquivo é a fonte de verdade. O cache evita
+    decodificar a imagem inteira a cada requisição.
+    """
+    if not path:
+        return None
+    try:
+        p = Path(path)
+        st = p.stat()
+    except OSError:
+        return None
+    return _cached_image_size(str(p), st.st_mtime_ns, st.st_size)
+
+
 def canonical_size(config: dict) -> tuple[int, int]:
     cfg = normalize_config(config)
     w = max(1, int(cfg["page_w"] or 1))
@@ -873,6 +904,18 @@ def _is_convex_quad(pts: list[tuple[float, float]]) -> bool:
     return all(s > 0 for s in signs) or all(s < 0 for s in signs)
 
 
+def _valid_homography(M: np.ndarray | None) -> bool:
+    """Matriz de perspectiva utilizável (finita e não degenerada)."""
+    if M is None or M.shape != (3, 3):
+        return False
+    try:
+        if not bool(np.isfinite(M).all()):
+            return False
+        return abs(float(np.linalg.det(M))) > 1e-12
+    except (ValueError, np.linalg.LinAlgError):
+        return False
+
+
 def manual_corners_px(
     corners: list, w: int, h: int
 ) -> dict[str, tuple[float, float]] | None:
@@ -906,18 +949,28 @@ def _page_rect_dst(cw: int, ch: int) -> dict[str, tuple[float, float]]:
 
 def _page_corners_dst(cfg: dict, cw: int, ch: int
                       ) -> dict[str, tuple[float, float]] | None:
-    """Destino canônico a partir de `page_corners` (folha dentro do modelo)."""
+    """Destino canônico a partir de `page_corners` (folha dentro do modelo).
+
+    Só aceita 4 pontos normalizados (0..1) formando um quadrilátero convexo.
+    Um "X" arrastado no editor geraria uma homografia sem sentido — nesse
+    caso o chamador cai para a página inteira.
+    """
     pc = cfg.get("page_corners")
     if not isinstance(pc, list) or len(pc) != 4:
         return None
-    dst: dict[str, tuple[float, float]] = {}
-    for i, corner in enumerate(CORNERS):
-        p = pc[i]
+    pts: list[tuple[float, float]] = []
+    for p in pc:
         try:
-            dst[corner] = (float(p["x"]) * cw, float(p["y"]) * ch)
+            x, y = float(p["x"]), float(p["y"])
         except (KeyError, TypeError, ValueError):
             return None
-    return dst
+        if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+            return None
+        pts.append((x, y))
+    if not _is_convex_quad(pts):
+        return None
+    return {corner: (pts[i][0] * cw, pts[i][1] * ch)
+            for i, corner in enumerate(CORNERS)}
 
 
 def _infer_missing_corner(
@@ -1077,17 +1130,22 @@ def detect_anchor_corners(image: np.ndarray, config: dict) -> tuple[dict[str, tu
     return corners, reason
 
 
-def _corners_from_anchors(config: dict) -> dict[str, tuple[float, float]] | None:
+def _corners_from_anchors(config: dict, page: int | None = None
+                          ) -> dict[str, tuple[float, float]] | None:
     """Cantos da folha (NORMALIZADOS 0..1) a partir dos 4 marcadores de canto.
 
     Em modelos personalizados a folha costuma ser delimitada pelos marcadores
     (e não por uma borda visível). Só devolve quando os 4 cantos TL/TR/BR/BL
-    estão presentes.
+    estão presentes. Com `page`, considera apenas as âncoras daquela página.
     """
     cfg = normalize_config(config)
+    anchors = cfg["anchors"]
+    if page is not None:
+        idx = int(page)
+        anchors = [a for a in anchors if int(a.get("page") or 0) == idx]
     out: dict[str, tuple[float, float]] = {}
-    for a in cfg["anchors"]:
-        corner = a.get("corner") or _infer_corner(cfg["anchors"], a.get("id"))
+    for a in anchors:
+        corner = a.get("corner") or _infer_corner(anchors, a.get("id"))
         if corner in CORNERS and corner not in out:
             out[corner] = (float(a["x"]), float(a["y"]))
     if len(out) != 4:
@@ -1096,31 +1154,49 @@ def _corners_from_anchors(config: dict) -> dict[str, tuple[float, float]] | None
 
 
 def detect_page_corners_ex(image: np.ndarray,
-                           config: dict | None = None
+                           config: dict | None = None,
+                           page: int | None = None
                            ) -> tuple[list[dict] | None, bool]:
     """Cantos da folha normalizados (0..1) + flag `inferred`.
 
     Prioridade: (1) marcadores de canto configurados; (2) maior quadrilátero
     que contém os blocos de bolhas; (3) borda da página. Se nada for detectado
     devolve os cantos da imagem com `inferred=True` (a UI avisa para ajustar).
+
+    `page` restringe as âncoras/blocos considerados (modelos multi-página).
+    Sem blocos que validem a região, um quadrilátero que ocupa menos de 20%
+    do frame é marcado como `inferred=True` (estimativa de baixa confiança):
+    é o caso típico de uma coluna de conteúdo confundida com a folha.
     """
     if image is None:
         return None, False
     h, w = image.shape[:2]
 
-    norm = _corners_from_anchors(config) if config else None
+    norm = _corners_from_anchors(config, page=page) if config else None
     if norm is not None:
         return ([{"x": _clamp01(norm[c][0]), "y": _clamp01(norm[c][1])}
                  for c in CORNERS], False)
 
+    cfg = normalize_config(config) if config else None
+    if cfg is not None and page is not None:
+        cfg["anchors"] = [a for a in cfg["anchors"] if int(a.get("page") or 0) == int(page)]
+        cfg["questions"] = [q for q in cfg["questions"] if int(q.get("page") or 0) == int(page)]
+
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-    corners = _detect_page_corners(gray, config)
+    corners = _detect_page_corners(gray, cfg)
     inferred = False
     if corners is None:
         # Último recurso: a folha preenchendo o frame.
         corners = {"TL": (0.0, 0.0), "TR": (float(w), 0.0),
                    "BR": (float(w), float(h)), "BL": (0.0, float(h))}
         inferred = True
+    elif not (cfg and cfg.get("questions")):
+        # Sem blocos para confirmar a região: exige uma folha que ocupe uma
+        # fração relevante do frame; senão é estimativa (não "detecção").
+        pts = [corners[c] for c in CORNERS]
+        area = _quad_area(pts) / float(max(1, w * h))
+        if area < 0.20:
+            inferred = True
     out = [{"x": _clamp01(corners[c][0] / w), "y": _clamp01(corners[c][1] / h)}
            for c in CORNERS]
     return out, inferred
@@ -1147,12 +1223,16 @@ def detect_page_corners(image: np.ndarray,
             for c in CORNERS]
 
 
-def detect_anchors_auto(image: np.ndarray, page: int = 0) -> list[dict]:
+def detect_anchors_auto(image: np.ndarray, page: int = 0,
+                        config: dict | None = None) -> list[dict]:
     """Detecta até 4 âncoras de canto e devolve configs normalizadas.
 
     Cascata: ArUco (ids detectados) → quadrados (cantos da imagem) → borda da
     página. Cada âncora vem centralizada (x, y = centro do marcador) com
     tamanho estimado. Rótulo de canto (TL/TR/BR/BL) atribuído por quadrante.
+
+    `config`, quando informada, ajuda o fallback de borda a escolher o
+    quadrilátero que contém os blocos de bolhas (evita pegar uma coluna).
 
     Usado pelo editor para popular a configuração automaticamente a partir da
     imagem importada.
@@ -1236,14 +1316,14 @@ def detect_anchors_auto(image: np.ndarray, page: int = 0) -> list[dict]:
     # 3) borda da página (fallback) para cantos faltantes
     if len(found) < 4:
         try:
-            page = _detect_page_corners(gray)
+            page_corners = _detect_page_corners(gray, config)
         except Exception:
-            page = None
-        if page is not None:
+            page_corners = None
+        if page_corners is not None:
             for corner in CORNERS:
                 if corner in found:
                     continue
-                px_, py_ = page[corner]
+                px_, py_ = page_corners[corner]
                 # tamanho estimado: 5% do lado maior, clampado
                 found[corner] = (float(px_), float(py_), 0.05, "quad", None)
 
@@ -1285,12 +1365,16 @@ def build_homography_ex(
     if manual_corners is not None:
         meta = {"method": "manual", "detected": list(CORNERS), "inferred": []}
         dst_map = _page_rect_dst(cw, ch)
+        if not _is_convex_quad([manual_corners[c] for c in CORNERS]):
+            return None, cw, ch, "Cantos manuais inválidos (não convexos).", meta
         src = np.array([manual_corners[c] for c in CORNERS], dtype=np.float32)
         dst = np.array([dst_map[c] for c in CORNERS], dtype=np.float32)
         try:
             M = cv2.getPerspectiveTransform(src, dst)
         except cv2.error:
             return None, cw, ch, "Cantos manuais inválidos (não foi possível retificar).", meta
+        if not _valid_homography(M):
+            return None, cw, ch, "Cantos manuais inválidos (geometria degenerada).", meta
         return M, cw, ch, "", meta
 
     corners, reason, meta = _detect_anchor_corners_ex(image, config)
@@ -1313,6 +1397,8 @@ def build_homography_ex(
         M = cv2.getPerspectiveTransform(src, dst)
     except cv2.error:
         return None, cw, ch, "Geometria inválida das âncoras (não foi possível retificar).", meta
+    if not _valid_homography(M):
+        return None, cw, ch, "Geometria degenerada da folha (cantos quase colineares).", meta
     return M, cw, ch, "", meta
 
 

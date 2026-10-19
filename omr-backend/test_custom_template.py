@@ -1861,3 +1861,129 @@ def test_api_process_endpoint_with_page(authed):
     assert body["success"] is True, body
     assert body["answers"] == {"7": "B"}
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ─── Regressões da revisão (detecção, dimensões, multi-página) ───
+
+def test_detect_anchors_auto_without_4_markers_does_not_crash():
+    """Regressão: `page` era sombreado pelo dict da borda → TypeError/500."""
+    rng = np.random.default_rng(0)
+    noise = (rng.random((400, 300, 3)) * 255).astype(np.uint8)
+    anchors = ct.detect_anchors_auto(noise, page=2)
+    assert isinstance(anchors, list)
+    assert all(a["page"] == 2 for a in anchors)
+
+    blank = np.full((400, 300, 3), 255, np.uint8)
+    assert ct.detect_anchors_auto(blank, page=1) == []
+
+
+def test_api_detect_anchors_without_markers_does_not_500(authed):
+    """A imagem sem marcadores cai no fallback da borda (não pode dar 500)."""
+    client = authed
+    rng = np.random.default_rng(1)
+    noise = (rng.random((300, 400, 3)) * 255).astype(np.uint8)
+    tid = _create(client, _png_bytes(noise), "Ruído").json()["id"]
+    r = client.post(f"/api/custom-templates/{tid}/detect-anchors?page=0")
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json()["anchors"], list)
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_page_corners_use_only_the_requested_page():
+    cfg = _config()
+    cfg["n_pages"] = 2
+    cfg["anchors"] = [
+        {"id": f"p0_{i}", "type": "aruco", "aruco_id": i, "corner": c, "page": 0,
+         "x": 0.10 if c in ("TL", "BL") else 0.90,
+         "y": 0.10 if c in ("TL", "TR") else 0.90,
+         "size": 0.05, "tolerance": 0.2}
+        for i, c in enumerate(ct.CORNERS)
+    ] + [
+        {"id": f"p1_{i}", "type": "aruco", "aruco_id": i, "corner": c, "page": 1,
+         "x": 0.20 if c in ("TL", "BL") else 0.80,
+         "y": 0.20 if c in ("TL", "TR") else 0.80,
+         "size": 0.05, "tolerance": 0.2}
+        for i, c in enumerate(ct.CORNERS)
+    ]
+    blank = np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255
+    c0, _ = ct.detect_page_corners_ex(blank, cfg, page=0)
+    c1, _ = ct.detect_page_corners_ex(blank, cfg, page=1)
+    assert c0[0] == pytest.approx({"x": 0.10, "y": 0.10})
+    assert c0[2] == pytest.approx({"x": 0.90, "y": 0.90})
+    assert c1[0] == pytest.approx({"x": 0.20, "y": 0.20})
+    assert c1[2] == pytest.approx({"x": 0.80, "y": 0.80})
+
+
+def test_page_corners_dst_rejects_non_convex_quad():
+    """Cantos em "X" (não convexos) não podem virar destino da homografia."""
+    cfg = ct.normalize_config(_config_page_corners([
+        {"x": 0.10, "y": 0.10}, {"x": 0.90, "y": 0.90},
+        {"x": 0.90, "y": 0.10}, {"x": 0.10, "y": 0.90},
+    ]))
+    assert ct._page_corners_dst(cfg, PAGE_W, PAGE_H) is None
+
+    ok = ct.normalize_config(_config_page_corners([
+        {"x": 0.10, "y": 0.10}, {"x": 0.90, "y": 0.10},
+        {"x": 0.90, "y": 0.90}, {"x": 0.10, "y": 0.90},
+    ]))
+    assert ct._page_corners_dst(ok, PAGE_W, PAGE_H) is not None
+
+
+def test_page_corners_small_quad_without_blocks_is_inferred(monkeypatch):
+    """Sem blocos para validar, uma coluna estreita não é "folha detectada"."""
+    cfg = _config()
+    cfg["anchors"] = []
+    cfg["questions"] = []
+    img = np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255
+    small = {"TL": (60.0, 200.0), "TR": (260.0, 200.0),
+             "BR": (260.0, 780.0), "BL": (60.0, 780.0)}
+    monkeypatch.setattr(ct, "_detect_page_corners", lambda *a, **k: small)
+    corners, inferred = ct.detect_page_corners_ex(img, cfg)
+    assert len(corners) == 4
+    assert inferred is True
+
+
+def test_api_update_syncs_page_size_with_real_image(authed):
+    """O PUT não pode gravar page_w/page_h defasados enviados pelo cliente."""
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Tamanho").json()["id"]
+    cfg = _config()
+    cfg["page_w"], cfg["page_h"] = 500, 700
+    r = client.put(f"/api/custom-templates/{tid}", json={"config": cfg})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["config"]["page_w"] == PAGE_W
+    assert body["config"]["page_h"] == PAGE_H
+    assert body["image_w"] == PAGE_W and body["image_h"] == PAGE_H
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_invalid_config_downgrades_active_template(authed):
+    """Config inválida não pode permanecer ATIVA (seria usada na leitura)."""
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Ativo inválido").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+
+    bad = _config()
+    bad["anchors"] = []
+    bad["questions"] = []
+    r = client.put(f"/api/custom-templates/{tid}", json={"config": bad})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "rascunho"
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_read_upload_enforces_limit():
+    from fastapi import HTTPException
+    from routers import custom_templates as rt
+
+    class _F:
+        class file:  # noqa: N801
+            @staticmethod
+            def read(n: int) -> bytes:
+                return b"x" * n
+
+    with pytest.raises(HTTPException) as exc:
+        rt._read_upload(_F(), limit=100)
+    assert exc.value.status_code == 413

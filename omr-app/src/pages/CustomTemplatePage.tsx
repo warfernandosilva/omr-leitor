@@ -571,7 +571,7 @@ function TemplateEditor({
   /** Cria/redefine os 4 cantos da folha para ajuste manual (âncoras ou borda). */
   const startManualPageCorners = () => {
     const cfg = configRef.current;
-    const anchors = cfg.anchors.filter((a) => (a.page ?? 0) === pageIdx && a.corner);
+    const anchors = cfg.anchors.filter((a) => (a.page ?? 0) === currentPage && a.corner);
     const fromAnchors = anchors.length === 4
       ? (['TL', 'TR', 'BR', 'BL'] as const).map((c) => {
           const a = anchors.find((x) => x.corner === c)!;
@@ -640,7 +640,7 @@ function TemplateEditor({
   const handleDetectPageCorners = async () => {
     setDetectingPageCorners(true);
     try {
-      const res = await detectPageCorners(detail.id);
+      const res = await detectPageCorners(detail.id, currentPage);
       if (!res.ok || !res.corners || res.corners.length !== 4) {
         toast.info('Não encontrei os cantos da folha — marque-os manualmente.');
         return;
@@ -649,7 +649,7 @@ function TemplateEditor({
       if (res.warning) {
         toast.error(res.warning);
       } else if (res.inferred) {
-        toast.info('Cantos estimados (cartão preenchendo o frame) — ajuste manualmente se necessário.');
+        toast.info('Cantos estimados (baixa confiança) — confira e ajuste os pontos se necessário.');
       } else {
         toast.success('Cantos da folha detectados. Ajuste se precisar.');
       }
@@ -715,12 +715,23 @@ function TemplateEditor({
       const src = await getCustomTemplate(copyFromId);
       const c = src.config;
       // Clona regiões com novos ids (evita colisão com o modelo atual).
+      const infoIdMap = new Map<string, string>();
+      const infoRegions = (c.info_regions ?? []).map((r) => {
+        const id = `info_${rnd()}`;
+        infoIdMap.set(r.id, id);
+        return { ...r, id };
+      });
       const cloned: CustomConfig = {
         ...c,
         anchors: (c.anchors ?? []).map((a) => ({ ...a, id: `anc_${rnd()}` })),
         qr: c.qr ? { ...c.qr, id: `qr_${rnd()}` } : null,
-        info_regions: (c.info_regions ?? []).map((r) => ({ ...r, id: `info_${rnd()}` })),
+        info_regions: infoRegions,
         questions: (c.questions ?? []).map((b) => ({ ...b, id: `blk_${rnd()}` })),
+        // Os campos impressos referenciam o id da região informativa: sem o
+        // remapeamento eles ficariam órfãos (e deixariam de ser impressos).
+        print_fields: (c.print_fields ?? []).map((f) => ({
+          ...f, region_id: infoIdMap.get(f.region_id) ?? f.region_id,
+        })),
       };
       apply(cloned);
       setCopyOpen(false);
@@ -1201,29 +1212,6 @@ function OverlayRegions({
 
   return (
     <g>
-      {pageCorners && (
-        <g>
-          <polygon
-            points={pageCorners.map((p) => `${p.x * pw},${p.y * ph}`).join(' ')}
-            fill="rgba(168,85,247,0.10)" stroke="#a855f7" strokeWidth={stroke}
-            strokeDasharray={`${6 / zoom} ${4 / zoom}`} style={{ cursor: 'move' }} />
-          {(['TL', 'TR', 'BR', 'BL'] as const).map((c, i) => {
-            const p = pageCorners[i];
-            const r = 6 / zoom;
-            return (
-              <g key={c}>
-                <circle cx={p.x * pw} cy={p.y * ph} r={r}
-                        fill="#a855f7" stroke="#fff" strokeWidth={1.5 / zoom}
-                        style={{ cursor: 'grab' }}
-                        onPointerDown={(e) => onStartPageCorner(e, i)} />
-                <text x={p.x * pw + r + 2 / zoom} y={p.y * ph + 4 / zoom}
-                      fontSize={10 / zoom} fill="#7e22ce">{c}</text>
-              </g>
-            );
-          })}
-        </g>
-      )}
-
       {show.anchors && config.anchors.map((a) => {
         const r: Rect = { x: a.x - a.size / 2, y: a.y - a.size / 2, w: a.size, h: a.size };
         return (
@@ -1292,6 +1280,34 @@ function OverlayRegions({
           </g>
         );
       })}
+
+      {/* Cantos da folha por ÚLTIMO: os handles precisam ficar acima das
+          âncoras/blocos, senão ficam inalcançáveis onde as regiões se
+          sobrepõem (o pointerdown iria para a região de baixo). */}
+      {pageCorners && (
+        <g>
+          <polygon
+            points={pageCorners.map((p) => `${p.x * pw},${p.y * ph}`).join(' ')}
+            fill="rgba(168,85,247,0.10)" stroke="#a855f7" strokeWidth={stroke}
+            strokeDasharray={`${6 / zoom} ${4 / zoom}`}
+            style={{ cursor: 'move', pointerEvents: 'none' }} />
+          {(['TL', 'TR', 'BR', 'BL'] as const).map((c, i) => {
+            const p = pageCorners[i];
+            const r = 6 / zoom;
+            return (
+              <g key={c}>
+                <circle cx={p.x * pw} cy={p.y * ph} r={r}
+                        fill="#a855f7" stroke="#fff" strokeWidth={1.5 / zoom}
+                        style={{ cursor: 'grab' }}
+                        onPointerDown={(e) => onStartPageCorner(e, i)} />
+                <text x={p.x * pw + r + 2 / zoom} y={p.y * ph + 4 / zoom}
+                      fontSize={10 / zoom} fill="#7e22ce"
+                      style={{ pointerEvents: 'none' }}>{c}</text>
+              </g>
+            );
+          })}
+        </g>
+      )}
     </g>
   );
 }

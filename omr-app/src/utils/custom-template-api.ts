@@ -319,8 +319,8 @@ export interface PageCornersResult {
   warning?: string | null;
 }
 
-export function detectPageCorners(id: number): Promise<PageCornersResult> {
-  return apiJsonBody(`/api/custom-templates/${id}/detect-page-corners`, 'POST', {});
+export function detectPageCorners(id: number, page = 0): Promise<PageCornersResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/detect-page-corners?page=${page}`, 'POST', {});
 }
 
 export interface DetectAnchorsResult {

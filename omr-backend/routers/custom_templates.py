@@ -36,6 +36,7 @@ from omr.custom_template import (
     detect_grid,
     expand_bubbles,
     has_errors,
+    image_size_from_path,
     n_pages,
     normalize_config,
     process_custom_image,
@@ -54,6 +55,21 @@ TEMPLATE_STATUSES = (
     CustomTemplate.STATUS_VALIDADO,
     CustomTemplate.STATUS_ATIVO,
 )
+
+_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+
+def _read_upload(file: UploadFile, limit: int = _MAX_IMAGE_BYTES) -> bytes:
+    """Lê no máximo `limit` bytes (não carrega uploads gigantes na memória)."""
+    data = file.file.read(limit + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="Imagem vazia ou inválida.")
+    if len(data) > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Imagem muito grande (limite {limit // (1024 * 1024)}MB).",
+        )
+    return data
 
 
 # ---------------------------------------------------------------------------
@@ -175,23 +191,20 @@ def _size_mismatch_issue(tpl: CustomTemplate) -> dict | None:
     uma reimportação que não atualizou `page_w/page_h`): todas as coordenadas
     normalizadas passam a apontar para o lugar errado.
     """
+    real = image_size_from_path(tpl.image_path)
+    if real is None:
+        return None
     try:
-        p = Path(tpl.image_path) if tpl.image_path else None
-        if p is None or not p.exists():
-            return None
-        img = cv2.imread(str(p))
-        if img is None:
-            return None
-        h, w = img.shape[:2]
+        w, h = real
         cfg = normalize_config(tpl.config or {})
         cw, ch = int(cfg["page_w"] or 0), int(cfg["page_h"] or 0)
         if cw and ch and (abs(cw - w) > 2 or abs(ch - h) > 2):
             return {
                 "level": "error",
                 "code": "image_size_mismatch",
-                "message": (f"A imagem atual é {w}×{h} px, mas a configuração do modelo "
-                            f"está em {cw}×{ch} px. Reimporte a imagem para o modelo e "
-                            "redesenhe as regiões (âncoras/blocos)."),
+                "message": (f"A imagem atual é {w}×{h} px, diferente do tamanho usado quando "
+                            f"as regiões foram desenhadas ({cw}×{ch} px). Confira e "
+                            "redesenhe as âncoras e os blocos se necessário."),
                 "region_id": None,
             }
     except Exception:
@@ -199,13 +212,45 @@ def _size_mismatch_issue(tpl: CustomTemplate) -> dict | None:
     return None
 
 
+def _config_for_read(tpl: CustomTemplate) -> dict:
+    """Config pronta para leitura: `page_w/page_h` sincronizados com o arquivo."""
+    cfg = normalize_config(tpl.config or {})
+    real = image_size_from_path(tpl.image_path)
+    if real is not None:
+        cfg["page_w"], cfg["page_h"] = real
+    return cfg
+
+
+def _image_issues(tpl: CustomTemplate) -> list[dict]:
+    """Erros do arquivo de imagem: ausente ou divergente da configuração."""
+    if image_size_from_path(tpl.image_path) is None:
+        return [{
+            "level": "error",
+            "code": "image_missing",
+            "message": "Imagem do modelo não encontrada. Reimporte a imagem.",
+            "region_id": None,
+        }]
+    mismatch = _size_mismatch_issue(tpl)
+    return [mismatch] if mismatch else []
+
+
 def _detail(tpl: CustomTemplate) -> dict:
     d = _summary(tpl)
-    d["config"] = normalize_config(tpl.config or {})
+    real = image_size_from_path(tpl.image_path)
+    if real is not None:
+        # O arquivo é a fonte de verdade. `page_w/page_h` defasados faziam o
+        # editor esticar a imagem e a leitura usar um aspecto canônico errado.
+        # As coordenadas são normalizadas: corrigir as dimensões não desloca
+        # nenhuma região (o PUT persiste a correção).
+        d["image_w"], d["image_h"] = real
+    cfg = normalize_config(tpl.config or {})
+    if real is not None:
+        cfg["page_w"], cfg["page_h"] = real
+    d["config"] = cfg
     issues = list(tpl.last_issues or [])
-    mismatch = _size_mismatch_issue(tpl)
-    if mismatch and not any(i.get("code") == mismatch["code"] for i in issues):
-        issues.insert(0, mismatch)
+    for issue in reversed(_image_issues(tpl)):
+        if not any(i.get("code") == issue["code"] for i in issues):
+            issues.insert(0, issue)
     d["issues"] = issues
     d["image_url"] = f"/api/custom-templates/{tpl.id}/image"
     d["preview_url"] = f"/api/custom-templates/{tpl.id}/preview"
@@ -225,11 +270,9 @@ def create_template(
     db: Session = Depends(get_db),
 ):
     """Importa a imagem de referência e cria o modelo (rascunho)."""
-    contents = file.file.read()
-    if not contents or len(contents) < 100:
+    contents = _read_upload(file)
+    if len(contents) < 100:
         raise HTTPException(status_code=400, detail="Imagem vazia ou inválida.")
-    if len(contents) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Imagem muito grande (limite 20MB).")
 
     image = _decode_image_bytes(contents)
     if image is None:
@@ -289,15 +332,21 @@ def update_template(
         tpl.nome = patch.nome.strip()[:200] or tpl.nome
     if patch.config is not None:
         cfg = normalize_config(patch.config)
-        # Preserva as dimensões reais da imagem importada
+        # Preserva as dimensões REAIS da imagem importada (o arquivo é a
+        # fonte de verdade; `image_w/image_h` pode estar defasado se a
+        # imagem foi trocada fora do fluxo da API).
+        real = image_size_from_path(tpl.image_path)
+        if real is not None:
+            tpl.image_w, tpl.image_h = real
         cfg["page_w"] = tpl.image_w
         cfg["page_h"] = tpl.image_h
         tpl.config = cfg
         issues = validate_config(cfg)
         tpl.last_issues = issues
-        if not has_errors(issues) and tpl.status == CustomTemplate.STATUS_VALIDADO:
-            pass  # mantém validado
-        elif has_errors(issues) and tpl.status == CustomTemplate.STATUS_VALIDADO:
+        # Config inválida não pode continuar ATIVA (seria usada na leitura).
+        if has_errors(issues) and tpl.status in (
+            CustomTemplate.STATUS_VALIDADO, CustomTemplate.STATUS_ATIVO
+        ):
             tpl.status = CustomTemplate.STATUS_RASCUNHO
     db.commit()
     db.refresh(tpl)
@@ -312,7 +361,7 @@ def replace_image(
     db: Session = Depends(get_db),
 ):
     tpl = _get_template(db, tid, current_user)
-    contents = file.file.read()
+    contents = _read_upload(file)
     image = _decode_image_bytes(contents)
     if image is None:
         raise HTTPException(status_code=400, detail="Não foi possível decodificar a imagem.")
@@ -326,6 +375,11 @@ def replace_image(
     cfg["page_w"] = w
     cfg["page_h"] = h
     tpl.config = cfg
+    # A imagem de referência mudou: o modelo precisa ser redesenhado e
+    # revalidado antes de voltar a ser usado na leitura.
+    tpl.last_issues = validate_config(cfg)
+    if tpl.status in (CustomTemplate.STATUS_VALIDADO, CustomTemplate.STATUS_ATIVO):
+        tpl.status = CustomTemplate.STATUS_RASCUNHO
     db.commit()
     db.refresh(tpl)
     return _detail(tpl)
@@ -379,7 +433,7 @@ def template_preview(
 @router.post("/api/custom-templates/{tid}/validate")
 def validate_template(tid: int, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     tpl = _get_template(db, tid, current_user)
-    issues = validate_config(tpl.config or {})
+    issues = _image_issues(tpl) + validate_config(tpl.config or {})
     tpl.last_issues = issues
     if not has_errors(issues) and tpl.status == CustomTemplate.STATUS_RASCUNHO:
         tpl.status = CustomTemplate.STATUS_VALIDADO
@@ -409,13 +463,13 @@ def test_template(
 ):
     """Lê uma foto real com este modelo e compara com o gabarito informado."""
     tpl = _get_template(db, tid, current_user)
-    contents = file.file.read()
+    contents = _read_upload(file)
     image = _decode_image_bytes(contents)
     if image is None:
         raise HTTPException(status_code=400, detail="Não foi possível decodificar a foto.")
 
     diag: dict = {}
-    result = process_custom_image(image, tpl.config or {}, adaptive=adaptive, debug=debug,
+    result = process_custom_image(image, _config_for_read(tpl), adaptive=adaptive, debug=debug,
                                   diagnostics=diag, page=page)
     if result is None:
         detail = diag.get("detail") or ""
@@ -503,7 +557,7 @@ def _debug_overlay(result, want: bool) -> str | None:
 @router.post("/api/custom-templates/{tid}/activate")
 def activate_template(tid: int, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     tpl = _get_template(db, tid, current_user)
-    issues = validate_config(tpl.config or {})
+    issues = _image_issues(tpl) + validate_config(tpl.config or {})
     tpl.last_issues = issues
     if has_errors(issues):
         db.commit()
@@ -798,7 +852,7 @@ def detect_anchors_endpoint(
     image = _load_image(tpl)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
-    anchors = detect_anchors_auto(image, page=page)
+    anchors = detect_anchors_auto(image, page=page, config=tpl.config or {})
     for a in anchors:
         a["page"] = max(0, int(page or 0))
     return {"ok": bool(anchors), "anchors": anchors, "count": len(anchors)}
@@ -807,6 +861,7 @@ def detect_anchors_endpoint(
 @router.post("/api/custom-templates/{tid}/detect-page-corners")
 def detect_page_corners_endpoint(
     tid: int,
+    page: int = 0,
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -814,13 +869,14 @@ def detect_page_corners_endpoint(
 
     Prioriza os marcadores de canto configurados; depois o maior quadrilátero
     que contém os blocos de bolhas; por fim a borda da página. Se nada for
-    detectado, devolve os cantos da imagem com `inferred=True`.
+    detectado, devolve os cantos da imagem com `inferred=True`. `page`
+    restringe âncoras/blocos à página editada (modelos multi-página).
     """
     tpl = _get_template(db, tid, current_user)
     image = _load_image(tpl)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
-    corners, inferred = detect_page_corners_ex(image, tpl.config or {})
+    corners, inferred = detect_page_corners_ex(image, tpl.config or {}, page=page)
     mismatch = _size_mismatch_issue(tpl)
     warning = mismatch["message"] if mismatch else None
     if not corners:
