@@ -22,6 +22,7 @@ import Select from '../components/ui/Select';
 import Button from '../components/ui/Button';
 import StatCard from '../components/ui/StatCard';
 import EmptyState from '../components/ui/EmptyState';
+import { gabaritosPdfName, CardSource } from '../utils/pdf-name';
 
 interface Props {
   examId: string | null;
@@ -48,12 +49,14 @@ export default function RosterCardsPage({ examId, onNavigate }: Props) {
   const [genError, setGenError] = useState<string | null>(null);
   const [importingOnly, setImportingOnly] = useState(false);
   const [importedPersisted, setImportedPersisted] = useState<ImportStudentsResult | null>(null);
-  const [source, setSource] = useState<'file' | 'turma'>('file');
+  const [source, setSource] = useState<CardSource>('file');
   const [turmas, setTurmas] = useState<TurmaDTO[]>([]);
   const [turmaSelId, setTurmaSelId] = useState<number | ''>('');
   const [turmaDetail, setTurmaDetail] = useState<TurmaDetail | null>(null);
   const [loadingTurma, setLoadingTurma] = useState(false);
   const [doneInfo, setDoneInfo] = useState<{
+    source: CardSource;
+    origem: string;
     pages: number;
     alunos: PersistedAluno[];
     primeiroCodigo: string;
@@ -87,9 +90,14 @@ const SIMULADO_BLOCK_MSG = 'Provas "Simulado" são avulsas (sem QR/nome/turma): 
   const COLAR_BLOCK_MSG = 'Provas "Colar em Avaliação" são avulsas (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
 const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Gerenciar Avaliação (com QR duplo + código único por aluno).';
 
-  const switchSource = (s: 'file' | 'turma') => {
+  const switchSource = (s: CardSource) => {
+    if (s === source) return;
+    // Fluxos independentes: não herdam resultado/erro/etapa do outro.
     setSource(s);
     setGenError(null);
+    setStage('');
+    setDoneInfo(null);
+    setStep('form');
     if (s === 'turma' && turmaSelId === '' && activeExam?.turmaId) {
       void pickTurma(activeExam.turmaId);
     }
@@ -129,21 +137,24 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
     }
   };
 
-  const reset = () => {
-    setResult(null);
-    setParseError(null);
-    setFileName('');
-    setShowIgnored(false);
-    setShowPreview(false);
+  /** Limpa só o fluxo pedido (o outro permanece intacto). */
+  const reset = (mode: CardSource = source) => {
     setGenError(null);
-    setImportedPersisted(null);
-    setImportingOnly(false);
-    setDoneInfo(null);
     setStage('');
+    setDoneInfo(null);
     setStep('form');
-    setSource('file');
-    setTurmaSelId('');
-    setTurmaDetail(null);
+    if (mode === 'file') {
+      setResult(null);
+      setParseError(null);
+      setFileName('');
+      setShowIgnored(false);
+      setShowPreview(false);
+      setImportedPersisted(null);
+      setImportingOnly(false);
+    } else {
+      setTurmaSelId('');
+      setTurmaDetail(null);
+    }
   };
 
   const handleImportOnly = async () => {
@@ -219,9 +230,9 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const slug = activeExam.name.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '');
       a.href = url;
-      a.download = `gabaritos_${slug || 'prova'}_${n}_paginas.pdf`;
+      // Nome próprio do fluxo de ARQUIVO (inclui o nome da lista).
+      a.download = gabaritosPdfName(activeExam.name, 'file', fileName, n);
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -233,6 +244,8 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       const codigos = lista?.gabaritos.map(g => g.codigo_unico) ?? [];
       const alunosPersistidos = importedForPdf?.alunos ?? importedPersisted?.alunos ?? [];
       setDoneInfo({
+        source: 'file',
+        origem: fileName ? `Lista: ${fileName}` : 'Lista importada',
         pages,
         alunos: alunosPersistidos,
         primeiroCodigo: codigos[0] ?? '—',
@@ -276,9 +289,9 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const slug = activeExam.name.toLowerCase().replace(/[^a-z0-9]+/gi, '-').replace(/(^-|-$)/g, '');
       a.href = url;
-      a.download = `gabaritos_${slug || 'prova'}_${pages}_paginas.pdf`;
+      // Nome próprio do fluxo de TURMA (inclui o nome da turma).
+      a.download = gabaritosPdfName(activeExam.name, 'turma', turmaDetail.nome, pages);
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -290,6 +303,8 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       const alunosPersistidos = lista?.gabaritos.map(g => ({ id: g.aluno.id, nome: g.aluno.nome, matricula: g.aluno.matricula })) ?? [];
       const codigos = lista?.gabaritos.map(g => g.codigo_unico) ?? [];
       setDoneInfo({
+        source: 'turma',
+        origem: `Turma: ${turmaDetail.nome}`,
         pages,
         alunos: alunosPersistidos,
         primeiroCodigo: codigos[0] ?? '—',
@@ -327,7 +342,8 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
           <div className="w-16 h-16 bg-success-50 dark:bg-success-700/20 rounded-full flex items-center justify-center mx-auto mb-4 text-success-600 dark:text-success-100" aria-hidden>
             <CheckCircle2 size={32} strokeWidth={1.8} />
           </div>
-          <h3 className="text-xl font-bold text-ink dark:text-white mb-4">Gabaritos gerados e persistidos!</h3>
+          <h3 className="text-xl font-bold text-ink dark:text-white mb-2">Gabaritos gerados e persistidos!</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{doneInfo.origem}</p>
 
           <div className="inline-grid grid-cols-3 gap-3 mb-4 text-sm">
             <div className="bg-success-50 dark:bg-success-700/15 rounded-lg px-4 py-2">
@@ -356,8 +372,8 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
             <Button onClick={() => onNavigate('manage-exam', activeExam?.id)}>
               Ver avaliação
             </Button>
-            <Button variant="secondary" onClick={reset}>
-              Importar outra lista
+            <Button variant="secondary" onClick={() => reset(doneInfo.source)}>
+              {doneInfo.source === 'turma' ? 'Gerar outra turma' : 'Importar outra lista'}
             </Button>
           </div>
         </div>
@@ -482,11 +498,11 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
               </div>
             )}
 
-            {parseError && (
+            {source === 'file' && parseError && (
               <div className="callout-danger">{parseError}</div>
             )}
 
-            {result && (
+            {source === 'file' && result && (
               <>
                 <div className="grid grid-cols-3 gap-3">
                   <StatCard label="Alunos importados" value={n} tone="info" />
@@ -535,7 +551,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
               </>
             )}
 
-            {importedPersisted && (
+            {source === 'file' && importedPersisted && (
               <div className="callout-success">
                 <span className="inline-flex items-center gap-1.5"><CheckCircle2 size={15} aria-hidden /> {importedPersisted.total_importados} aluno(s) já importado(s) no banco para esta prova
                 {' '}({importedPersisted.alunos.length} registro(s) com IDs internos).</span>{' '}
@@ -566,7 +582,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
               <div className="callout-danger whitespace-pre-line">{genError}</div>
             )}
 
-            {result && n > 0 && (
+            {source === 'file' && result && n > 0 && (
               <div className="flex flex-col gap-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Button
@@ -597,7 +613,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   {' '}<button onClick={() => onNavigate('manage-exam', activeExam!.id)} className="underline">Gerenciar Avaliação</button>
                   {' '}ou este mesmo botão para gerar o PDF.
                 </p>
-                <Button variant="secondary" onClick={reset}>
+                <Button variant="secondary" onClick={() => reset('file')}>
                   Limpar
                 </Button>
               </div>
@@ -616,14 +632,14 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   Materializa o catálogo na prova (sem duplicar quem já está nela), vincula a turma
                   e gera o PDF. Alunos novos no catálogo entram na próxima geração.
                 </p>
-                <Button variant="secondary" onClick={reset}>
+                <Button variant="secondary" onClick={() => reset('turma')}>
                   Limpar
                 </Button>
               </div>
             )}
           </div>
 
-          {result && n > 0 && (
+          {source === 'file' && result && n > 0 && (
             <div className="card max-w-3xl mt-6">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-semibold text-ink dark:text-white">
