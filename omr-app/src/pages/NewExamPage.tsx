@@ -59,6 +59,8 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isHerby = templateType === 'herby';
   const isSimulado = templateType === 'simulado';
   const isCustom = isSae || isColar || templateType === 'custom';
+const isCustomTemplate = templateType === 'custom';
+const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' || t.status === 'validado');
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
   // Herby: dual 1+1 a 26+26 ou single 1..26 (metade esquerda do cartão)
   // Simulado: tabela única, sempre single e sempre 22 questões
@@ -136,6 +138,18 @@ export default function NewExamPage({ onNavigate }: Props) {
   useEffect(() => {
     listCustomTemplates().then((res) => setCustomTemplates(res.templates)).catch(() => setCustomTemplates([]));
   }, []);
+  // ─── Sincroniza questões/disciplina quando o template custom muda ───
+  useEffect(() => {
+    if (templateType !== 'custom' || customTemplateId === '') return;
+    const tpl = customTemplates.find((c) => c.id === customTemplateId);
+    if (!tpl) return;
+    const nq = tpl.config_summary?.n_questions;
+    if (nq && nq > 0) setQuestionsPerSubject(nq);
+    if (tpl.nome) {
+      setSubjectLP(tpl.nome);
+      setSubjectMat(tpl.nome);
+    }
+  }, [customTemplateId, templateType, customTemplates]);
 
   const handleQpsChange = (raw: string) => {
     if (raw === '') { setQuestionsPerSubject(0); return; }
@@ -153,6 +167,14 @@ export default function NewExamPage({ onNavigate }: Props) {
     } else if (t === 'simulado') {
       setLayoutMode('single');
       setQuestionsPerSubject(SIMULADO_MAX_QUESTIONS);
+    } else if (t === 'custom') {
+      setLayoutMode('single');
+      const tpl = customTemplates.find((c) => c.id === customTemplateId);
+      const nq = tpl?.config_summary?.n_questions;
+      if (nq && nq > 0) setQuestionsPerSubject(nq);
+      else setQuestionsPerSubject(0);
+      setSubjectLP((prev) => (tpl?.nome ? tpl.nome : prev || 'GABARITO PERSONALIZADO'));
+      setSubjectMat((prev) => (tpl?.nome ? tpl.nome : prev || 'GABARITO PERSONALIZADO'));
     } else if (t !== 'padrao' && questionsPerSubject > SAE_MAX_QUESTIONS) {
       setQuestionsPerSubject(SAE_MAX_QUESTIONS);
     }
@@ -175,9 +197,10 @@ export default function NewExamPage({ onNavigate }: Props) {
   const [saving, setSaving] = useState(false);
   const handleSave = async () => {
     if (saving) return;
-    if (!name.trim() || !subjectLP.trim()) return;
-    if (layoutMode === 'dual' && !subjectMat.trim()) return;
-    if (questionsPerSubject < 1) return;
+    if (!name.trim()) return;
+    if (!isCustomTemplate && !subjectLP.trim()) return;
+    if (!isCustomTemplate && layoutMode === 'dual' && !subjectMat.trim()) return;
+    if (!isCustomTemplate && questionsPerSubject < 1) return;
     if (templateType === 'custom' && customTemplateId === '') {
       alert('Selecione um Gabarito Personalizado ativo para esta prova.');
       return;
@@ -401,7 +424,7 @@ export default function NewExamPage({ onNavigate }: Props) {
           </div>
 
           {templateType === 'custom' && (
-            customTemplates.length === 0 ? (
+            readyCustomTemplates.length === 0 ? (
               <div className="callout-warning text-sm">
                 Nenhum Gabarito Personalizado ativo. Crie e ative um modelo em{' '}
                 <button
@@ -414,20 +437,35 @@ export default function NewExamPage({ onNavigate }: Props) {
                 antes de vincular a esta prova.
               </div>
             ) : (
-              <Field label="Gabarito Personalizado *" htmlFor="exam-custom-template">
-                <Select
-                  id="exam-custom-template"
-                  value={customTemplateId}
-                  onChange={(e) => setCustomTemplateId(e.target.value === '' ? '' : Number(e.target.value))}
-                >
-                  <option value="">Selecione o modelo importado...</option>
-                  {customTemplates.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.nome} ({t.config_summary.n_questions} quest{t.config_summary.n_questions === 1 ? 'ão' : 'ões'})
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              <>
+                <Field label="Gabarito Personalizado *" htmlFor="exam-custom-template">
+                  <Select
+                    id="exam-custom-template"
+                    value={customTemplateId}
+                    onChange={(e) => setCustomTemplateId(e.target.value === '' ? '' : Number(e.target.value))}
+                  >
+                    <option value="">Selecione o modelo importado...</option>
+                    {readyCustomTemplates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.nome} ({t.config_summary.n_questions} quest{t.config_summary.n_questions === 1 ? 'ão' : 'ões'})
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {customTemplateId !== '' && (() => {
+                  const tpl = customTemplates.find((t) => t.id === customTemplateId);
+                  if (!tpl) return null;
+                  return (
+                    <div className="rounded border border-gray-200 dark:border-gray-700 p-3 text-sm space-y-1">
+                      <p><strong>Modelo:</strong> {tpl.nome}</p>
+                      <p><strong>Questões:</strong> {tpl.config_summary.n_questions} (definidas no gabarito personalizado)</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Disciplina e número de questões são configurados no próprio gabarito personalizado; esta prova apenas o vincula.
+                      </p>
+                    </div>
+                  );
+                })()}
+              </>
             )
           )}
 
@@ -459,6 +497,7 @@ export default function NewExamPage({ onNavigate }: Props) {
             </div>
           )}
 
+{!isCustomTemplate && (
           <Field
             label={isCustom || layoutMode === 'single' ? 'Disciplina' : 'Disciplina 1 (Língua Portuguesa)'}
             htmlFor="exam-subject-lp"
@@ -472,8 +511,9 @@ export default function NewExamPage({ onNavigate }: Props) {
               onChange={(e) => setSubjectLP(e.target.value)}
             />
           </Field>
+          )}
 
-          {!isCustom && layoutMode === 'dual' && (
+          {!isCustomTemplate && !isCustom && layoutMode === 'dual' && (
             <Field label="Disciplina 2 (Matemática)" htmlFor="exam-subject-mat" required>
               <Input
                 id="exam-subject-mat"
@@ -485,6 +525,7 @@ export default function NewExamPage({ onNavigate }: Props) {
             </Field>
           )}
 
+          {!isCustomTemplate && (
           <Field
             label={`Questões${!isCustom && layoutMode === 'dual' ? ' por disciplina' : ''}`}
             htmlFor="exam-qps"
@@ -512,6 +553,7 @@ export default function NewExamPage({ onNavigate }: Props) {
               onChange={(e) => handleQpsChange(e.target.value)}
             />
           </Field>
+          )}
           </>
         )}
 
@@ -555,9 +597,9 @@ export default function NewExamPage({ onNavigate }: Props) {
             {[
               ['Nome', name.trim() || '—'],
               ['Turma', turmaId === '' ? 'Sem turma vinculada' : (turmas.find(t => t.id === turmaId)?.nome ?? '—')],
-              ['Modelo', templateLabel(templateType)],
-              ['Disciplinas', layoutMode === 'single' || isCustom ? subjectLP.trim() || '—' : `${subjectLP.trim() || '—'} + ${subjectMat.trim() || '—'}`],
-              ['Questões', String(questionsPerSubject > 0 ? totalQuestions : '—')],
+              ['Modelo', isCustomTemplate ? (customTemplates.find(t => t.id === customTemplateId)?.nome ?? 'Gabarito Personalizado') : templateLabel(templateType)],
+              ['Disciplinas', isCustomTemplate ? 'Definidas no gabarito personalizado' : (layoutMode === 'single' || isCustom ? subjectLP.trim() || '—' : `${subjectLP.trim() || '—'} + ${subjectMat.trim() || '—'}`)],
+              ['Questões', isCustomTemplate ? String(customTemplates.find(t => t.id === customTemplateId)?.config_summary.n_questions ?? '—') : String(questionsPerSubject > 0 ? totalQuestions : '—')],
               ['Escala', gradeScale === 'count' ? 'Quantidade de acertos' : `0 a ${gradeScale === '0-10' ? '10' : '100'}`],
               ['Situação', examStatusLabel(status)],
             ].map(([k, v]) => (
@@ -580,7 +622,7 @@ export default function NewExamPage({ onNavigate }: Props) {
                 onClick={() => setStep(step + 1)}
                 disabled={
                   (step === 0 && !name.trim())
-                  || (step === 1 && (!subjectLP.trim() || (layoutMode === 'dual' && !isCustom && !subjectMat.trim()) || questionsPerSubject < 1))
+                  || (step === 1 && !isCustomTemplate && (!subjectLP.trim() || (layoutMode === 'dual' && !isCustom && !subjectMat.trim()) || questionsPerSubject < 1))
                 }
                 className="min-h-[44px] flex-1"
               >

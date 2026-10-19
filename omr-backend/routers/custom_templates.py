@@ -31,6 +31,7 @@ from omr.custom_template import (
     config_for_page,
     config_summary,
     default_config,
+    detect_anchors_auto,
     detect_grid,
     expand_bubbles,
     has_errors,
@@ -744,6 +745,28 @@ def template_bubbles(
 # ---------------------------------------------------------------------------
 # Auto-detecção da grade (sugestão para o editor — NÃO persiste)
 # ---------------------------------------------------------------------------
+
+@router.post("/api/custom-templates/{tid}/detect-anchors")
+def detect_anchors_endpoint(
+    tid: int,
+    page: int = 0,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Detecta e centraliza automaticamente as âncoras de canto da imagem importada.
+
+    Devolve até 4 âncoras (ArUco → quadrado → borda da página) com posição
+    e tamanho normalizados. O frontend aplica na configuração (com undo).
+    """
+    tpl = _get_template(db, tid, current_user)
+    image = _load_image(tpl)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Imagem original não encontrada")
+    anchors = detect_anchors_auto(image, page=page)
+    for a in anchors:
+        a["page"] = max(0, int(page or 0))
+    return {"ok": bool(anchors), "anchors": anchors, "count": len(anchors)}
+
 
 @router.post("/api/custom-templates/{tid}/detect-grid")
 def detect_grid_endpoint(

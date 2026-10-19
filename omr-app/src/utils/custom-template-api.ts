@@ -305,6 +305,16 @@ export function detectCustomGrid(id: number, page = 0): Promise<DetectGridResult
   return apiJsonBody(`/api/custom-templates/${id}/detect-grid?page=${page}`, 'POST', {});
 }
 
+export interface DetectAnchorsResult {
+  ok: boolean;
+  anchors: CustomAnchor[];
+  count: number;
+}
+
+export function detectCustomAnchors(id: number, page = 0): Promise<DetectAnchorsResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/detect-anchors?page=${page}`, 'POST', {});
+}
+
 // ─── Teste ───
 
 export function testCustomTemplate(

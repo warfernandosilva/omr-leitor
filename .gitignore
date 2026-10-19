@@ -4,3 +4,6 @@ omr-leitor-zimaos.zip
 .playwright-cli/
 node_modules/
 .playwright-mcp/
+
+# graphify outputs
+graphify-out/

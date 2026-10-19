@@ -887,6 +887,131 @@ def detect_anchor_corners(image: np.ndarray, config: dict) -> tuple[dict[str, tu
     return corners, reason
 
 
+def detect_anchors_auto(image: np.ndarray, page: int = 0) -> list[dict]:
+    """Detecta até 4 âncoras de canto e devolve configs normalizadas.
+
+    Cascata: ArUco (ids detectados) → quadrados (cantos da imagem) → borda da
+    página. Cada âncora vem centralizada (x, y = centro do marcador) com
+    tamanho estimado. Rótulo de canto (TL/TR/BR/BL) atribuído por quadrante.
+
+    Usado pelo editor para popular a configuração automaticamente a partir da
+    imagem importada.
+    """
+    if image is None:
+        return []
+    h, w = image.shape[:2]
+    if h <= 0 or w <= 0:
+        return []
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    max_side = float(max(w, h))
+
+    found: dict[str, tuple[float, float, float, str, int | None]] = {}
+    # (cx, cy, size_norm, type, aruco_id)
+
+    # 1) ArUco
+    try:
+        det = detect_markers(image)
+        for m in det.markers:
+            nx = float(m.center[0]) / w
+            ny = float(m.center[1]) / h
+            corner = _corner_by_quadrant(nx, ny)
+            if corner is None or corner in found:
+                continue
+            corners = np.asarray(m.corners, dtype=np.float64).reshape(-1, 2)
+            side = float(np.mean([
+                np.linalg.norm(corners[0] - corners[1]),
+                np.linalg.norm(corners[1] - corners[2]),
+                np.linalg.norm(corners[2] - corners[3]),
+                np.linalg.norm(corners[3] - corners[0]),
+            ]))
+            size = max(0.01, min(0.2, side / max_side))
+            found[corner] = (float(m.center[0]), float(m.center[1]), size, "aruco", int(m.id))
+    except Exception:
+        pass
+
+    # 2) quadrados (para cantos ainda não ocupados)
+    if len(found) < 4:
+        try:
+            cands = _square_candidates(gray)
+        except Exception:
+            cands = []
+        # candidatos com centro + área
+        cand_list = []
+        for c in cands:
+            pts = np.asarray(c, dtype=np.float64).reshape(-1, 2)
+            cx = float(pts[:, 0].mean())
+            cy = float(pts[:, 1].mean())
+            area = float(cv2.contourArea(pts.astype(np.float32)))
+            side = math.sqrt(max(area, 1.0))
+            cand_list.append((cx, cy, side, pts))
+        # atribui cada candidato ao canto livre mais próximo
+        free_corners = [c for c in CORNERS if c not in found]
+        # ordena candidatos por distância ao centro esperado do canto? usa nearest
+        used_idx: set[int] = set()
+        for corner in free_corners:
+            # posição esperada aproximada do canto
+            if corner == "TL":
+                ex, ey = 0.15 * w, 0.15 * h
+            elif corner == "TR":
+                ex, ey = 0.85 * w, 0.15 * h
+            elif corner == "BR":
+                ex, ey = 0.85 * w, 0.85 * h
+            else:
+                ex, ey = 0.15 * w, 0.85 * h
+            best_i = None
+            best_d = max(w, h) * 0.25
+            for i, (cx, cy, side, pts) in enumerate(cand_list):
+                if i in used_idx:
+                    continue
+                d = math.hypot(cx - ex, cy - ey)
+                if d < best_d:
+                    best_d = d
+                    best_i = i
+            if best_i is not None:
+                cx, cy, side, pts = cand_list[best_i]
+                used_idx.add(best_i)
+                size = max(0.01, min(0.2, side / max_side))
+                found[corner] = (cx, cy, size, "quad", None)
+
+    # 3) borda da página (fallback) para cantos faltantes
+    if len(found) < 4:
+        try:
+            page = _detect_page_corners(gray)
+        except Exception:
+            page = None
+        if page is not None:
+            for corner in CORNERS:
+                if corner in found:
+                    continue
+                px_, py_ = page[corner]
+                # tamanho estimado: 5% do lado maior, clampado
+                found[corner] = (float(px_), float(py_), 0.05, "quad", None)
+
+    # monta lista de anchors normalizados
+    anchors: list[dict] = []
+    for corner in CORNERS:
+        if corner not in found:
+            continue
+        cx, cy, size, typ, aruco_id = found[corner]
+        # Infla o tamanho detectado (~25%) para cobrir o marcador por completo
+        # na renderização/overlay; a leitura usa apenas o centro + tolerância.
+        size_inflated = max(0.02, min(0.2, size * 1.25))
+        tolerance = max(0.15, min(0.35, size_inflated * 1.5))
+        anchors.append({
+            "id": f"anc_{corner.lower()}",
+            "type": typ,
+            "corner": corner,
+            "aruco_id": aruco_id,
+            "page": int(page),
+            "x": _clamp01(cx / w),
+            "y": _clamp01(cy / h),
+            "size": _clamp01(size_inflated, 0.05) or 0.05,
+            "tolerance": tolerance,
+            "required": typ != "quad" or aruco_id is not None,
+        })
+    return anchors
+
+
 def build_homography_ex(
     image: np.ndarray, config: dict,
     manual_corners: dict[str, tuple[float, float]] | None = None,

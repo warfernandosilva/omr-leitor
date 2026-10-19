@@ -20,7 +20,7 @@ import {
   CustomAnchor, CustomBlock, CustomConfig, CustomInfoRegion, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
-  createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, expandBlock,
+  createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, expandBlock,
   getCustomTemplate, listCustomTemplates, printCustomTemplate, printPreviewCustomTemplate,
   testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
 } from '../utils/custom-template-api';
@@ -310,9 +310,11 @@ function TemplateEditor({
   const [saving, setSaving] = useState(false);
   const [anchorType, setAnchorType] = useState<'aruco' | 'quad'>('quad');
   const [anchorArucoId, setAnchorArucoId] = useState(0);
+  const [anchorSize, setAnchorSize] = useState(0.05);
   const [creating, setCreating] = useState<CreateBox | null>(null);
   const [dragKind, setDragKind] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
+  const [detectingAnchors, setDetectingAnchors] = useState(false);
   // Multi-página (mesma folha): página do modelo atualmente editada.
   const [pageIdx, setPageIdx] = useState(0);
   // Cópia de configuração de outro modelo
@@ -399,8 +401,8 @@ function TemplateEditor({
   const dragRef = useRef<DragState | null>(null);
   const snapRef = useRef<CustomConfig | null>(null);
   const creatingRef = useRef<CreateBox | null>(null);
-  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info'; anchorType: 'aruco' | 'quad'; arucoId: number; page: number }>(
-    { tool: 'anchor', anchorType: 'quad', arucoId: 0, page: 0 },
+  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info'; anchorType: 'aruco' | 'quad'; arucoId: number; anchorSize: number; page: number }>(
+    { tool: 'anchor', anchorType: 'quad', arucoId: 0, anchorSize: 0.05, page: 0 },
   );
   const pendingBlockRef = useRef<CustomBlock | null>(null);
 
@@ -466,7 +468,7 @@ function TemplateEditor({
           w, h,
         };
         const snap = clone(configRef.current);
-        const created = buildCreate(configRef.current, ctx.tool, rect, ctx.anchorType, ctx.arucoId, ctx.page);
+        const created = buildCreate(configRef.current, ctx.tool, rect, ctx.anchorType, ctx.arucoId, ctx.anchorSize, ctx.page);
         if (created) {
           setConfig(created.config);
           pushHistory(snap);
@@ -501,7 +503,7 @@ function TemplateEditor({
     if (tool === 'select') { setSelection(null); return; }
     if (tool === 'place-block') return;
     const p = toBase(e.clientX, e.clientY);
-    createCtxRef.current = { tool, anchorType, arucoId: anchorArucoId, page: currentPage };
+    createCtxRef.current = { tool, anchorType, arucoId: anchorArucoId, anchorSize, page: currentPage };
     creatingRef.current = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
     setCreating(creatingRef.current);
   };
@@ -575,6 +577,24 @@ function TemplateEditor({
       toast.error(e instanceof Error ? e.message : 'Falha ao detectar a grade');
     } finally {
       setDetecting(false);
+    }
+  };
+
+  const detectAnchors = async () => {
+    setDetectingAnchors(true);
+    try {
+      const res = await detectCustomAnchors(detail.id, currentPage);
+      if (!res.ok || !res.anchors.length) {
+        toast.info('Não encontrei âncoras nesta imagem — marque-as manualmente.');
+        return;
+      }
+      const others = configRef.current.anchors.filter((a) => (a.page ?? 0) !== currentPage);
+      apply({ ...configRef.current, anchors: [...others, ...res.anchors] });
+      toast.success(`${res.count} âncora(s) detectada(s) e centralizada(s). Ajuste se precisar.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao detectar as âncoras');
+    } finally {
+      setDetectingAnchors(false);
     }
   };
 
@@ -716,9 +736,9 @@ function TemplateEditor({
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)_300px] gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_280px] gap-3">
         {/* Painel esquerdo */}
-        <div className="card space-y-3 max-h-[78vh] overflow-y-auto">
+        <div className="card space-y-3 max-h-[85vh] overflow-y-auto">
           {/* Multi-página (mesma folha): abas de página */}
           <div className="space-y-2">
             <p className="label">Páginas do cartão</p>
@@ -779,7 +799,9 @@ function TemplateEditor({
                    anchorType={anchorType} setAnchorType={setAnchorType}
                    anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
                    onAddBlock={addBlock}
-                   onDetectGrid={() => void detectGrid()} detecting={detecting} />
+                   anchorSize={anchorSize} setAnchorSize={setAnchorSize}
+                   onDetectGrid={() => void detectGrid()} detecting={detecting}
+                    onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors} />
 
           <div>
             <p className="label">Camadas</p>
@@ -803,11 +825,18 @@ function TemplateEditor({
         </div>
 
         {/* Área central */}
-        <div className="card p-2 flex flex-col gap-2 min-h-[60vh]">
+        <div className="card p-2 flex flex-col gap-2 min-h-[78vh]">
           <div className="flex items-center flex-wrap gap-2">
-            <Button size="icon" variant="ghost" title="Reduzir" onClick={() => setZoom((z) => Math.max(0.1, z - 0.1))}><ZoomOut size={16} /></Button>
-            <span className="text-xs w-10 text-center">{Math.round(zoom * 100)}%</span>
-            <Button size="icon" variant="ghost" title="Ampliar" onClick={() => setZoom((z) => Math.min(4, z + 0.1))}><ZoomIn size={16} /></Button>
+            <Button size="icon" variant="ghost" title="Reduzir" onClick={() => setZoom((z) => Math.max(0.1, z - 0.05))}><ZoomOut size={16} /></Button>
+            <input type="number" min={10} max={400} step={1} value={Math.round(zoom * 100)}
+                   onChange={(e) => {
+                     const v = Number(e.target.value);
+                     if (!Number.isFinite(v)) return;
+                     setZoom(Math.max(0.1, Math.min(4, v / 100)));
+                   }}
+                   className="text-xs w-12 text-center border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 bg-transparent" />
+            <span className="text-xs text-gray-500">%</span>
+            <Button size="icon" variant="ghost" title="Ampliar" onClick={() => setZoom((z) => Math.min(4, z + 0.05))}><ZoomIn size={16} /></Button>
             <Button size="icon" variant="ghost" title="Ajustar"
                     onClick={() => { setZoom(0.5); setPan({ x: 0, y: 0 }); }}><Maximize size={16} /></Button>
             <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
@@ -856,7 +885,7 @@ function TemplateEditor({
         </div>
 
         {/* Painel direito */}
-        <div className="card space-y-3 max-h-[78vh] overflow-y-auto">
+        <div className="card space-y-3 max-h-[85vh] overflow-y-auto">
           <PropertiesPanel config={config} selection={selection} updateField={updateField} />
           <ValidationPanel issues={issues} onGoTo={setSelection} />
           <ActionsPanel detailId={detail.id} />
@@ -873,6 +902,7 @@ function TemplateEditor({
 function buildCreate(
   cfg: CustomConfig, region: 'anchor' | 'qr' | 'info', rect: Rect,
   anchorType: 'aruco' | 'quad', arucoId: number,
+  anchorSize: number = 0.05,
   page: number = 0,
 ): { config: CustomConfig; selection: Selection } | null {
   if (region === 'qr') {
@@ -886,7 +916,7 @@ function buildCreate(
     const info: CustomInfoRegion = { id: `info_${rnd()}`, kind: 'info', ...rect };
     return { config: { ...cfg, info_regions: [...cfg.info_regions, info] }, selection: { kind: 'info', id: info.id } };
   }
-  const size = Math.max(rect.w, rect.h);
+const size = anchorSize;
   const anchor: CustomAnchor = {
     id: `anc_${rnd()}`, type: anchorType, corner: null,
     aruco_id: anchorType === 'aruco' ? arucoId : null,
@@ -922,11 +952,10 @@ function setRect(cfg: CustomConfig, kind: Exclude<RegionType, 'block'>, id: stri
   if (kind === 'info') {
     return { ...cfg, info_regions: cfg.info_regions.map((i) => (i.id === id ? { ...i, ...rect } : i)) };
   }
-  const size = Math.max(rect.w, rect.h);
   return {
     ...cfg,
     anchors: cfg.anchors.map((a) =>
-      a.id === id ? { ...a, x: rect.x + size / 2, y: rect.y + size / 2, size } : a),
+      a.id === id ? { ...a, x: rect.x + a.size / 2, y: rect.y + a.size / 2 } : a),
   };
 }
 
@@ -953,15 +982,18 @@ function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
 // ───────────────────────────────────────────────────────────────────────────
 
 function Toolbar({
-  tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId,
-  onAddBlock, onDetectGrid, detecting,
+  tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId, anchorSize, setAnchorSize,
+  onAddBlock, onDetectGrid, onDetectAnchors, detecting, detectingAnchors,
 }: {
   tool: Tool; setTool: (t: Tool) => void;
   anchorType: 'aruco' | 'quad'; setAnchorType: (t: 'aruco' | 'quad') => void;
   anchorArucoId: number; setAnchorArucoId: (n: number) => void;
+  anchorSize: number; setAnchorSize: (n: number) => void;
   onAddBlock: () => void;
   onDetectGrid: () => void;
+  onDetectAnchors: () => void;
   detecting: boolean;
+  detectingAnchors: boolean;
 }) {
   const tools: { id: Tool; label: string; icon: typeof PenSquare }[] = [
     { id: 'select', label: 'Selecionar', icon: Crosshair },
@@ -988,6 +1020,11 @@ function Toolbar({
                 className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
           <ScanSearch size={15} aria-hidden /> {detecting ? 'Detectando…' : 'Detectar grade'}
         </button>
+        <button type="button" onClick={onDetectAnchors} disabled={detectingAnchors}
+                title="Detecta e centraliza automaticamente as 4 âncoras de canto da imagem importada"
+                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
+          <Crosshair size={15} aria-hidden /> {detectingAnchors ? 'Detectando…' : 'Detectar âncoras'}
+        </button>
       </div>
 
       {tool === 'anchor' && (
@@ -1004,6 +1041,15 @@ function Toolbar({
                      onChange={(e) => setAnchorArucoId(Number(e.target.value))} />
             </Field>
           )}
+          <Field label="Tamanho (%)" htmlFor="anc-size">
+            <Input id="anc-size" type="number" min={1} max={20} step={0.5}
+                   value={Math.round(anchorSize * 100)}
+                   onChange={(e) => {
+                     const v = Number(e.target.value);
+                     if (!Number.isFinite(v)) return;
+                     setAnchorSize(Math.max(0.01, Math.min(0.2, v / 100)));
+                   }} />
+          </Field>
         </div>
       )}
     </div>
@@ -1165,7 +1211,7 @@ function RegionalList({
 function PctInput({ label, value, onChange, id }: { label: string; value: number; onChange: (v: number) => void; id: string }) {
   return (
     <Field label={label} htmlFor={id}>
-      <Input id={id} type="number" step={0.1} value={Number((value * 100).toFixed(2))}
+      <Input id={id} type="number" step={0.01} value={Number((value * 100).toFixed(3))}
              onChange={(e) => onChange(Number(e.target.value) / 100)} />
     </Field>
   );
@@ -1340,7 +1386,7 @@ function PropertiesPanel({
       </Field>
       <div className="grid grid-cols-2 gap-2">
         <Field label="Valor (pontos)" htmlFor="p-blk-points">
-          <Input id="p-blk-points" type="number" step={0.5} value={b.points}
+          <Input id="p-blk-points" type="number" step={0.1} value={b.points}
                  onChange={(e) => upd({ points: Number(e.target.value) })} />
         </Field>
         <div className="flex items-end gap-3 pb-1 text-sm">

@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PDFViewer, PDFDownloadLink } from '@react-pdf/renderer';
 import { ArrowLeft, Download, Eye, Printer, Users } from 'lucide-react';
-import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, HerbySpec, isSaeExam, isHerbyExam, isSimuladoExam, templateLabel } from '../types';
+import { AppView, Exam, SaeSpec, DEFAULT_SAE_SPEC, DEFAULT_HERBY_SPEC, HerbySpec, isSaeExam, isHerbyExam, isSimuladoExam, isCustomExam, templateLabel } from '../types';
 import { getExam, getExams, saveExam } from '../utils/storage';
 import { generateBlankCard, checkHealth, syncExam } from '../utils/api';
+import { getCustomTemplate, customTemplateImage, printCustomTemplate, type CustomTemplateDetail } from '../utils/custom-template-api';
 import AnswerCard from '../components/AnswerCard';
 import CardPdfDocument from '../components/pdf/CardPdfDocument';
 import { useAuth } from '../context/AuthContext';
@@ -33,6 +34,8 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
   const [sourceNote, setSourceNote] = useState<string | null>(null);
   const [pngUrl, setPngUrl] = useState<string | null>(null);
   const [loadingPng, setLoadingPng] = useState(false);
+  const [customTpl, setCustomTpl] = useState<CustomTemplateDetail | null>(null);
+  const [customImgUrl, setCustomImgUrl] = useState<string | null>(null);
   const [saeSpec, setSaeSpec] = useState<SaeSpec>({ ...DEFAULT_SAE_SPEC });
 
   useEffect(() => {
@@ -47,6 +50,7 @@ export default function GenerateCardPage({ examId, onNavigate }: Props) {
 const isHerby = isHerbyExam(activeExam);
 const isColar = activeExam?.templateType === 'colar';
 const isSimulado = isSimuladoExam(activeExam);
+const isCustom = isCustomExam(activeExam);
 
 // Carrega o cabeçalho SAE salvo na prova ao trocar de prova
 const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC });
@@ -56,6 +60,33 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
     setHerbySpec({ ...DEFAULT_HERBY_SPEC, ...(activeExam?.herbySpec ?? {}) });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedExamId]);
+
+  // Carrega o gabarito personalizado (imagem + detalhes) quando a prova é custom
+  useEffect(() => {
+    if (!isCustom || !activeExam?.customTemplateId) {
+      setCustomTpl(null);
+      if (customImgUrl) { URL.revokeObjectURL(customImgUrl); setCustomImgUrl(null); }
+      return;
+    }
+    let cancelled = false;
+    let url: string | null = null;
+    (async () => {
+      try {
+        const cid = activeExam.customTemplateId as number;
+        const tpl = await getCustomTemplate(cid);
+        if (cancelled) return;
+        setCustomTpl(tpl);
+        const blob = await customTemplateImage(cid);
+        if (cancelled) return;
+        url = URL.createObjectURL(blob);
+        setCustomImgUrl(url);
+      } catch {
+        if (!cancelled) { setCustomTpl(null); setCustomImgUrl(null); }
+      }
+    })();
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isCustom, activeExam?.customTemplateId]);
 
   const setSae = (patch: Partial<SaeSpec>) => setSaeSpec(prev => ({ ...prev, ...patch }));
   const setSaeTitulo = (i: number, v: string) =>
@@ -94,6 +125,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
     setLoadingPng(true);
     (async () => {
       try {
+        if (isCustom) return;
         if (!(await checkHealth())) return;
         const blob = await generateBlankCard(
           activeExam.subjectLP,
@@ -145,7 +177,15 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
   };
 
   const handlePrint = async () => {
-    // Abre o PDF do servidor em nova aba para impressão; fallback: impressão do DOM
+    if (isCustom && activeExam?.customTemplateId) {
+      try {
+        await printCustomTemplate(activeExam.customTemplateId, 'blank', 'PDF');
+        setSourceNote('PDF do gabarito personalizado gerado pelo servidor.');
+        return;
+      } catch {
+        // fallback
+      }
+    }
     const blob = await buildServerPdf();
     if (blob && blob.type.includes('pdf')) {
       const url = URL.createObjectURL(blob);
@@ -161,6 +201,11 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
     setDownloading(true);
     setSourceNote(null);
     try {
+      if (isCustom && activeExam?.customTemplateId) {
+        await printCustomTemplate(activeExam.customTemplateId, 'blank', 'PDF');
+        setSourceNote('PDF do gabarito personalizado gerado pelo servidor.');
+        return;
+      }
       const blob = await buildServerPdf();
       if (blob) {
         downloadBlob(blob, `${isColar ? 'colar-avaliacao' : isSae ? 'cartao-sae' : isHerby ? 'cartao-herby' : isSimulado ? 'cartao-simulado' : 'cartao-resposta'}-${cardId}.pdf`);
@@ -224,7 +269,12 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
               {activeExam && (
                 <div className="bg-surface dark:bg-gray-800/60 rounded-lg p-4 text-sm">
                   <p className="text-ink dark:text-gray-100"><strong>Prova:</strong> {activeExam.name}</p>
-                  {isColar ? (
+                  {isCustom ? (
+                    <>
+                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Gabarito Personalizado{customTpl ? ` — ${customTpl.nome}` : ''}</p>
+                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {customTpl?.config_summary.n_questions ?? activeExam.questionsPerSubject}</p>
+                    </>
+                  ) : isColar ? (
                     <>
                       <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Colar em Avaliação (só o gabarito, sem cabeçalho)</p>
                       <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
@@ -346,6 +396,16 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                   </PDFDownloadLink>
                 </div>
               </div>
+            ) : isCustom ? (
+              <div className="print-answer-card shadow-2xl flex items-center justify-center p-4">
+                {customImgUrl ? (
+                  <img src={customImgUrl} alt="Gabarito personalizado" className="max-w-full h-auto" />
+                ) : (
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    {loadingPng ? 'Carregando prévia do servidor...' : 'Carregando imagem do gabarito personalizado...'}
+                  </div>
+                )}
+              </div>
             ) : isSae || isColar || isSimulado ? (
               <div className="print-answer-card shadow-2xl flex items-center justify-center p-8 text-center text-sm text-gray-500 dark:text-gray-400">
                 {loadingPng
@@ -365,7 +425,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         )}
       </div>
 
-      {showPreview && activeExam && !isSae && !isColar && !isSimulado && (
+      {showPreview && activeExam && !isSae && !isColar && !isSimulado && !isCustom && (
         <div id="print-card" className="print-answer-card" style={{ position: 'fixed', left: -10000, top: 0, zIndex: -1 }}>
           <AnswerCard exam={activeExam} cardId={cardId} />
         </div>
