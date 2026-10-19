@@ -57,6 +57,20 @@ describe('syncExam envia turma (bug do campo sempre vazio)', () => {
     await syncExam({ ...EXAM_BASE });
     expect(body()).toMatchObject({ turma: null, turma_id: null });
   });
+
+  it('envia custom_template_id quando a prova usa Gabarito Personalizado', async () => {
+    stubFetch();
+    nextPayload = { avaliacao_id: 1, external_id: 'ex-1', titulo: 'Prova 1' };
+    await syncExam({ ...EXAM_BASE, customTemplateId: 7 });
+    expect(body()).toMatchObject({ custom_template_id: 7 });
+  });
+
+  it('sem modelo personalizado envia custom_template_id null', async () => {
+    stubFetch();
+    nextPayload = { avaliacao_id: 1, external_id: 'ex-1', titulo: 'Prova 1' };
+    await syncExam({ ...EXAM_BASE });
+    expect(body()).toMatchObject({ custom_template_id: null });
+  });
 });
 
 describe('cliente de turmas', () => {

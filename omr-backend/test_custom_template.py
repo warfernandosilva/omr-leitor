@@ -539,6 +539,55 @@ def test_api_links_exam_and_sets_template(authed, db_session):
     client.delete(f"/api/custom-templates/{tid}")
 
 
+def test_api_sync_links_active_custom_template(authed, db_session):
+    """Prova criada via /api/exams/sync com custom_template_id ativo fica vinculada."""
+    client = authed
+    from models import Avaliacao
+
+    r = _create(client, _png_bytes(_make_card({})), "Modelo via sync")
+    tid = r.json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+
+    r = client.post("/api/exams/sync", json={
+        "external_id": "ex-custom-sync",
+        "titulo": "Prova via sync",
+        "custom_template_id": tid,
+    })
+    assert r.status_code == 200, r.text
+
+    db = db_session()
+    try:
+        av = db.query(Avaliacao).filter(Avaliacao.external_id == "ex-custom-sync").one()
+        assert av.template == "custom"
+        assert av.custom_template_id == tid
+    finally:
+        db.close()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_sync_rejects_missing_or_inactive_custom_template(authed):
+    """Vínculo inválido: 404 para inexistente, 400 para modelo não ativo."""
+    client = authed
+
+    r = client.post("/api/exams/sync", json={
+        "external_id": "ex-custom-404",
+        "titulo": "Prova",
+        "custom_template_id": 999999,
+    })
+    assert r.status_code == 404, r.text
+
+    r = _create(client, _png_bytes(_make_card({})), "Ainda rascunho")
+    tid = r.json()["id"]
+    r = client.post("/api/exams/sync", json={
+        "external_id": "ex-custom-draft",
+        "titulo": "Prova",
+        "custom_template_id": tid,
+    })
+    assert r.status_code == 400, r.text
+    client.delete(f"/api/custom-templates/{tid}")
+
+
 def test_api_process_endpoint_with_custom_template(authed):
     client = authed
     r = _create(client, _png_bytes(_make_card({})), "Leitura custom")

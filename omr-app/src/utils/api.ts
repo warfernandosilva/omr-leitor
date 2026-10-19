@@ -448,6 +448,7 @@ export async function syncExam(exam: {
   questionsPerSubject?: number;
   layoutMode?: 'dual' | 'single';
   templateType?: 'padrao' | 'sae' | 'colar' | 'saev' | 'herby' | 'simulado';
+  customTemplateId?: number;
   saeSpec?: SaeSpec;
   herbySpec?: HerbySpec;
 }): Promise<SyncExamResult> {
@@ -464,6 +465,7 @@ export async function syncExam(exam: {
       questions_per_subject: exam.questionsPerSubject ?? 22,
       layout_mode: exam.layoutMode ?? 'dual',
       template: exam.templateType ?? 'padrao',
+      custom_template_id: exam.customTemplateId ?? null,
       sae: exam.templateType === 'sae' && exam.saeSpec
         ? { ...exam.saeSpec, n_questoes: exam.questionsPerSubject ?? 26 }
         : null,

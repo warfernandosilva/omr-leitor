@@ -12,6 +12,7 @@ import { MAX_QUESTIONS_PER_SUBJECT, MAX_QUESTIONS_SINGLE } from '../utils/card-t
 import { syncExam, getExamsFromDB, getDeletedExamsFromDB, isGoneError, deleteExamFromDB, checkHealth, listTurmas } from '../utils/api';
 import type { TurmaDTO } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
+import { listCustomTemplates, type CustomTemplateSummary } from '../utils/custom-template-api';
 import PageHeader from '../components/ui/PageHeader';
 import Field from '../components/ui/Field';
 import Input from '../components/ui/Input';
@@ -24,11 +25,15 @@ interface Props {
   onNavigate: (view: AppView, examId?: string) => void;
 }
 
+/** Modelo escolhido no formulário (inclui o pseudo-modelo "custom" para o Gabarito Personalizado). */
+type ModelChoice = NonNullable<Exam['templateType']> | 'custom';
+
 export default function NewExamPage({ onNavigate }: Props) {
   const { user } = useAuth();
   const [exams, setExams] = useState(() => getExams(user?.id));
   const [name, setName] = useState('');
-  const [templateType, setTemplateType] = useState<NonNullable<Exam['templateType']>>('padrao');
+  const [templateType, setTemplateType] = useState<ModelChoice>('padrao');
+  const [customTemplateId, setCustomTemplateId] = useState<number | ''>('');
   const [layoutMode, setLayoutMode] = useState<'dual' | 'single'>('dual');
   const [subjectLP, setSubjectLP] = useState('LÍNGUA PORTUGUESA');
   const [subjectMat, setSubjectMat] = useState('MATEMÁTICA');
@@ -44,6 +49,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const [step, setStep] = useState(0);
   const [examSearch, setExamSearch] = useState('');
   const [examStatusFilter, setExamStatusFilter] = useState<'' | ExamStatus>('');
+  const [customTemplates, setCustomTemplates] = useState<CustomTemplateSummary[]>([]);
 
   const STEPS = ['Dados', 'Modelo', 'Configurações', 'Revisão'] as const;
 
@@ -52,7 +58,7 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isSaev = templateType === 'saev';
   const isHerby = templateType === 'herby';
   const isSimulado = templateType === 'simulado';
-  const isCustom = isSae || isColar;
+  const isCustom = isSae || isColar || templateType === 'custom';
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
   // Herby: dual 1+1 a 26+26 ou single 1..26 (metade esquerda do cartão)
   // Simulado: tabela única, sempre single e sempre 22 questões
@@ -126,6 +132,10 @@ export default function NewExamPage({ onNavigate }: Props) {
     listTurmas().then(setTurmas).catch(() => setTurmas([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
+  // ─── Carregar modelos custom do backend ───
+  useEffect(() => {
+    listCustomTemplates().then((res) => setCustomTemplates(res.templates)).catch(() => setCustomTemplates([]));
+  }, []);
 
   const handleQpsChange = (raw: string) => {
     if (raw === '') { setQuestionsPerSubject(0); return; }
@@ -133,7 +143,7 @@ export default function NewExamPage({ onNavigate }: Props) {
     setQuestionsPerSubject(v);
   };
 
-  const handleTemplateChange = (t: NonNullable<Exam['templateType']>) => {
+  const handleTemplateChange = (t: ModelChoice) => {
     setTemplateType(t);
     if (t === 'saev') {
       setLayoutMode('dual');
@@ -168,6 +178,10 @@ export default function NewExamPage({ onNavigate }: Props) {
     if (!name.trim() || !subjectLP.trim()) return;
     if (layoutMode === 'dual' && !subjectMat.trim()) return;
     if (questionsPerSubject < 1) return;
+    if (templateType === 'custom' && customTemplateId === '') {
+      alert('Selecione um Gabarito Personalizado ativo para esta prova.');
+      return;
+    }
     setSaving(true);
 
     const turmaSel = turmaId === '' ? undefined : turmas.find(t => t.id === turmaId);
@@ -185,7 +199,8 @@ export default function NewExamPage({ onNavigate }: Props) {
       gradeScale,
       answerKey: null,
       layoutMode: isCustom ? 'single' : layoutMode,
-      templateType,
+      templateType: templateType === 'custom' ? 'padrao' : templateType,
+      customTemplateId: templateType === 'custom' && customTemplateId !== '' ? customTemplateId : undefined,
       saeSpec: isSae ? { ...DEFAULT_SAE_SPEC } : undefined,
       herbySpec: isHerby ? { ...DEFAULT_HERBY_SPEC } : undefined,
     };
@@ -241,7 +256,13 @@ export default function NewExamPage({ onNavigate }: Props) {
     setName(exam.name);
     setStatus(normalizeExamStatus(exam.status));
     setStep(0);
-    setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado' ? exam.templateType : 'padrao');
+    if (exam.customTemplateId != null) {
+      setTemplateType('custom');
+      setCustomTemplateId(exam.customTemplateId);
+    } else {
+      setTemplateType(exam.templateType === 'sae' || exam.templateType === 'colar' || exam.templateType === 'saev' || exam.templateType === 'herby' || exam.templateType === 'simulado' ? exam.templateType : 'padrao');
+      setCustomTemplateId('');
+    }
     setLayoutMode(exam.layoutMode === 'single' ? 'single' : 'dual');
     setSubjectLP(exam.subjectLP);
     setSubjectMat(exam.subjectMat);
@@ -258,17 +279,19 @@ export default function NewExamPage({ onNavigate }: Props) {
     setStatus('ativa');
     setStep(0);
     setTemplateType('padrao');
+    setCustomTemplateId('');
     setSubjectLP('LÍNGUA PORTUGUESA');
     setSubjectMat('MATEMÁTICA');
   };
 
-  const templates: { id: NonNullable<Exam['templateType']>; title: string; hint: string }[] = [
+  const templates: { id: ModelChoice; title: string; hint: string }[] = [
     { id: 'padrao', title: 'Padrão', hint: 'ArUco nos cantos · 1 ou 2 disciplinas' },
     { id: 'saev', title: 'Gabarito SAEV', hint: 'LP + MAT · 16 a 26 por disciplina' },
     { id: 'sae', title: 'Avaliação Contínua', hint: `Cabeçalho editável · até ${SAE_MAX_QUESTIONS} questões` },
     { id: 'colar', title: 'Colar em Avaliação', hint: `Só o gabarito · até ${SAE_MAX_QUESTIONS} questões` },
     { id: 'herby', title: 'Gabarito Herby', hint: '1 ou 2 disciplinas · QR duplo · 1 a 26 por disciplina' },
     { id: 'simulado', title: 'Simulado', hint: 'Só a tabela · réguas como âncora · 22 questões · sem QR' },
+    { id: 'custom', title: 'Gabarito Personalizado', hint: 'Modelo importado (âncoras + bolhas)' },
   ];
 
   const optionCard = (selected: boolean) =>
@@ -376,6 +399,37 @@ export default function NewExamPage({ onNavigate }: Props) {
               ))}
             </div>
           </div>
+
+          {templateType === 'custom' && (
+            customTemplates.length === 0 ? (
+              <div className="callout-warning text-sm">
+                Nenhum Gabarito Personalizado ativo. Crie e ative um modelo em{' '}
+                <button
+                  type="button"
+                  className="text-brand-600 hover:text-brand-700 dark:text-brand-200 underline"
+                  onClick={() => onNavigate('custom-template')}
+                >
+                  Gabarito personalizado
+                </button>{' '}
+                antes de vincular a esta prova.
+              </div>
+            ) : (
+              <Field label="Gabarito Personalizado *" htmlFor="exam-custom-template">
+                <Select
+                  id="exam-custom-template"
+                  value={customTemplateId}
+                  onChange={(e) => setCustomTemplateId(e.target.value === '' ? '' : Number(e.target.value))}
+                >
+                  <option value="">Selecione o modelo importado...</option>
+                  {customTemplates.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nome} ({t.config_summary.n_questions} quest{t.config_summary.n_questions === 1 ? 'ão' : 'ões'})
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )
+          )}
 
           {(!isCustom && templateType !== 'saev' && !isSimulado) && (
             <div>
@@ -610,9 +664,11 @@ export default function NewExamPage({ onNavigate }: Props) {
                       <span className="inline-flex flex-wrap gap-1 mr-1 align-middle">
                         <Badge tone={st === 'ativa' ? 'success' : st === 'rascunho' ? 'info' : 'neutral'}>{examStatusLabel(st)}</Badge>
                         {exam.turma && <Badge tone="success">{exam.turma}</Badge>}
-                        {exam.templateType && exam.templateType !== 'padrao' && (
+                        {exam.customTemplateId != null ? (
+                          <Badge tone="info">Gabarito Personalizado</Badge>
+                        ) : (exam.templateType && exam.templateType !== 'padrao' && (
                           <Badge tone="info">{templateLabel(exam.templateType)}</Badge>
-                        )}
+                        ))}
                       </span>
                       {exam.layoutMode === 'single'
                         ? exam.subjectLP

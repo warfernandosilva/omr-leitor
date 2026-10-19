@@ -240,6 +240,7 @@ class ExamSyncRequest(BaseModel):
     questions_per_subject: int = 22
     layout_mode: str = "dual"  # dual | single
     template: str = "padrao"  # padrao | sae | colar | saev | herby | simulado
+    custom_template_id: int | None = None  # vínculo com Gabarito Personalizado ativo
     sae: SaeSpecRequest | None = None  # cabeçalho editável (só SAE)
     herby: HerbySpecRequest | None = None  # cabeçalho editável (só Herby)
     grade_scale: str | None = None
@@ -1293,6 +1294,16 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
     av.layout_mode = req.layout_mode
     if req.template not in ("padrao", "sae", "colar", "saev", "herby", "simulado"):
         raise HTTPException(status_code=400, detail="template deve ser 'padrao', 'sae', 'colar', 'saev', 'herby' ou 'simulado'")
+    # Vínculo com Gabarito Personalizado: valida dono/status e marca a prova como custom.
+    if req.custom_template_id is not None:
+        from models import CustomTemplate
+        tpl = db.get(CustomTemplate, req.custom_template_id)
+        if tpl is None:
+            raise HTTPException(status_code=404, detail="Gabarito personalizado não encontrado")
+        auth.require_owner_or_admin(tpl, current_user)
+        if tpl.status != "ativo":
+            raise HTTPException(status_code=400, detail="Gabarito personalizado não está ativo")
+        av.custom_template_id = tpl.id
     # Prova com Gabarito Personalizado ativo mantém o vínculo (não volta p/ nativo).
     av.template = "custom" if av.custom_template_id is not None else req.template
     if req.sae is not None:
