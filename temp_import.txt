@@ -1,0 +1,230 @@
+﻿import { useEffect, useRef, useState } from 'react';
+import { Download, FileUp, GraduationCap, Upload } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import type { AppView } from '../types';
+import {
+  createTurma, importTurmaAlunos, listTurmas, saveBlob,
+  type TurmaDTO, type TurmaImportResult,
+} from '../utils/api';
+import { importStudents, type ImportResult } from '../utils/students';
+import PageHeader from '../components/ui/PageHeader';
+import Button from '../components/ui/Button';
+import Field from '../components/ui/Field';
+import Input from '../components/ui/Input';
+import Select from '../components/ui/Select';
+import EmptyState from '../components/ui/EmptyState';
+
+interface Props {
+  onNavigate: (view: AppView) => void;
+}
+
+/** Gera a planilha-modelo (Nome + MatrÃ­cula) para download. */
+function downloadTemplate() {
+  const ws = XLSX.utils.json_to_sheet([
+    { 'Nome': 'Ana Beatriz Lima', 'MatrÃ­cula': '0012' },
+    { 'Nome': 'Bruno Henrique Silva', 'MatrÃ­cula': '0013' },
+  ]);
+  ws['!cols'] = [{ wch: 28 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Alunos');
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' }) as ArrayBuffer;
+  saveBlob(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), 'modelo-alunos.xlsx');
+}
+
+/** ImportaÃ§Ã£o global de alunos para o catÃ¡logo de uma turma. */
+export default function ImportStudentsPage({ onNavigate }: Props) {
+  const [turmas, setTurmas] = useState<TurmaDTO[]>([]);
+  const [turmaId, setTurmaId] = useState('');
+  const [newTurma, setNewTurma] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [parsed, setParsed] = useState<ImportResult | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<TurmaImportResult | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const refresh = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      setTurmas(await listTurmas());
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Falha ao carregar turmas.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { refresh(); }, []);
+
+  const handleCreate = async () => {
+    if (!newTurma.trim()) return;
+    setCreating(true);
+    try {
+      const t = await createTurma(newTurma.trim());
+      setNewTurma('');
+      await refresh();
+      setTurmaId(String(t.id));
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Falha ao criar turma.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setFileName(file.name);
+    setParsed(null);
+    setParseError(null);
+    setResult(null);
+    setImportError(null);
+    try {
+      const r = await importStudents(file);
+      if (r.students.length === 0) throw new Error('Nenhum aluno vÃ¡lido encontrado no arquivo.');
+      setParsed(r);
+    } catch (err) {
+      setParseError(err instanceof Error ? err.message : 'NÃ£o foi possÃ­vel ler o arquivo.');
+    }
+  };
+
+  const handleImport = async () => {
+    if (!turmaId || !parsed) return;
+    setImporting(true);
+    setImportError(null);
+    setResult(null);
+    try {
+      const r = await importTurmaAlunos(
+        Number(turmaId),
+        parsed.students.map(s => ({ nome: s.name, matricula: s.identifier ?? null })),
+      );
+      setResult(r);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Falha ao importar.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const turmaName = turmas.find(t => String(t.id) === turmaId)?.nome ?? '';
+
+  return (
+    <div className="space-y-4 animate-fade-in max-w-3xl">
+      <PageHeader
+        title="Importar alunos"
+        subtitle="Planilha XLSX ou CSV para o catÃ¡logo de uma turma"
+        crumbs={[{ label: 'Gerenciamento' }, { label: 'Importar alunos' }]}
+      />
+
+      {loading ? (
+        <div className="card text-center py-12"><p className="text-gray-500 dark:text-gray-400" role="status">Carregando turmas...</p></div>
+      ) : loadError ? (
+        <div className="callout-danger" role="alert">{loadError}</div>
+      ) : (
+        <>
+          <div className="card">
+            <Field label="Turma de destino" htmlFor="import-turma">
+              <Select id="import-turma" value={turmaId} onChange={e => { setTurmaId(e.target.value); setResult(null); }}>
+                <option value="">Escolha a turma...</option>
+                {turmas.map(t => (
+                  <option key={t.id} value={t.id}>{t.nome} ({t.total_alunos} aluno(s))</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Ou criar turma nova" htmlFor="import-new-turma">
+              <div className="flex gap-2">
+                <Input
+                  id="import-new-turma"
+                  type="text"
+                  placeholder="Ex: 9Âº A"
+                  value={newTurma}
+                  onChange={e => setNewTurma(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreate(); }}
+                />
+                <Button onClick={handleCreate} loading={creating} disabled={!newTurma.trim()} className="min-h-[44px] shrink-0">
+                  Criar
+                </Button>
+              </div>
+            </Field>
+          </div>
+
+          <div className="card">
+            <h2 className="text-base font-semibold text-ink dark:text-white mb-1">Selecione o arquivo</h2>
+            <p className="field-helper">XLSX ou CSV com colunas de nome e matrÃ­cula. Arraste ou clique para selecionar.</p>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={!turmaId}
+              className="mt-3 w-full border-2 border-dashed border-line dark:border-gray-700 rounded-lg p-6 text-center hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-700/10 transition-colors min-h-[44px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Upload size={22} className="mx-auto mb-2 text-gray-400" aria-hidden />
+              <p className="text-sm font-medium text-ink dark:text-gray-100">
+                {!turmaId ? 'Escolha a turma de destino primeiro' : (fileName || 'Clique para selecionar o arquivo')}
+              </p>
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx,.xls,.csv,text/csv"
+              className="hidden"
+              aria-label="Arquivo XLSX ou CSV"
+              onChange={handleFile}
+            />
+            <Button variant="ghost" size="sm" onClick={downloadTemplate} icon={<Download size={14} aria-hidden />} className="mt-2">
+              Baixar planilha-modelo
+            </Button>
+            {parseError && <div className="callout-danger mt-3" role="alert">{parseError}</div>}
+          </div>
+
+          {parsed && (
+            <div className="card">
+              <h2 className="text-base font-semibold text-ink dark:text-white mb-1">PrÃ©via da leitura</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-300">
+                <strong>{parsed.students.length}</strong> aluno(s) vÃ¡lido(s) em {parsed.totalRowsRead} linha(s)
+                {parsed.ignored.length > 0 && ` Â· ${parsed.ignored.length} linha(s) ignorada(s)`}
+                {parsed.duplicateNamesCount > 0 && ` Â· ${parsed.duplicateNamesCount} nome(s) repetido(s) no arquivo`}.
+              </p>
+              <ul className="mt-2 max-h-44 overflow-y-auto text-sm divide-y divide-line dark:divide-gray-800 border border-line dark:border-gray-800 rounded-lg">
+                {parsed.students.slice(0, 30).map(s => (
+                  <li key={s.seq} className="px-3 py-1.5 flex justify-between gap-2">
+                    <span className="truncate text-ink dark:text-gray-100">{s.seq}. {s.name}</span>
+                    {s.identifier && <span className="text-gray-400 shrink-0">#{s.identifier}</span>}
+                  </li>
+                ))}
+              </ul>
+              {importError && <div className="callout-danger mt-3" role="alert">{importError}</div>}
+              {result && (
+                <div className="callout-success mt-3" role="status">
+                  Lista de <strong>{turmaName}</strong> atualizada: +{result.criados} novo(s), {result.atualizados} atualizado(s) por matrÃ­cula
+                  {result.ignorados > 0 && `, ${result.ignorados} ignorado(s)`}. Total: {result.total_alunos} aluno(s).
+                </div>
+              )}
+              <div className="flex flex-col sm:flex-row gap-2 mt-3">
+                <Button onClick={handleImport} loading={importing} icon={<FileUp size={15} aria-hidden />} className="min-h-[44px] flex-1">
+                  Confirmar importaÃ§Ã£o
+                </Button>
+                {result && (
+                  <Button variant="secondary" onClick={() => onNavigate('turmas')} icon={<GraduationCap size={15} aria-hidden />} className="min-h-[44px] flex-1">
+                    Ver turma
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!parsed && !parseError && (
+            <EmptyState
+              title="Nenhum arquivo lido"
+              description="Selecione uma planilha para ver a prÃ©via antes de confirmar."
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
