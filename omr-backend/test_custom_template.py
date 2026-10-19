@@ -1088,6 +1088,40 @@ def _make_dual_card() -> np.ndarray:
     return img
 
 
+def _make_custom_card(shape: str = "circle", n_q: int = 5,
+                      b_radius: float = B_RADIUS, pad: int = 0,
+                      opt_step: float = OPT_STEP, q_step: float = Q_STEP
+                      ) -> np.ndarray:
+    """Cartão sintético parametrizável (forma, tamanho, fundo, espaçamento).
+
+    Com `pad > 0` o cartão fica sobre um fundo escuro (simulando foto/scan com
+    margem), cenário em que `RETR_EXTERNAL` engolia as bolhas.
+    """
+    pad = int(pad)
+    W, H = PAGE_W + 2 * pad, PAGE_H + 2 * pad
+    img = np.full((H, W, 3), 120 if pad else 255, dtype=np.uint8)
+    card = np.ones((PAGE_H, PAGE_W, 3), dtype=np.uint8) * 255
+    for mid, (nx, ny) in ANCHOR_POS.items():
+        m = _generate_aruco_marker(ARUCO_DICT, mid, ARUCO_SIZE)
+        if m.ndim == 2:
+            m = cv2.cvtColor(m, cv2.COLOR_GRAY2BGR)
+        cx, cy = int(nx * PAGE_W), int(ny * PAGE_H)
+        card[cy - ARUCO_SIZE // 2:cy + ARUCO_SIZE // 2,
+             cx - ARUCO_SIZE // 2:cx + ARUCO_SIZE // 2] = m
+    r_px = max(3, int(b_radius * max(PAGE_W, PAGE_H)))
+    for q in range(n_q):
+        for i in range(4):
+            cx = int((B1_FX + i * opt_step) * PAGE_W)
+            cy = int((B1_FY + q * q_step) * PAGE_H)
+            if shape == "square":
+                cv2.rectangle(card, (cx - r_px, cy - r_px),
+                              (cx + r_px, cy + r_px), (0, 0, 0), 2)
+            else:
+                cv2.circle(card, (cx, cy), r_px, (0, 0, 0), 2)
+    img[pad:pad + PAGE_H, pad:pad + PAGE_W] = card
+    return img
+
+
 def test_detect_grid_single_block():
     """Detecta a grade do cartão de teste e cai perto da geometria real."""
     res = ct.detect_grid(_make_card({}), {})
@@ -1114,6 +1148,46 @@ def test_detect_grid_dual_columns():
     assert left["start_question"] == 1 and right["start_question"] == 7
     for b in (left, right):
         assert b["n_questions"] == 6 and b["labels"] == ["A", "B", "C", "D"]
+
+
+def test_detect_grid_detects_shape():
+    """Bolhas quadradas → 'square'; bolhas redondas → 'circle'."""
+    sq = ct.detect_grid(_make_custom_card(shape="square"), {})
+    assert sq["ok"] is True and sq["blocks"], sq
+    assert all(b["shape"] == "square" for b in sq["blocks"])
+
+    ci = ct.detect_grid(_make_custom_card(shape="circle"), {})
+    assert ci["ok"] is True and ci["blocks"]
+    assert all(b["shape"] == "circle" for b in ci["blocks"])
+
+
+def test_detect_grid_radius_tracks_bubble_size():
+    """O raio sugerido acompanha bolhas pequenas e grandes (não fica fixo)."""
+    small = ct.detect_grid(_make_custom_card(b_radius=0.009), {})
+    assert small["ok"] is True, small
+    assert small["blocks"][0]["shape"] == "circle"
+    assert small["blocks"][0]["radius"] == pytest.approx(0.009, abs=0.003)
+
+    big = ct.detect_grid(_make_custom_card(b_radius=0.030, q_step=0.09), {})
+    assert big["ok"] is True, big
+    assert big["blocks"][0]["radius"] == pytest.approx(0.030, abs=0.004)
+
+
+def test_detect_grid_card_on_background():
+    """Cartão com margem/fundo: a grade ainda é encontrada (RETR_LIST)."""
+    res = ct.detect_grid(_make_custom_card(pad=140), {})
+    assert res["ok"] is True, res
+    assert len(res["blocks"]) == 1
+    assert res["blocks"][0]["n_questions"] == 5
+
+
+def test_detect_grid_lattice_count_tolerates_gaps():
+    """A contagem por rede regular não é enganada por linhas ausentes/espúrias."""
+    step, count = ct._lattice_step_count([100.0, 200.0, 300.0, 500.0])
+    assert step == pytest.approx(100.0)
+    assert count == 5  # 100,200,300,[400 ausente],500
+    _step, count2 = ct._lattice_step_count([0.0, 120.0, 240.0])
+    assert count2 == 3
 
 
 def test_detect_grid_blank_image():

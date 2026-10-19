@@ -1069,10 +1069,19 @@ GRID_ROW_TOL_FACTOR = 0.9        # tol. de linha (y) = fator × diâmetro median
 GRID_COLUMN_TOL_FACTOR = 1.5     # tol. de coluna de grupo = fator × raio
 GRID_GAP_FACTOR = 2.5            # gap que separa áreas (entre alternativas)
 GRID_MIN_LABELS = 2              # menos alternativas que isto não é questão
+GRID_SQUARE_EXTENT_MIN = 0.89    # área/preenche-bbox acima disto ⇒ bolha quadrada
+GRID_MIN_QUESTIONS = 3           # menos questões que isto é ruído, não um bloco
 
 
-def _grid_candidates(gray: np.ndarray) -> list[tuple[float, float, float]]:
-    """Contornos com cara de bolha em px: `(cx, cy, raio)`. Dispensa config."""
+def _grid_candidates(gray: np.ndarray) -> list[tuple[float, float, float, bool]]:
+    """Contornos com cara de bolha em px: `(cx, cy, raio, quadrado)`.
+
+    Usa `RETR_LIST` (todos os contornos, não só os externos) para que a grade
+    seja encontrada mesmo quando o cartão está sobre um fundo escuro, dentro de
+    uma moldura/borda ou com as bolhas encaixadas numa caixa — situações em que
+    `RETR_EXTERNAL` devolveria só o contorno externo e engoliria as bolhas.
+    A forma (círculo vs quadrado) sai da circularidade do contorno.
+    """
     h, w = gray.shape[:2]
     if h < 8 or w < 8:
         return []
@@ -1080,13 +1089,14 @@ def _grid_candidates(gray: np.ndarray) -> list[tuple[float, float, float]]:
     try:
         blur = cv2.GaussianBlur(gray, (3, 3), 0)
         _, bw = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        # Abertura suave: remove ruído sem apagar anéis finos de bolhas pequenas.
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         bw = cv2.morphologyEx(bw, cv2.MORPH_OPEN, k)
-        cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cnts, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     except cv2.error:
         return []
 
-    out: list[tuple[float, float, float]] = []
+    out: list[tuple[float, float, float, bool]] = []
     for c in cnts:
         area = float(cv2.contourArea(c))
         if area <= 0:
@@ -1103,25 +1113,31 @@ def _grid_candidates(gray: np.ndarray) -> list[tuple[float, float, float]]:
         peri = float(cv2.arcLength(c, True))
         if peri <= 0:
             continue
-        if 4.0 * math.pi * area / (peri * peri) < GRID_MIN_CIRCULARITY:
+        circ = 4.0 * math.pi * area / (peri * peri)
+        if circ < GRID_MIN_CIRCULARITY:
             continue
-        out.append((x + ww / 2.0, y + hh / 2.0, (ww + hh) / 4.0))
+        # Forma por "extent" (área ÷ bbox), invariante à escala: círculo ≈ π/4 ≈
+        # 0,785 e quadrado ≈ 1,0. A circularidade sozinha erra bolhas pequenas,
+        # em que a discretização do perímetro a empurra para valores de quadrado.
+        extent = area / float(ww * hh)
+        square = extent >= GRID_SQUARE_EXTENT_MIN
+        out.append((x + ww / 2.0, y + hh / 2.0, (ww + hh) / 4.0, square))
     return out
 
 
-def _dominant_radius(cands: list[tuple[float, float, float]]
-                     ) -> tuple[float, list[tuple[float, float, float]]]:
+def _dominant_radius(cands: list[tuple[float, float, float, bool]]
+                     ) -> tuple[float, list[tuple[float, float, float, bool]]]:
     """Raio do grupo que melhor "se parece com as bolhas" e os candidatos nele.
 
     Escolhe o tamanho por `apoio × raio²`: as bolhas são o conjunto circular
     grande E numeroso. Isso descarta marcações de âncora (grandes, mas poucas)
-    e células internas do ArUco/texto (numerosas, mas pequenas).
+    e células internas do ArUco/texto (numerosas, mas pequenas). O raio devolvido
+    é a MEDIANA do grupo escolhido (mais fiel que o "seed" arredondado).
     """
     if not cands:
         return 0.0, []
     lo, hi = GRID_RADIUS_BAND
     best_score = -1.0
-    best_seed = 0.0
     best_kept: list = []
     for seed in {round(c[2], 1) for c in cands}:
         if seed <= 0:
@@ -1129,14 +1145,17 @@ def _dominant_radius(cands: list[tuple[float, float, float]]
         kept = [c for c in cands if lo * seed <= c[2] <= hi * seed]
         score = len(kept) * seed * seed
         if score > best_score:
-            best_score, best_seed, best_kept = score, seed, kept
-    return best_seed, best_kept
+            best_score, best_kept = score, kept
+    if not best_kept:
+        return 0.0, []
+    r0 = float(np.median([c[2] for c in best_kept]))
+    return r0, best_kept
 
 
-def _dedupe_points(cands: list[tuple[float, float, float]], min_dist: float
-                   ) -> list[tuple[float, float, float]]:
+def _dedupe_points(cands: list[tuple[float, float, float, bool]], min_dist: float
+                   ) -> list[tuple[float, float, float, bool]]:
     """Remove candidatos coincidentes (mantém o maior de cada aglomerado)."""
-    kept: list[tuple[float, float, float]] = []
+    kept: list[tuple[float, float, float, bool]] = []
     for c in sorted(cands, key=lambda c: -c[2]):
         if all((c[0] - k[0]) ** 2 + (c[1] - k[1]) ** 2 > min_dist * min_dist
                for k in kept):
@@ -1144,7 +1163,7 @@ def _dedupe_points(cands: list[tuple[float, float, float]], min_dist: float
     return kept
 
 
-def _group_rows(cands: list[tuple[float, float, float]], tol: float) -> list[dict]:
+def _group_rows(cands: list[tuple[float, float, float, bool]], tol: float) -> list[dict]:
     """Agrupa candidatos em linhas por proximidade em y."""
     rows: list[dict] = []
     for c in sorted(cands, key=lambda c: c[1]):
@@ -1157,8 +1176,8 @@ def _group_rows(cands: list[tuple[float, float, float]], tol: float) -> list[dic
     return rows
 
 
-def _split_by_gap(items: list[tuple[float, float, float]], gap: float
-                  ) -> list[list[tuple[float, float, float]]]:
+def _split_by_gap(items: list[tuple[float, float, float, bool]], gap: float
+                  ) -> list[list[tuple[float, float, float, bool]]]:
     """Separa itens ordenados por x onde o vão supera `gap`."""
     xs = sorted(items, key=lambda c: c[0])
     groups: list[list] = [[xs[0]]]
@@ -1189,6 +1208,30 @@ def _mode_max(vals: list[int]) -> int:
     for v in vals:
         counts[v] = counts.get(v, 0) + 1
     return max(counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+
+
+def _lattice_step_count(ys: list[float]) -> tuple[float, int]:
+    """Ajusta a sequência de y a uma rede regular: `(passo, nº de questões)`.
+
+    Estima o passo pela MEDIANA dos vãos (robusta a uma linha ausente/espúria) e
+    projeta o intervalo total na rede. Assim a contagem não é refém de um
+    agrupamento que fundiu/partiu uma linha por ruído — o que mais erra o número
+    de questões em fotos reais.
+    """
+    ys = sorted(ys)
+    if len(ys) <= 1:
+        return 0.0, len(ys)
+    gaps = [b - a for a, b in zip(ys, ys[1:]) if b - a > 1e-6]
+    if not gaps:
+        return 0.0, 1
+    step = float(np.median(gaps))
+    if step <= 0:
+        return 0.0, len(ys)
+    count = int(round((ys[-1] - ys[0]) / step)) + 1
+    if count < 1:
+        count = 1
+    # Sanidade: uma rede nunca descreve menos linhas do que as detectadas.
+    return step, max(count, 1)
 
 
 def detect_grid(image: np.ndarray, config: dict | None = None,
@@ -1238,6 +1281,7 @@ def detect_grid(image: np.ndarray, config: dict | None = None,
 
     blocks: list[dict] = []
     start_question = max(1, int(start_question or 1))
+    base_question = start_question
     for cl in sorted(columns, key=lambda c: c["x"]):
         gs = sorted(cl["items"], key=lambda g: g["y"])
         n_opts = _mode_max([len(g["items"]) for g in gs])
@@ -1256,15 +1300,20 @@ def detect_grid(image: np.ndarray, config: dict | None = None,
             xs = sorted(b[0] for b in g["items"])
             osx_gaps += [b - a for a, b in zip(xs, xs[1:])]
         ys = sorted(g["y"] for g in rows_use)
-        q_gaps = [b - a for a, b in zip(ys, ys[1:])]
-        if not osx_gaps or not q_gaps:
+        if not osx_gaps:
             continue
+        # Contagem/passo por rede regular: não conta linhas, ajusta a grade.
+        qsy_px, nq = _lattice_step_count(ys)
         osx = float(np.median(osx_gaps)) / w
-        qsy = float(np.median(q_gaps)) / h
+        qsy = qsy_px / h
         if osx <= 0 or qsy <= 0:
             continue
 
-        nq = len(rows_use)
+        # Forma dominante do bloco (círculo vs quadrado).
+        n_sq = sum(1 for g in rows_use for c in g["items"] if c[3])
+        n_tot = sum(len(g["items"]) for g in rows_use)
+        shape = "square" if n_tot and n_sq * 2 >= n_tot else "circle"
+
         blocks.append({
             "id": f"blk{len(blocks) + 1}",
             "type": "bubble_block",
@@ -1276,11 +1325,27 @@ def detect_grid(image: np.ndarray, config: dict | None = None,
             "n_questions": nq,
             "labels": [chr(ord("A") + i) for i in range(n_opts)],
             "radius": round(r0 / max(w, h), 4),
-            "shape": "circle",
+            "shape": shape,
             "start_question": start_question,
             "distribution": "column",
         })
         start_question += nq
+
+    # Filtra blocos ruidosos: artefatos de fusão de bolhas viram "colunas" com
+    # poucas questões e bem menores que o bloco principal. Colunas reais de um
+    # mesmo cartão têm tamanho parecido.
+    if blocks:
+        max_nq = max(b["n_questions"] for b in blocks)
+        min_nq = max(GRID_MIN_QUESTIONS, int(math.ceil(0.5 * max_nq)))
+        blocks = [b for b in blocks if b["n_questions"] >= min_nq]
+        for i, b in enumerate(blocks, start=1):
+            b["id"] = f"blk{i}"
+        # Renumera as questões em sequência a partir do offset original
+        # (preserva a continuidade da numeração entre páginas).
+        q = base_question
+        for b in blocks:
+            b["start_question"] = q
+            q += b["n_questions"]
 
     return {
         "ok": bool(blocks),
