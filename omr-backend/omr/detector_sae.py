@@ -48,42 +48,57 @@ class SaeDetectionResult:
 
 def _square_candidates(
     gray: np.ndarray,
-    min_area_frac: float = 0.0001,
+    min_area_frac: float = 0.00005,
     max_area_frac: float = 0.02,
 ) -> list[np.ndarray]:
     h, w = gray.shape[:2]
     img_area = float(h * w)
-    # Quadrado de 40px em 1448×2048 ≈ 0.05% da área; aceita ampla faixa de escala.
     min_area = img_area * min_area_frac
     max_area = img_area * max_area_frac
 
-    _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    # RETR_LIST (não EXTERNAL): ilhas brancas dentro do papel fechado
-    # (âncoras cercadas de preto) são contornos aninhados e seriam ignoradas.
-    contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    def _from_bw(bw):
+        contours, _ = cv2.findContours(bw, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        out = []
+        for cnt in contours:
+            area = float(cv2.contourArea(cnt))
+            if not (min_area <= area <= max_area):
+                continue
+            peri = float(cv2.arcLength(cnt, True))
+            if peri <= 0:
+                continue
+            approx = cv2.approxPolyDP(cnt, 0.03 * peri, True)
+            if len(approx) != 4 or not cv2.isContourConvex(approx):
+                continue
+            x, y, cw, ch = cv2.boundingRect(approx)
+            if ch == 0:
+                continue
+            aspect = cw / float(ch)
+            if not (0.72 <= aspect <= 1.38):
+                continue
+            rect_area = float(cw * ch)
+            solidity = area / rect_area if rect_area > 0 else 0.0
+            if solidity < 0.82:
+                continue
+            out.append(approx.reshape(-1, 2).astype(np.float64))
+        return out
 
     out = []
-    for cnt in contours:
-        area = float(cv2.contourArea(cnt))
-        if not (min_area <= area <= max_area):
-            continue
-        peri = float(cv2.arcLength(cnt, True))
-        if peri <= 0:
-            continue
-        approx = cv2.approxPolyDP(cnt, 0.03 * peri, True)
-        if len(approx) != 4 or not cv2.isContourConvex(approx):
-            continue
-        x, y, cw, ch = cv2.boundingRect(approx)
-        if ch == 0:
-            continue
-        aspect = cw / float(ch)
-        if not (0.72 <= aspect <= 1.38):
-            continue
-        rect_area = float(cw * ch)
-        solidity = area / rect_area if rect_area > 0 else 0.0
-        if solidity < 0.82:
-            continue
-        out.append(approx.reshape(-1, 2).astype(np.float64))
+    try:
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        _, bw = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        out = _from_bw(bw)
+    except cv2.error:
+        out = []
+    if len(out) < 4:
+        try:
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            bw = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                       cv2.THRESH_BINARY_INV, 31, 5)
+            out2 = _from_bw(bw)
+            if len(out2) > len(out):
+                out = out2
+        except cv2.error:
+            pass
     return out
 
 
