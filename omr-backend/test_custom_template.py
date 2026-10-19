@@ -1470,6 +1470,124 @@ def test_process_manual_corners_invalid_reports_diagnostics():
     assert "convexo" in diag["detail"]
 
 
+# ─── Cantos da folha (page_corners) ───
+
+def _config_page_corners(corners: list[dict]) -> dict:
+    cfg = _config()
+    cfg["anchors"] = []
+    cfg["page_corners"] = corners
+    return cfg
+
+
+def test_page_corners_from_corner_anchors():
+    """Com 4 marcadores de canto, os cantos da folha saem deles."""
+    blank = np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255
+    corners, inferred = ct.detect_page_corners_ex(blank, _config())
+    assert inferred is False
+    assert len(corners) == 4
+    assert corners[0] == pytest.approx({"x": 0.10, "y": 0.10})
+    assert corners[1] == pytest.approx({"x": 0.90, "y": 0.10})
+    assert corners[2] == pytest.approx({"x": 0.90, "y": 0.90})
+    assert corners[3] == pytest.approx({"x": 0.10, "y": 0.90})
+
+
+def test_page_corners_from_anchors_ignores_stale_page_size():
+    """Âncoras (normalizadas) independem de page_w/page_h defasados."""
+    cfg = _config()
+    cfg["page_w"], cfg["page_h"] = 500, 700  # defasado em relação à imagem
+    blank = np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255
+    corners, inferred = ct.detect_page_corners_ex(blank, cfg)
+    assert inferred is False
+    assert corners[0] == pytest.approx({"x": 0.10, "y": 0.10})
+    assert corners[2] == pytest.approx({"x": 0.90, "y": 0.90})
+
+
+def test_page_corners_prefers_quad_containing_blocks():
+    """Escolhe o quadrilátero que contém as bolhas, não o maior da imagem."""
+    img = np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255
+    # Retângulo em volta do bloco de bolhas (contém o conteúdo).
+    cv2.rectangle(img, (280, 420), (600, 830), (0, 0, 0), 6)
+    # Retângulo maior, em outra região (não contém as bolhas).
+    cv2.rectangle(img, (700, 80), (980, 1320), (0, 0, 0), 6)
+
+    cfg = _config()
+    cfg["anchors"] = []  # força o caminho por contorno
+    corners, inferred = ct.detect_page_corners_ex(img, cfg)
+    assert inferred is False
+    # O escolhido é o que envolve as bolhas (x ~ 280..600), não o da direita.
+    assert corners[0]["x"] == pytest.approx(280 / PAGE_W, abs=0.02)
+    assert corners[1]["x"] == pytest.approx(600 / PAGE_W, abs=0.02)
+
+
+def test_page_corners_fall_back_to_image_corners(monkeypatch):
+    """Sem âncoras e sem contorno, usa os cantos da imagem e marca inferred."""
+    blank = np.ones((PAGE_H, PAGE_W, 3), np.uint8) * 255
+    monkeypatch.setattr(ct, "_detect_page_corners", lambda *a, **k: None)
+    corners, inferred = ct.detect_page_corners_ex(blank, _config_page_corners([]))
+    assert inferred is True
+    assert corners == pytest.approx([
+        {"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0},
+        {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0},
+    ])
+
+
+def test_page_corners_are_destination_not_source(monkeypatch):
+    """page_corners define o destino da homografia (região da folha no modelo)."""
+    pc = [{"x": 0.2, "y": 0.1}, {"x": 0.8, "y": 0.1},
+          {"x": 0.8, "y": 0.9}, {"x": 0.2, "y": 0.9}]
+    cfg = _config_page_corners(pc)
+    cfg["questions"] = []
+    image = np.ones((600, 400, 3), np.uint8) * 255
+
+    # Simula a detecção automática achando a folha nas bordas da foto.
+    src = {"TL": (10.0, 10.0), "TR": (390.0, 10.0),
+           "BR": (390.0, 590.0), "BL": (10.0, 590.0)}
+    monkeypatch.setattr(ct, "_detect_anchor_corners_ex",
+                        lambda *a, **k: (src, "", {"method": "page_edge",
+                                                   "detected": list(ct.CORNERS),
+                                                   "inferred": []}))
+
+    M, cw, ch, reason, meta = ct.build_homography_ex(image, cfg)
+    assert reason == "" and M is not None
+    # Os cantos de origem (borda da foto) caem na região page_corners do modelo.
+    expected = ct._page_corners_dst(ct.normalize_config(cfg), cw, ch)
+    got = cv2.perspectiveTransform(
+        np.array([[src[c] for c in ct.CORNERS]], dtype=np.float32), M)[0]
+    for i, c in enumerate(ct.CORNERS):
+        assert got[i] == pytest.approx(expected[c], abs=1e-3)
+
+
+def test_process_does_not_use_page_corners_as_manual_corners(monkeypatch):
+    """page_corners não são cantos da FOTO: não devem resgatar o alinhamento."""
+    card = _make_card({1: "A"})
+    cfg = _config_page_corners([{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0},
+                                {"x": 1.0, "y": 1.0}, {"x": 0.0, "y": 1.0}])
+
+    class _NoMarkers:
+        markers: list = []
+
+    monkeypatch.setattr(ct, "detect_markers", lambda *a, **k: _NoMarkers())
+    monkeypatch.setattr(ct, "_detect_page_corners", lambda *a, **k: None)
+
+    diag: dict = {}
+    assert ct.process_custom_image(card, cfg, diagnostics=diag) is None
+    assert diag["reason"] == "anchors"  # não "manual_corners"
+
+
+def test_api_detect_page_corners_endpoint(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Cantos").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+
+    r = client.post(f"/api/custom-templates/{tid}/detect-page-corners")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["count"] == 4
+    assert body["inferred"] is False
+    assert body["corners"][0] == pytest.approx({"x": 0.10, "y": 0.10}, abs=1e-3)
+
+
 def test_api_process_with_manual_corners(authed):
     client = authed
     tid = _create(client, _png_bytes(_make_card({})), "Manual").json()["id"]

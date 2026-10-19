@@ -88,6 +88,10 @@ export interface CustomConfig {
   // Multi-página (mesma folha): 1 = modelo de 1 página (default).
   n_pages?: number;
   anchors: CustomAnchor[];
+  // Cantos da FOLHA dentro da imagem do modelo (normalizados, TL/TR/BR/BL).
+  // Usados como DESTINO do alinhamento quando o modelo não tem as 4 âncoras
+  // de canto (não são cantos da foto capturada).
+  page_corners?: { x: number; y: number }[] | null;
   qr: CustomQr | null;
   info_regions: CustomInfoRegion[];
   questions: CustomBlock[];
@@ -303,6 +307,20 @@ export interface DetectGridResult {
 
 export function detectCustomGrid(id: number, page = 0): Promise<DetectGridResult> {
   return apiJsonBody(`/api/custom-templates/${id}/detect-grid?page=${page}`, 'POST', {});
+}
+
+export interface PageCornersResult {
+  ok: boolean;
+  corners: { x: number; y: number }[] | null;
+  count: number;
+  /** true quando os cantos são estimados (não detectados) — ajuste manual. */
+  inferred?: boolean;
+  /** Aviso quando a config não corresponde à imagem atual (tamanho diferente). */
+  warning?: string | null;
+}
+
+export function detectPageCorners(id: number): Promise<PageCornersResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/detect-page-corners`, 'POST', {});
 }
 
 export interface DetectAnchorsResult {

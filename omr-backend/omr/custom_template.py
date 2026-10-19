@@ -122,6 +122,10 @@ def default_config(page_w: int = 0, page_h: int = 0) -> dict:
         # informativas, campos de impressão e parâmetros são compartilhados.
         "n_pages": 1,
         "anchors": [],
+        # Cantos da FOLHA dentro da imagem do modelo (normalizados, TL/TR/BR/BL).
+        # Servem de DESTINO da homografia quando não há 4 âncoras de canto —
+        # indicam onde a folha está na imagem importada (que pode ter margens).
+        "page_corners": None,
         "qr": None,
         "info_regions": [],
         "questions": [],
@@ -194,6 +198,29 @@ def normalize_config(config: dict | None) -> dict:
             "required": bool(a.get("required", True)),
         })
     out["anchors"] = anchors
+
+    # page_corners: lista de 4 {x, y} normalizados (ou None).
+    pc = cfg.get("page_corners")
+    if isinstance(pc, list) and len(pc) == 4:
+        out["page_corners"] = []
+        for p in pc:
+            if isinstance(p, dict):
+                out["page_corners"].append({
+                    "x": _clamp01(p.get("x")),
+                    "y": _clamp01(p.get("y")),
+                })
+            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                out["page_corners"].append({
+                    "x": _clamp01(p[0]),
+                    "y": _clamp01(p[1]),
+                })
+            else:
+                out["page_corners"] = None
+                break
+        if out["page_corners"] is None or len(out["page_corners"]) != 4:
+            out["page_corners"] = None
+    else:
+        out["page_corners"] = None
 
     qr = cfg.get("qr")
     if isinstance(qr, dict):
@@ -468,6 +495,14 @@ def validate_config(config: dict) -> list[dict]:
     if not cfg["page_w"] or not cfg["page_h"]:
         add("error", "page_size", "Dimensões da imagem não definidas (reimporte a imagem).", None)
 
+    pc = cfg.get("page_corners")
+    if isinstance(pc, list) and len(pc) == 4:
+        pts = [(float(p["x"]), float(p["y"])) for p in pc]
+        if not _is_convex_quad(pts):
+            add("warning", "page_corners_invalid",
+                "Cantos da folha não formam um quadrilátero convexo; "
+                "redetecte ou ajuste os pontos.", None)
+
     total_pages = max(1, int(cfg.get("n_pages") or 1))
     multi = total_pages > 1
 
@@ -662,31 +697,135 @@ def _expected_corners_px(config: dict, w: int, h: int) -> dict[str, tuple[float,
     return out
 
 
-def _detect_page_corners(gray: np.ndarray) -> dict[str, tuple[float, float]] | None:
-    """Maior quadrilátero da imagem como borda da página (método alternativo)."""
+def _sheet_region_from_blocks(cfg: dict, w: int, h: int) -> tuple[float, float, float, float] | None:
+    """Bounding box (x0, y0, x1, y1) em px dos blocos de bolhas, ou None.
+
+    A geometria dos blocos é normalizada (0..1) relativa à IMAGEM, então a
+    conversão para px usa as dimensões reais da imagem — independe de
+    `page_w/page_h` (que podem estar defasados após trocar a imagem).
+    """
+    nx0: list[float] = []
+    ny0: list[float] = []
+    nx1: list[float] = []
+    ny1: list[float] = []
+    for b in cfg.get("questions") or []:
+        if not isinstance(b, dict):
+            continue
+        try:
+            fx = float(b["first_x"])
+            fy = float(b["first_y"])
+            n_q = max(1, int(b.get("n_questions") or 1))
+            labels = b.get("labels") or ["A", "B", "C", "D"]
+            n_opt = max(1, len(labels))
+            cols = max(1, int(b.get("columns") or 1))
+            step_x = float(b.get("option_step_x") or 0)
+            step_y = float(b.get("question_step_y") or 0)
+            col_step = b.get("column_step_x")
+            col_step = float(col_step) if col_step else step_x * n_opt
+            rows = max(1, (n_q + cols - 1) // cols)
+            c_lo = min(fx, fx + col_step * (cols - 1))
+            c_hi = max(fx, fx + col_step * (cols - 1)) + step_x * (n_opt - 1)
+            nx0.append(c_lo); ny0.append(fy)
+            nx1.append(c_hi); ny1.append(fy + step_y * (rows - 1))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not nx0:
+        return None
+    return (min(nx0) * w, min(ny0) * h, max(nx1) * w, max(ny1) * h)
+
+
+def _point_in_quad(pt: tuple[float, float], quad: np.ndarray) -> bool:
+    """True se o ponto está dentro do quadrilátero (convexo, em ordem)."""
+    if pt is None:
+        return False
+    return cv2.pointPolygonTest(quad.reshape(-1, 1, 2).astype(np.float32),
+                                (float(pt[0]), float(pt[1])), False) >= 0
+
+
+def _detect_page_corners(gray: np.ndarray,
+                         config: dict | None = None
+                         ) -> dict[str, tuple[float, float]] | None:
+    """Maior quadrilátero da imagem como borda da página (método alternativo).
+
+    Tenta Otsu (vários blurs), threshold adaptativo e Canny. Aceita cartão
+    ocupando >= 5% do frame. Quando `config` traz blocos de bolhas, prefere o
+    quadrilátero que CONTÉM a região dos blocos (evita pegar uma coluna).
+    Se nada for encontrado, devolve None (o chamador pode usar os cantos da
+    imagem como último recurso).
+    """
     h, w = gray.shape[:2]
+    region = _sheet_region_from_blocks(normalize_config(config), w, h) if config else None
+    region_center = None
+    if region is not None:
+        region_center = ((region[0] + region[2]) / 2.0, (region[1] + region[3]) / 2.0)
+
+    quad_best: list[tuple[float, np.ndarray]] = []
+    candidates_bw = []
+    for blur_k in ((3, 3), (5, 5), (7, 7)):
+        try:
+            blur = cv2.GaussianBlur(gray, blur_k, 0)
+        except cv2.error:
+            continue
+        for thr in (cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU, None):
+            try:
+                if thr is None:
+                    bw = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                               cv2.THRESH_BINARY_INV, 31, 5)
+                else:
+                    _, bw = cv2.threshold(blur, 0, 255, thr)
+                candidates_bw.append(bw)
+            except cv2.error:
+                continue
+    # Canny
     try:
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        _, bw = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        edges = cv2.Canny(gray, 50, 150)
+        edges = cv2.dilate(edges, None, iterations=2)
+        candidates_bw.append(edges)
     except cv2.error:
-        return None
-    best = None
-    best_area = 0.0
-    for c in cnts:
-        area = float(cv2.contourArea(c))
-        if area < 0.25 * w * h:
+        pass
+
+    for bw in candidates_bw:
+        try:
+            cnts, _ = cv2.findContours(bw, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        except cv2.error:
             continue
-        peri = float(cv2.arcLength(c, True))
-        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-        if len(approx) != 4:
-            continue
-        if area > best_area:
-            best_area = area
-            best = approx.reshape(-1, 2).astype(np.float64)
-    if best is None:
+        for c in cnts:
+            area = float(cv2.contourArea(c))
+            if area < 0.05 * w * h:
+                continue
+            peri = float(cv2.arcLength(c, True))
+            if peri <= 0:
+                continue
+            found_quad = None
+            for eps in (0.015, 0.02, 0.03, 0.05):
+                approx = cv2.approxPolyDP(c, eps * peri, True)
+                if len(approx) == 4:
+                    found_quad = approx.reshape(-1, 2).astype(np.float64)
+                    break
+            if found_quad is None:
+                # Convex hull fallback: aproxima o invólucro do contorno
+                hull = cv2.convexHull(c)
+                peri_h = float(cv2.arcLength(hull, True))
+                if peri_h > 0:
+                    approx = cv2.approxPolyDP(hull, 0.02 * peri_h, True)
+                    if len(approx) == 4:
+                        found_quad = approx.reshape(-1, 2).astype(np.float64)
+            if found_quad is not None:
+                quad_best.append((area, found_quad))
+
+    if not quad_best:
         return None
-    return _order_corners(best)
+
+    if region_center is not None:
+        # Prefere o maior quadrilátero que contém o centro dos blocos de bolhas
+        # (a folha), descartando quadros internos que não englobam o conteúdo.
+        containing = [(a, q) for a, q in quad_best if _point_in_quad(region_center, q)]
+        if containing:
+            containing.sort(key=lambda t: t[0], reverse=True)
+            return _order_corners(containing[0][1])
+
+    quad_best.sort(key=lambda t: t[0], reverse=True)
+    return _order_corners(quad_best[0][1])
 
 
 def _order_corners(pts: np.ndarray) -> dict[str, tuple[float, float]]:
@@ -765,6 +904,22 @@ def _page_rect_dst(cw: int, ch: int) -> dict[str, tuple[float, float]]:
             "BR": (float(cw), float(ch)), "BL": (0.0, float(ch))}
 
 
+def _page_corners_dst(cfg: dict, cw: int, ch: int
+                      ) -> dict[str, tuple[float, float]] | None:
+    """Destino canônico a partir de `page_corners` (folha dentro do modelo)."""
+    pc = cfg.get("page_corners")
+    if not isinstance(pc, list) or len(pc) != 4:
+        return None
+    dst: dict[str, tuple[float, float]] = {}
+    for i, corner in enumerate(CORNERS):
+        p = pc[i]
+        try:
+            dst[corner] = (float(p["x"]) * cw, float(p["y"]) * ch)
+        except (KeyError, TypeError, ValueError):
+            return None
+    return dst
+
+
 def _infer_missing_corner(
     found: dict[str, tuple[float, float]],
     w: int,
@@ -800,7 +955,7 @@ def _infer_missing_corner(
     return m, (mx, my)
 
 
-def _detect_anchor_corners_ex(
+def _detect_anchor_corners_once(
     image: np.ndarray, config: dict
 ) -> tuple[dict[str, tuple[float, float]] | None, str, dict]:
     """Como `detect_anchor_corners`, mas devolve também metadados de alinhamento.
@@ -881,10 +1036,115 @@ def _detect_anchor_corners_ex(
         {"method": "none", "detected": sorted(found), "inferred": sorted(inferred)}
 
 
+def _detect_anchor_corners_ex(
+    image: np.ndarray, config: dict
+) -> tuple[dict[str, tuple[float, float]] | None, str, dict]:
+    """Tenta a detecção em 0°, 90°, 180° e 270° (fotos de celular rotacionadas).
+
+    Remapeia os cantos para o referencial original. Devolve o primeiro resultado
+    que encontrar as 4 âncoras (ou a borda da página).
+    """
+    if image is None:
+        return None, "imagem inválida", {"method": "none", "detected": [], "inferred": []}
+    h, w = image.shape[:2]
+    rotations = [
+        (None, lambda pt: pt),  # 0°
+        (cv2.ROTATE_90_CLOCKWISE, lambda pt: (pt[1], h - 1 - pt[0])),
+        (cv2.ROTATE_180, lambda pt: (w - 1 - pt[0], h - 1 - pt[1])),
+        (cv2.ROTATE_90_COUNTERCLOCKWISE, lambda pt: (w - 1 - pt[1], pt[0])),
+    ]
+    last = None
+    for code, remap in rotations:
+        img = image if code is None else cv2.rotate(image, code)
+        corners, reason, meta = _detect_anchor_corners_once(img, config)
+        if corners is not None:
+            # remapeia para o referencial original
+            remapped = {c: (float(remap(pt)[0]), float(remap(pt)[1])) for c, pt in corners.items()}
+            # atualiza dimensões para o remapeamento? já feito via remap
+            meta = dict(meta)
+            meta["rotation"] = 0 if code is None else int(code)
+            return remapped, reason, meta
+    # nenhuma rotação funcionou: mantém falha (cantos manuais são o fallback
+    # do usuário). Limiares mais baixos acima já tentaram o possível.
+    return None, ("Âncoras não detectadas. Aproxime a câmera, melhore a "
+                  "iluminação ou use 'Marcar cantos manualmente'."), \
+        {"method": "none", "detected": [], "inferred": []}
+
+
 def detect_anchor_corners(image: np.ndarray, config: dict) -> tuple[dict[str, tuple[float, float]] | None, str]:
     """Devolve {corner: (x, y) em px da foto} ou (None, motivo)."""
     corners, reason, _meta = _detect_anchor_corners_ex(image, config)
     return corners, reason
+
+
+def _corners_from_anchors(config: dict) -> dict[str, tuple[float, float]] | None:
+    """Cantos da folha (NORMALIZADOS 0..1) a partir dos 4 marcadores de canto.
+
+    Em modelos personalizados a folha costuma ser delimitada pelos marcadores
+    (e não por uma borda visível). Só devolve quando os 4 cantos TL/TR/BR/BL
+    estão presentes.
+    """
+    cfg = normalize_config(config)
+    out: dict[str, tuple[float, float]] = {}
+    for a in cfg["anchors"]:
+        corner = a.get("corner") or _infer_corner(cfg["anchors"], a.get("id"))
+        if corner in CORNERS and corner not in out:
+            out[corner] = (float(a["x"]), float(a["y"]))
+    if len(out) != 4:
+        return None
+    return out
+
+
+def detect_page_corners_ex(image: np.ndarray,
+                           config: dict | None = None
+                           ) -> tuple[list[dict] | None, bool]:
+    """Cantos da folha normalizados (0..1) + flag `inferred`.
+
+    Prioridade: (1) marcadores de canto configurados; (2) maior quadrilátero
+    que contém os blocos de bolhas; (3) borda da página. Se nada for detectado
+    devolve os cantos da imagem com `inferred=True` (a UI avisa para ajustar).
+    """
+    if image is None:
+        return None, False
+    h, w = image.shape[:2]
+
+    norm = _corners_from_anchors(config) if config else None
+    if norm is not None:
+        return ([{"x": _clamp01(norm[c][0]), "y": _clamp01(norm[c][1])}
+                 for c in CORNERS], False)
+
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    corners = _detect_page_corners(gray, config)
+    inferred = False
+    if corners is None:
+        # Último recurso: a folha preenchendo o frame.
+        corners = {"TL": (0.0, 0.0), "TR": (float(w), 0.0),
+                   "BR": (float(w), float(h)), "BL": (0.0, float(h))}
+        inferred = True
+    out = [{"x": _clamp01(corners[c][0] / w), "y": _clamp01(corners[c][1] / h)}
+           for c in CORNERS]
+    return out, inferred
+
+
+def detect_page_corners(image: np.ndarray,
+                        config: dict | None = None) -> list[dict] | None:
+    """Detecta os 4 cantos da folha (normalizados) ou None.
+
+    Compat: usa apenas a detecção geométrica (sem o fallback dos cantos da
+    imagem). Prefira `detect_page_corners_ex` quando quiser o fallback.
+    """
+    if image is None:
+        return None
+    h, w = image.shape[:2]
+    norm = _corners_from_anchors(config) if config else None
+    if norm is not None:
+        return [{"x": _clamp01(norm[c][0]), "y": _clamp01(norm[c][1])} for c in CORNERS]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+    corners = _detect_page_corners(gray, config)
+    if corners is None:
+        return None
+    return [{"x": _clamp01(corners[c][0] / w), "y": _clamp01(corners[c][1] / h)}
+            for c in CORNERS]
 
 
 def detect_anchors_auto(image: np.ndarray, page: int = 0) -> list[dict]:
@@ -1039,9 +1299,13 @@ def build_homography_ex(
 
     cfg = normalize_config(config)
     # Pontos de destino: as posições médias das âncoras (se houver) ou a
-    # página inteira quando o alinhamento veio da borda.
+    # região da folha dentro da imagem do modelo (`page_corners`). Sem
+    # `page_corners`, assume-se que a imagem do modelo é a folha inteira.
     expected = _expected_corners_px(cfg, cw, ch)
-    dst_map = expected if len(expected) == 4 else _page_rect_dst(cw, ch)
+    if len(expected) == 4:
+        dst_map = expected
+    else:
+        dst_map = _page_corners_dst(cfg, cw, ch) or _page_rect_dst(cw, ch)
 
     src = np.array([corners[c] for c in CORNERS], dtype=np.float32)
     dst = np.array([dst_map[c] for c in CORNERS], dtype=np.float32)

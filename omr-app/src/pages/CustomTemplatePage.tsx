@@ -3,7 +3,7 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 import {
   ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
-  Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus,
+  Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus, Move,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -20,7 +20,7 @@ import {
   CustomAnchor, CustomBlock, CustomConfig, CustomInfoRegion, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
-  createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, expandBlock,
+  createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
   getCustomTemplate, listCustomTemplates, printCustomTemplate, printPreviewCustomTemplate,
   testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
 } from '../utils/custom-template-api';
@@ -286,7 +286,8 @@ type DragState =
   | { kind: 'pan'; startX: number; startY: number; origX: number; origY: number }
   | { kind: 'move'; region: Exclude<RegionType, 'block'>; id: string; start: { x: number; y: number }; orig: Rect }
   | { kind: 'resize'; region: Exclude<RegionType, 'block'>; id: string; handle: string; orig: Rect }
-  | { kind: 'moveblock'; id: string; start: { x: number; y: number }; orig: { x: number; y: number } };
+  | { kind: 'moveblock'; id: string; start: { x: number; y: number }; orig: { x: number; y: number } }
+  | { kind: 'pagecorner'; index: number; start: { x: number; y: number }; orig: { x: number; y: number } };
 
 interface CreateBox { x0: number; y0: number; x1: number; y1: number }
 
@@ -315,6 +316,7 @@ function TemplateEditor({
   const [dragKind, setDragKind] = useState<string | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [detectingAnchors, setDetectingAnchors] = useState(false);
+  const [detectingPageCorners, setDetectingPageCorners] = useState(false);
   // Multi-página (mesma folha): página do modelo atualmente editada.
   const [pageIdx, setPageIdx] = useState(0);
   // Cópia de configuração de outro modelo
@@ -449,6 +451,10 @@ function TemplateEditor({
         const dx = (p.x - d.start.x) / baseW;
         const dy = (p.y - d.start.y) / baseH;
         setConfig((cfg) => setBlockStart(cfg, d.id, clamp(d.orig.x + dx, 0, 1), clamp(d.orig.y + dy, 0, 1)));
+      } else if (d.kind === 'pagecorner') {
+        const dx = (p.x - d.start.x) / baseW;
+        const dy = (p.y - d.start.y) / baseH;
+        setConfig((cfg) => setPageCorner(cfg, d.index, clamp(d.orig.x + dx, 0, 1), clamp(d.orig.y + dy, 0, 1)));
       }
     };
 
@@ -551,6 +557,39 @@ function TemplateEditor({
     setDragKind('resize');
   };
 
+  const startPageCornerDrag = (e: ReactPointerEvent<SVGElement>, index: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const pc = configRef.current.page_corners;
+    if (!pc || pc.length !== 4) return;
+    snapRef.current = clone(configRef.current);
+    const p = toBase(e.clientX, e.clientY);
+    dragRef.current = { kind: 'pagecorner', index, start: p, orig: { x: pc[index].x, y: pc[index].y } };
+    setDragKind('pagecorner');
+  };
+
+  /** Cria/redefine os 4 cantos da folha para ajuste manual (âncoras ou borda). */
+  const startManualPageCorners = () => {
+    const cfg = configRef.current;
+    const anchors = cfg.anchors.filter((a) => (a.page ?? 0) === pageIdx && a.corner);
+    const fromAnchors = anchors.length === 4
+      ? (['TL', 'TR', 'BR', 'BL'] as const).map((c) => {
+          const a = anchors.find((x) => x.corner === c)!;
+          return { x: a.x, y: a.y };
+        })
+      : null;
+    apply({
+      ...cfg,
+      page_corners: fromAnchors ?? [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }],
+    });
+    toast.info('Cantos da folha prontos para ajuste — arraste os 4 pontos.');
+  };
+
+  const removePageCorners = () => {
+    apply({ ...configRef.current, page_corners: null });
+    toast.info('Cantos da folha removidos.');
+  };
+
   const addBlock = () => {
     const id = `blk_${rnd()}`;
     const start = config.questions.reduce((m, b) => Math.max(m, b.start_question + b.n_questions), 1);
@@ -595,6 +634,29 @@ function TemplateEditor({
       toast.error(e instanceof Error ? e.message : 'Falha ao detectar as âncoras');
     } finally {
       setDetectingAnchors(false);
+    }
+  };
+
+  const handleDetectPageCorners = async () => {
+    setDetectingPageCorners(true);
+    try {
+      const res = await detectPageCorners(detail.id);
+      if (!res.ok || !res.corners || res.corners.length !== 4) {
+        toast.info('Não encontrei os cantos da folha — marque-os manualmente.');
+        return;
+      }
+      apply({ ...configRef.current, page_corners: res.corners });
+      if (res.warning) {
+        toast.error(res.warning);
+      } else if (res.inferred) {
+        toast.info('Cantos estimados (cartão preenchendo o frame) — ajuste manualmente se necessário.');
+      } else {
+        toast.success('Cantos da folha detectados. Ajuste se precisar.');
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao detectar os cantos da folha');
+    } finally {
+      setDetectingPageCorners(false);
     }
   };
 
@@ -801,7 +863,11 @@ function TemplateEditor({
                    onAddBlock={addBlock}
                    anchorSize={anchorSize} setAnchorSize={setAnchorSize}
                    onDetectGrid={() => void detectGrid()} detecting={detecting}
-                    onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors} />
+                    onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors}
+                    onDetectPageCorners={() => void handleDetectPageCorners()} detectingPageCorners={detectingPageCorners}
+                    onManualPageCorners={startManualPageCorners}
+                    onRemovePageCorners={removePageCorners}
+                    hasPageCorners={Array.isArray(config.page_corners) && config.page_corners.length === 4} />
 
           <div>
             <p className="label">Camadas</p>
@@ -867,6 +933,7 @@ function TemplateEditor({
                 <OverlayRegions
                   config={pageConfig} show={show} selection={selection} zoom={zoom}
                   onSelect={setSelection} onStartDrag={startDragRegion} onStartResize={startResize}
+                  onStartPageCorner={startPageCornerDrag}
                 />
                 {creating && (
                   <rect
@@ -881,6 +948,10 @@ function TemplateEditor({
           </div>
           <p className="text-[11px] text-gray-500 dark:text-gray-400">
             Alt+arrastar (ou botão do meio) move a visualização. {bubbles.length} bolha(s) configurada(s).
+            {Array.isArray(config.page_corners) && config.page_corners.length === 4 && (
+              <> Cantos da folha (roxo) ativos — arraste os 4 pontos para ajustar. Usados como destino
+              do alinhamento quando o modelo não tem as 4 âncoras de canto.</>
+            )}
           </p>
         </div>
 
@@ -966,6 +1037,15 @@ function setBlockStart(cfg: CustomConfig, id: string, x: number, y: number): Cus
   };
 }
 
+/** Atualiza um canto da folha (0..3, ordem TL/TR/BR/BL). */
+function setPageCorner(cfg: CustomConfig, index: number, x: number, y: number): CustomConfig {
+  const base = cfg.page_corners && cfg.page_corners.length === 4
+    ? cfg.page_corners.map((p) => ({ x: p.x, y: p.y }))
+    : [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }];
+  base[index] = { x, y };
+  return { ...cfg, page_corners: base };
+}
+
 function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
   let { x, y, w, h } = orig;
   const right = x + w;
@@ -983,7 +1063,8 @@ function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
 
 function Toolbar({
   tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId, anchorSize, setAnchorSize,
-  onAddBlock, onDetectGrid, onDetectAnchors, detecting, detectingAnchors,
+  onAddBlock, onDetectGrid, onDetectAnchors, onDetectPageCorners, onManualPageCorners, onRemovePageCorners,
+  detecting, detectingAnchors, detectingPageCorners, hasPageCorners,
 }: {
   tool: Tool; setTool: (t: Tool) => void;
   anchorType: 'aruco' | 'quad'; setAnchorType: (t: 'aruco' | 'quad') => void;
@@ -992,8 +1073,13 @@ function Toolbar({
   onAddBlock: () => void;
   onDetectGrid: () => void;
   onDetectAnchors: () => void;
+  onDetectPageCorners: () => void;
+  onManualPageCorners: () => void;
+  onRemovePageCorners: () => void;
   detecting: boolean;
   detectingAnchors: boolean;
+  detectingPageCorners: boolean;
+  hasPageCorners: boolean;
 }) {
   const tools: { id: Tool; label: string; icon: typeof PenSquare }[] = [
     { id: 'select', label: 'Selecionar', icon: Crosshair },
@@ -1025,6 +1111,23 @@ function Toolbar({
                 className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
           <Crosshair size={15} aria-hidden /> {detectingAnchors ? 'Detectando…' : 'Detectar âncoras'}
         </button>
+        <button type="button" onClick={onDetectPageCorners} disabled={detectingPageCorners}
+                title="Detecta os 4 cantos da folha (marcadores de canto ou maior quadrilátero)"
+                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
+          <Maximize size={15} aria-hidden /> {detectingPageCorners ? 'Detectando…' : 'Detectar cantos da folha'}
+        </button>
+        <button type="button" onClick={onManualPageCorners}
+                title="Cria os 4 cantos da folha para ajuste manual (arraste os pontos no cartão)"
+                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
+          <Move size={15} aria-hidden /> Ajustar cantos manualmente
+        </button>
+        {hasPageCorners && (
+          <button type="button" onClick={onRemovePageCorners}
+                  title="Remove os cantos da folha do modelo"
+                  className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
+              <Trash2 size={15} aria-hidden /> Remover cantos
+          </button>
+        )}
       </div>
 
       {tool === 'anchor' && (
@@ -1061,7 +1164,7 @@ function Toolbar({
 // ───────────────────────────────────────────────────────────────────────────
 
 function OverlayRegions({
-  config, show, selection, zoom, onSelect, onStartDrag, onStartResize,
+  config, show, selection, zoom, onSelect, onStartDrag, onStartResize, onStartPageCorner,
 }: {
   config: CustomConfig;
   show: { anchors: boolean; qr: boolean; info: boolean; bubbles: boolean };
@@ -1070,11 +1173,16 @@ function OverlayRegions({
   onSelect: (s: Selection) => void;
   onStartDrag: (e: ReactPointerEvent<SVGElement>, kind: RegionType, id: string) => void;
   onStartResize: (e: ReactPointerEvent<SVGElement>, kind: Exclude<RegionType, 'block'>, id: string, handle: string, orig: Rect) => void;
+  onStartPageCorner: (e: ReactPointerEvent<SVGElement>, index: number) => void;
 }) {
   const pw = config.page_w || 1;
   const ph = config.page_h || 1;
   const sel = (kind: RegionType, id: string) => selection?.kind === kind && selection?.id === id;
   const stroke = 2 / zoom;
+
+  const pageCorners = config.page_corners && config.page_corners.length === 4
+    ? config.page_corners
+    : null;
 
   const handlesFor = (kind: Exclude<RegionType, 'block'>, id: string, rect: Rect) => {
     const hs = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
@@ -1093,6 +1201,29 @@ function OverlayRegions({
 
   return (
     <g>
+      {pageCorners && (
+        <g>
+          <polygon
+            points={pageCorners.map((p) => `${p.x * pw},${p.y * ph}`).join(' ')}
+            fill="rgba(168,85,247,0.10)" stroke="#a855f7" strokeWidth={stroke}
+            strokeDasharray={`${6 / zoom} ${4 / zoom}`} style={{ cursor: 'move' }} />
+          {(['TL', 'TR', 'BR', 'BL'] as const).map((c, i) => {
+            const p = pageCorners[i];
+            const r = 6 / zoom;
+            return (
+              <g key={c}>
+                <circle cx={p.x * pw} cy={p.y * ph} r={r}
+                        fill="#a855f7" stroke="#fff" strokeWidth={1.5 / zoom}
+                        style={{ cursor: 'grab' }}
+                        onPointerDown={(e) => onStartPageCorner(e, i)} />
+                <text x={p.x * pw + r + 2 / zoom} y={p.y * ph + 4 / zoom}
+                      fontSize={10 / zoom} fill="#7e22ce">{c}</text>
+              </g>
+            );
+          })}
+        </g>
+      )}
+
       {show.anchors && config.anchors.map((a) => {
         const r: Rect = { x: a.x - a.size / 2, y: a.y - a.size / 2, w: a.size, h: a.size };
         return (

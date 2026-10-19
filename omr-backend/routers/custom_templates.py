@@ -32,6 +32,7 @@ from omr.custom_template import (
     config_summary,
     default_config,
     detect_anchors_auto,
+    detect_page_corners_ex,
     detect_grid,
     expand_bubbles,
     has_errors,
@@ -167,10 +168,45 @@ def _summary(tpl: CustomTemplate) -> dict:
     }
 
 
+def _size_mismatch_issue(tpl: CustomTemplate) -> dict | None:
+    """Aviso quando a configuração não corresponde à imagem atual do modelo.
+
+    Acontece quando a imagem é substituída por fora do fluxo normal (ou por
+    uma reimportação que não atualizou `page_w/page_h`): todas as coordenadas
+    normalizadas passam a apontar para o lugar errado.
+    """
+    try:
+        p = Path(tpl.image_path) if tpl.image_path else None
+        if p is None or not p.exists():
+            return None
+        img = cv2.imread(str(p))
+        if img is None:
+            return None
+        h, w = img.shape[:2]
+        cfg = normalize_config(tpl.config or {})
+        cw, ch = int(cfg["page_w"] or 0), int(cfg["page_h"] or 0)
+        if cw and ch and (abs(cw - w) > 2 or abs(ch - h) > 2):
+            return {
+                "level": "error",
+                "code": "image_size_mismatch",
+                "message": (f"A imagem atual é {w}×{h} px, mas a configuração do modelo "
+                            f"está em {cw}×{ch} px. Reimporte a imagem para o modelo e "
+                            "redesenhe as regiões (âncoras/blocos)."),
+                "region_id": None,
+            }
+    except Exception:
+        return None
+    return None
+
+
 def _detail(tpl: CustomTemplate) -> dict:
     d = _summary(tpl)
     d["config"] = normalize_config(tpl.config or {})
-    d["issues"] = tpl.last_issues
+    issues = list(tpl.last_issues or [])
+    mismatch = _size_mismatch_issue(tpl)
+    if mismatch and not any(i.get("code") == mismatch["code"] for i in issues):
+        issues.insert(0, mismatch)
+    d["issues"] = issues
     d["image_url"] = f"/api/custom-templates/{tpl.id}/image"
     d["preview_url"] = f"/api/custom-templates/{tpl.id}/preview"
     return d
@@ -766,6 +802,31 @@ def detect_anchors_endpoint(
     for a in anchors:
         a["page"] = max(0, int(page or 0))
     return {"ok": bool(anchors), "anchors": anchors, "count": len(anchors)}
+
+
+@router.post("/api/custom-templates/{tid}/detect-page-corners")
+def detect_page_corners_endpoint(
+    tid: int,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Detecta os 4 cantos da folha na imagem importada.
+
+    Prioriza os marcadores de canto configurados; depois o maior quadrilátero
+    que contém os blocos de bolhas; por fim a borda da página. Se nada for
+    detectado, devolve os cantos da imagem com `inferred=True`.
+    """
+    tpl = _get_template(db, tid, current_user)
+    image = _load_image(tpl)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Imagem original não encontrada")
+    corners, inferred = detect_page_corners_ex(image, tpl.config or {})
+    mismatch = _size_mismatch_issue(tpl)
+    warning = mismatch["message"] if mismatch else None
+    if not corners:
+        return {"ok": False, "corners": None, "count": 0, "inferred": False, "warning": warning}
+    return {"ok": True, "corners": corners, "count": len(corners),
+            "inferred": inferred, "warning": warning}
 
 
 @router.post("/api/custom-templates/{tid}/detect-grid")
