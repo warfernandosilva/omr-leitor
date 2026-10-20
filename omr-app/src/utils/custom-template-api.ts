@@ -455,6 +455,72 @@ export function expandBlock(block: CustomBlock): ExpandedBubble[] {
   return out;
 }
 
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+/**
+ * Desloca os ajustes individuais junto com o bloco. Os overrides são posições
+ * absolutas (x/y normalizados), então mover o bloco precisa mover as bolhas
+ * ajustadas na mesma direção.
+ */
+export function shiftOverrides(
+  overrides: CustomBlock['overrides'],
+  dx: number,
+  dy: number,
+): CustomBlock['overrides'] {
+  if ((!dx && !dy) || !overrides) return overrides ?? {};
+  const out: CustomBlock['overrides'] = {};
+  for (const [q, opts] of Object.entries(overrides)) {
+    const next: Record<string, { x?: number; y?: number }> = {};
+    for (const [label, p] of Object.entries(opts)) {
+      next[label] = {
+        ...p,
+        ...(typeof p.x === 'number' ? { x: clamp01(p.x + dx) } : {}),
+        ...(typeof p.y === 'number' ? { y: clamp01(p.y + dy) } : {}),
+      };
+    }
+    out[q] = next;
+  }
+  return out;
+}
+
+/** Move o início do bloco e leva os ajustes individuais junto. */
+export function moveBlockTo(block: CustomBlock, x: number, y: number): CustomBlock {
+  return {
+    ...block,
+    first_x: x,
+    first_y: y,
+    overrides: shiftOverrides(block.overrides, x - block.first_x, y - block.first_y),
+  };
+}
+
+/** Fixa uma bolha numa posição absoluta (override por questão/alternativa). */
+export function withBubbleOverride(
+  block: CustomBlock, question: number, option: string, x: number, y: number,
+): CustomBlock {
+  const qKey = String(question);
+  const prev = block.overrides?.[qKey] ?? {};
+  return {
+    ...block,
+    overrides: {
+      ...(block.overrides ?? {}),
+      [qKey]: { ...prev, [option]: { x, y } },
+    },
+  };
+}
+
+/** Remove o ajuste de uma bolha, devolvendo-a à grade do bloco. */
+export function withoutBubbleOverride(
+  block: CustomBlock, question: number, option: string,
+): CustomBlock {
+  const qKey = String(question);
+  const next = { ...(block.overrides ?? {}) };
+  const opts = { ...(next[qKey] ?? {}) };
+  delete opts[option];
+  if (Object.keys(opts).length) next[qKey] = opts;
+  else delete next[qKey];
+  return { ...block, overrides: next };
+}
+
 export function configQuestionCount(cfg: CustomConfig): number {
   const nums = new Set<number>();
   cfg.questions.forEach((b) => expandBlock(b).forEach((x) => nums.add(x.question)));

@@ -22,14 +22,15 @@ import {
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
   createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
-  getCustomTemplate, listCustomTemplates, printCustomTemplate, printPreviewCustomTemplate,
-  testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
+  getCustomTemplate, listCustomTemplates, moveBlockTo, printCustomTemplate, printPreviewCustomTemplate,
+  shiftOverrides, testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
+  withBubbleOverride, withoutBubbleOverride,
 } from '../utils/custom-template-api';
 import type { PrintPreviewResult } from '../utils/custom-template-api';
 import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
-type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block';
+type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble';
 type Selection = { kind: RegionType; id: string } | null;
 
 interface Rect { x: number; y: number; w: number; h: number }
@@ -37,6 +38,10 @@ interface Rect { x: number; y: number; w: number; h: number }
 const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const rnd = () => Math.random().toString(36).slice(2, 8);
+
+/** Gestos de pan do editor: botão do meio, Alt+arrastar ou Shift+botão direito. */
+const isPanGesture = (e: { button: number; altKey: boolean; shiftKey: boolean }) =>
+  e.button === 1 || e.altKey || (e.button === 2 && e.shiftKey);
 
 /** Bloco de questões com todos os campos do esquema (defaults + overrides). */
 function defaultBlock(id: string, start: number, over: Partial<CustomBlock> = {}): CustomBlock {
@@ -291,6 +296,7 @@ type DragState =
   | { kind: 'move'; region: Exclude<RegionType, 'block'>; id: string; start: { x: number; y: number }; orig: Rect }
   | { kind: 'resize'; region: Exclude<RegionType, 'block'>; id: string; handle: string; orig: Rect }
   | { kind: 'moveblock'; id: string; start: { x: number; y: number }; orig: { x: number; y: number } }
+  | { kind: 'bubble'; blockId: string; question: number; option: string; start: { x: number; y: number }; orig: { x: number; y: number } }
   | { kind: 'pagecorner'; index: number; start: { x: number; y: number }; orig: { x: number; y: number } };
 
 interface CreateBox { x0: number; y0: number; x1: number; y1: number }
@@ -455,6 +461,17 @@ function TemplateEditor({
         const dx = (p.x - d.start.x) / baseW;
         const dy = (p.y - d.start.y) / baseH;
         setConfig((cfg) => setBlockStart(cfg, d.id, clamp(d.orig.x + dx, 0, 1), clamp(d.orig.y + dy, 0, 1)));
+      } else if (d.kind === 'bubble') {
+        const dx = (p.x - d.start.x) / baseW;
+        const dy = (p.y - d.start.y) / baseH;
+        const nx = clamp(d.orig.x + dx, 0, 1);
+        const ny = clamp(d.orig.y + dy, 0, 1);
+        setConfig((cfg) => ({
+          ...cfg,
+          questions: cfg.questions.map((b) => (
+            b.id === d.blockId ? withBubbleOverride(b, d.question, d.option, nx, ny) : b
+          )),
+        }));
       } else if (d.kind === 'pagecorner') {
         const dx = (p.x - d.start.x) / baseW;
         const dy = (p.y - d.start.y) / baseH;
@@ -505,13 +522,12 @@ function TemplateEditor({
   }, [baseW, baseH, toBase, pushHistory, currentPage]);
 
   const onSvgPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
-    if (e.button === 1 || e.altKey) {
-      dragRef.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, origX: pan.x, origY: pan.y };
-      setDragKind('pan');
-      return;
-    }
+    // O pan é tratado no contêiner do editor (funciona também na área cinza).
+    if (isPanGesture(e)) return;
+    // Clique direito sem Shift apenas abre o menu de contexto.
+    if (e.button !== 0) return;
     if (tool === 'select') { setSelection(null); return; }
-    if (tool === 'place-block') return;
+    if (tool === 'place-block' || tool === 'bubble') return;
     const p = toBase(e.clientX, e.clientY);
     createCtxRef.current = { tool, anchorType, arucoId: anchorArucoId, anchorSize, page: currentPage };
     creatingRef.current = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
@@ -535,7 +551,7 @@ function TemplateEditor({
   };
 
   const startDragRegion = (e: ReactPointerEvent<SVGElement>, kind: RegionType, id: string) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || e.altKey) return;
     e.stopPropagation();
     setSelection({ kind, id });
     snapRef.current = clone(configRef.current);
@@ -553,8 +569,22 @@ function TemplateEditor({
     setDragKind('move');
   };
 
+  const startBubbleDrag = (
+    e: ReactPointerEvent<SVGElement>, blockId: string, question: number, option: string,
+    x: number, y: number,
+  ) => {
+    // Alt+arrasto continua sendo pan da página, mesmo sobre uma bolha.
+    if (e.button !== 0 || e.altKey) return;
+    e.stopPropagation();
+    setSelection({ kind: 'block', id: blockId });
+    snapRef.current = clone(configRef.current);
+    const p = toBase(e.clientX, e.clientY);
+    dragRef.current = { kind: 'bubble', blockId, question, option, start: p, orig: { x, y } };
+    setDragKind('bubble');
+  };
+
   const startResize = (e: ReactPointerEvent<SVGElement>, kind: Exclude<RegionType, 'block'>, id: string, handle: string, orig: Rect) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || e.altKey) return;
     e.stopPropagation();
     snapRef.current = clone(configRef.current);
     dragRef.current = { kind: 'resize', region: kind, id, handle, orig };
@@ -562,7 +592,7 @@ function TemplateEditor({
   };
 
   const startPageCornerDrag = (e: ReactPointerEvent<SVGElement>, index: number) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || e.altKey) return;
     e.stopPropagation();
     const pc = configRef.current.page_corners;
     if (!pc || pc.length !== 4) return;
@@ -890,7 +920,11 @@ function TemplateEditor({
               </div>
             )}
           </div>
-          <Toolbar tool={tool} setTool={setTool}
+          <Toolbar tool={tool} setTool={(t) => {
+                     setTool(t);
+                     // A ferramenta de bolhas só faz sentido com a camada visível.
+                     if (t === 'bubble') setShow((s) => ({ ...s, bubbles: true }));
+                   }}
                    anchorType={anchorType} setAnchorType={setAnchorType}
                    anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
                    onAddBlock={addBlock}
@@ -946,13 +980,27 @@ function TemplateEditor({
             {tool !== 'select' && (
               <span className="text-xs text-brand-600 dark:text-brand-300 ml-2 inline-flex items-center gap-1">
                 <Crosshair size={13} />
-                {tool === 'place-block' ? 'Clique para posicionar o bloco' : 'Arraste para criar a região'}
+                {tool === 'bubble'
+                  ? 'Arraste uma bolha para ajustar o alinhamento'
+                  : tool === 'place-block'
+                    ? 'Clique para posicionar o bloco'
+                    : 'Arraste para criar a região'}
               </span>
             )}
           </div>
 
           <div className="relative overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800 flex-1"
-               style={{ cursor: dragKind === 'pan' ? 'grabbing' : tool === 'select' ? 'default' : 'crosshair' }}>
+               style={{
+                 cursor: dragKind === 'pan' ? 'grabbing' : (tool === 'select' || tool === 'bubble') ? 'default' : 'crosshair',
+                 userSelect: 'none',
+               }}
+               onPointerDown={(e) => {
+                 if (!isPanGesture(e)) return;
+                 e.preventDefault();
+                 dragRef.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, origX: pan.x, origY: pan.y };
+                 setDragKind('pan');
+               }}
+               onContextMenu={(e) => { if (e.shiftKey) e.preventDefault(); }}>
             <div style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, position: 'absolute', left: 0, top: 0, width: baseW * zoom, height: baseH * zoom }}>
               {imgUrl ? (
                 <img src={imgUrl} alt="Cartão importado" draggable={false}
@@ -966,8 +1014,9 @@ function TemplateEditor({
                    className="absolute inset-0" style={{ touchAction: 'none' }}
                    onPointerDown={onSvgPointerDown} onClick={onSvgClick}>
                 <OverlayRegions
-                  config={pageConfig} show={show} selection={selection} zoom={zoom}
+                  config={pageConfig} show={show} selection={selection} zoom={zoom} tool={tool}
                   onSelect={setSelection} onStartDrag={startDragRegion} onStartResize={startResize}
+                  onStartBubbleDrag={startBubbleDrag}
                   onStartPageCorner={startPageCornerDrag}
                 />
                 {creating && (
@@ -982,7 +1031,7 @@ function TemplateEditor({
             </div>
           </div>
           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Alt+arrastar (ou botão do meio) move a visualização. {bubbles.length} bolha(s) configurada(s).
+            Alt+arrastar, botão do meio ou Shift+botão direito move a visualização. {bubbles.length} bolha(s) configurada(s).
             {Array.isArray(config.page_corners) && config.page_corners.length === 4 && (
               <> Cantos da folha (roxo) ativos — arraste os 4 pontos para ajustar. Usados como destino
               do alinhamento quando o modelo não tem as 4 âncoras de canto.</>
@@ -1068,7 +1117,7 @@ function setRect(cfg: CustomConfig, kind: Exclude<RegionType, 'block'>, id: stri
 function setBlockStart(cfg: CustomConfig, id: string, x: number, y: number): CustomConfig {
   return {
     ...cfg,
-    questions: cfg.questions.map((b) => (b.id === id ? { ...b, first_x: x, first_y: y } : b)),
+    questions: cfg.questions.map((b) => (b.id === id ? moveBlockTo(b, x, y) : b)),
   };
 }
 
@@ -1124,6 +1173,7 @@ function Toolbar({
     { id: 'anchor', label: 'Âncora', icon: Square },
     { id: 'qr', label: 'QR Code', icon: QrCode },
     { id: 'info', label: 'Info', icon: Info },
+    { id: 'bubble', label: 'Ajustar bolhas', icon: Move },
   ];
   return (
     <div className="space-y-2">
@@ -1131,7 +1181,8 @@ function Toolbar({
       <div className="grid grid-cols-2 gap-2">
         {tools.map((t) => (
           <button key={t.id} type="button" onClick={() => setTool(t.id)}
-                  className={`btn btn-sm min-h-[40px] justify-start ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}>
+                  title={t.id === 'bubble' ? 'Arraste uma bolha no cartão para corrigir o alinhamento individual' : undefined}
+                  className={`btn btn-sm min-h-[40px] justify-start ${t.id === 'bubble' ? 'col-span-2' : ''} ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}>
             <t.icon size={15} aria-hidden /> {t.label}
           </button>
         ))}
@@ -1217,15 +1268,18 @@ function Toolbar({
 // ───────────────────────────────────────────────────────────────────────────
 
 function OverlayRegions({
-  config, show, selection, zoom, onSelect, onStartDrag, onStartResize, onStartPageCorner,
+  config, show, selection, zoom, tool, onSelect, onStartDrag, onStartResize,
+  onStartBubbleDrag, onStartPageCorner,
 }: {
   config: CustomConfig;
   show: { anchors: boolean; qr: boolean; info: boolean; bubbles: boolean };
   selection: Selection;
   zoom: number;
+  tool: Tool;
   onSelect: (s: Selection) => void;
   onStartDrag: (e: ReactPointerEvent<SVGElement>, kind: RegionType, id: string) => void;
   onStartResize: (e: ReactPointerEvent<SVGElement>, kind: Exclude<RegionType, 'block'>, id: string, handle: string, orig: Rect) => void;
+  onStartBubbleDrag: (e: ReactPointerEvent<SVGElement>, blockId: string, question: number, option: string, x: number, y: number) => void;
   onStartPageCorner: (e: ReactPointerEvent<SVGElement>, index: number) => void;
 }) {
   const pw = config.page_w || 1;
@@ -1298,25 +1352,52 @@ function OverlayRegions({
         if (!bl.length) return null;
         const xs = bl.map((x) => x.x);
         const ys = bl.map((x) => x.y);
-        const bx = Math.min(...xs) - b.radius;
-        const by = Math.min(...ys) - b.radius;
-        const bw = Math.max(...xs) + b.radius - bx;
-        const bh = Math.max(...ys) + b.radius - by;
+        // Raio em px consistente com o backend/overlay: r * MAIOR lado.
+        const rPx = Math.max(1.5, b.radius * Math.max(pw, ph));
+        const rx = rPx / pw;
+        const ry = rPx / ph;
+        const bx = Math.min(...xs) - rx;
+        const by = Math.min(...ys) - ry;
+        const bw = Math.max(...xs) + rx - bx;
+        const bh = Math.max(...ys) + ry - by;
+        const nOverrides = Object.values(b.overrides ?? {})
+          .reduce((n, opts) => n + Object.keys(opts).length, 0);
         return (
           <g key={b.id}>
             <rect x={bx * pw} y={by * ph} width={bw * pw} height={bh * ph}
                   fill="rgba(239,68,68,0.06)"
                   stroke={sel('block', b.id) ? '#dc2626' : '#ef4444'}
                   strokeWidth={sel('block', b.id) ? stroke * 1.6 : stroke}
-                  strokeDasharray="5 3" style={{ cursor: 'move' }}
-                  onPointerDown={(e) => { e.stopPropagation(); onSelect({ kind: 'block', id: b.id }); onStartDrag(e, 'block', b.id); }} />
-            {bl.map((x, k) => (
-              <circle key={k} cx={x.x * pw} cy={x.y * ph} r={Math.max(1.5, x.r * pw)}
-                      fill="none" stroke="#ef4444" strokeWidth={1.2 / zoom} />
-            ))}
+                  strokeDasharray="5 3"
+                  style={{ cursor: tool === 'bubble' ? 'default' : 'move', pointerEvents: tool === 'bubble' ? 'none' : 'all' }}
+                  onPointerDown={tool === 'bubble' ? undefined : (e) => {
+                    // Botão direito (com Shift), botão do meio ou Alt+arrastar
+                    // são pan: deixe o evento chegar ao contêiner do editor.
+                    if (e.button !== 0 || e.altKey) return;
+                    e.stopPropagation();
+                    onSelect({ kind: 'block', id: b.id });
+                    onStartDrag(e, 'block', b.id);
+                  }} />
+            {bl.map((x, k) => {
+              const overridden = !!b.overrides?.[String(x.question)]?.[x.option];
+              return (
+                <g key={k}>
+                  <circle cx={x.x * pw} cy={x.y * ph} r={rPx}
+                          fill="none" stroke={overridden ? '#f59e0b' : '#ef4444'}
+                          strokeWidth={(overridden ? 1.8 : 1.2) / zoom} pointerEvents="none" />
+                  {tool === 'bubble' && (
+                    <circle cx={x.x * pw} cy={x.y * ph} r={Math.max(rPx * 1.4, 6 / zoom)}
+                            fill="transparent" stroke="none" style={{ cursor: 'grab' }}
+                            onPointerDown={(e) => onStartBubbleDrag(e, b.id, x.question, x.option, x.x, x.y)} />
+                  )}
+                </g>
+              );
+            })}
             {sel('block', b.id) && (
-              <text x={bx * pw} y={by * ph - 4 / zoom} fontSize={12 / zoom} fill="#b91c1c">
+              <text x={bx * pw} y={by * ph - 4 / zoom} fontSize={12 / zoom} fill="#b91c1c"
+                    pointerEvents="none">
                 Q{b.start_question}–Q{b.start_question + b.n_questions - 1}
+                {nOverrides ? ` · ${nOverrides} ajuste${nOverrides > 1 ? 's' : ''}` : ''}
               </text>
             )}
           </g>
@@ -1527,6 +1608,18 @@ function PropertiesPanel({
     const labels = raw.split(/[,\s]+/).map((s) => s.trim().toUpperCase()).filter(Boolean);
     upd({ labels: labels.length ? labels : ['A'] });
   };
+  // Início X/Y move o bloco inteiro; os ajustes individuais acompanham.
+  const updStart = (patch: { first_x?: number; first_y?: number }) => {
+    const nx = patch.first_x ?? b.first_x;
+    const ny = patch.first_y ?? b.first_y;
+    upd({ ...patch, overrides: shiftOverrides(b.overrides, nx - b.first_x, ny - b.first_y) });
+  };
+  const overrideRows = Object.entries(b.overrides ?? {})
+    .flatMap(([q, opts]) => Object.entries(opts).map(([option, p]) => ({ q: Number(q), option, ...p })))
+    .sort((a, z) => a.q - z.q || a.option.localeCompare(z.option));
+  const clearOneOverride = (q: number, option: string) =>
+    upd({ overrides: withoutBubbleOverride(b, q, option).overrides });
+  const clearAllOverrides = () => upd({ overrides: {} });
   return (
     <div className="space-y-2">
       <p className="font-semibold text-sm">Bloco de questões</p>
@@ -1562,8 +1655,38 @@ function PropertiesPanel({
         <PctInput id="p-blk-csx" label="Passo da coluna (%)" value={b.column_step_x ?? b.option_step_x * b.labels.length}
                   onChange={(v) => upd({ column_step_x: v })} />
         <PctInput id="p-blk-r" label="Raio da bolha (%)" value={b.radius} onChange={(v) => upd({ radius: v })} />
-        <PctInput id="p-blk-fx" label="Início X (%)" value={b.first_x} onChange={(v) => upd({ first_x: v })} />
-        <PctInput id="p-blk-fy" label="Início Y (%)" value={b.first_y} onChange={(v) => upd({ first_y: v })} />
+        <PctInput id="p-blk-fx" label="Início X (%)" value={b.first_x} onChange={(v) => updStart({ first_x: v })} />
+        <PctInput id="p-blk-fy" label="Início Y (%)" value={b.first_y} onChange={(v) => updStart({ first_y: v })} />
+      </div>
+      <div className="space-y-1 rounded border border-amber-200 dark:border-amber-900/60 p-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="label mb-0">Ajustes individuais ({overrideRows.length})</p>
+          {overrideRows.length > 0 && (
+            <button type="button" className="text-xs text-red-600 hover:underline" onClick={clearAllOverrides}>
+              Limpar todos
+            </button>
+          )}
+        </div>
+        {overrideRows.length === 0 ? (
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Use a ferramenta <strong>Ajustar bolhas</strong> e arraste uma bolha para corrigir o alinhamento.
+          </p>
+        ) : (
+          <div className="max-h-32 space-y-0.5 overflow-y-auto">
+            {overrideRows.map((o) => (
+              <div key={`${o.q}-${o.option}`} className="flex items-center justify-between gap-2 text-xs">
+                <span className="font-mono">Q{o.q} · {o.option}</span>
+                <span className="tabular-nums text-gray-400">
+                  {o.x != null ? `${(o.x * 100).toFixed(1)}%` : '—'}, {o.y != null ? `${(o.y * 100).toFixed(1)}%` : '—'}
+                </span>
+                <button type="button" className="text-gray-400 hover:text-red-500" title="Remover ajuste"
+                        onClick={() => clearOneOverride(o.q, o.option)}>
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <Field label="Formato da bolha" htmlFor="p-blk-shape">
         <Select id="p-blk-shape" value={b.shape} onChange={(e) => upd({ shape: e.target.value as 'circle' | 'square' })}>
