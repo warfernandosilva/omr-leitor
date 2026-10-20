@@ -13,6 +13,7 @@ import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
 import { useToast } from '../components/ui/Toast';
+import { useAuth } from '../context/AuthContext';
 import { syncExam } from '../utils/api';
 import { getExams } from '../utils/storage';
 import type { Exam } from '../types';
@@ -138,6 +139,8 @@ function TemplateList({
   onChanged: () => void;
 }) {
   const toast = useNotify();
+  const { user } = useAuth();
+  const userId = user?.id;
   const fileRef = useRef<HTMLInputElement>(null);
   const [nome, setNome] = useState('');
   const [exams, setExams] = useState<Exam[]>([]);
@@ -147,11 +150,11 @@ function TemplateList({
 
   useEffect(() => {
     try {
-      setExams(getExams());
+      setExams(getExams(userId));
     } catch {
       setExams([]);
     }
-  }, []);
+  }, [userId]);
 
   const handleCreate = async (file: File) => {
     setBusy(true);
