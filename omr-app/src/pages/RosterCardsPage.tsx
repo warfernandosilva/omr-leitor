@@ -23,6 +23,7 @@ import Button from '../components/ui/Button';
 import StatCard from '../components/ui/StatCard';
 import EmptyState from '../components/ui/EmptyState';
 import { gabaritosPdfName, CardSource } from '../utils/pdf-name';
+import { linkedExamForTurma } from '../utils/exam-turma';
 
 interface Props {
   examId: string | null;
@@ -90,6 +91,18 @@ const SIMULADO_BLOCK_MSG = 'Provas "Simulado" são avulsas (sem QR/nome/turma): 
   const COLAR_BLOCK_MSG = 'Provas "Colar em Avaliação" são avulsas (sem QR/nome): gere o cartão em branco em Gerar Cartão em vez do lote por alunos.';
 const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Gerenciar Avaliação (com QR duplo + código único por aluno).';
 
+  /** Troca a prova ativa, descartando o que pertencia à prova anterior. */
+  const changeExam = (id: string) => {
+    if (id === selectedExamId) return;
+    setSelectedExamId(id);
+    // "Já importado no banco" é específico da prova: não vale para a nova.
+    setImportedPersisted(null);
+    setGenError(null);
+    setStage('');
+    setDoneInfo(null);
+    setStep('form');
+  };
+
   const switchSource = (s: CardSource) => {
     if (s === source) return;
     // Fluxos independentes: não herdam resultado/erro/etapa do outro.
@@ -98,16 +111,27 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
     setStage('');
     setDoneInfo(null);
     setStep('form');
-    if (s === 'turma' && turmaSelId === '' && activeExam?.turmaId) {
-      void pickTurma(activeExam.turmaId);
+    if (s === 'turma' && turmaSelId === '' && activeExam?.turmaId != null) {
+      // Prova -> turma apenas para preencher uma seleção vazia.
+      void pickTurma(activeExam.turmaId, { syncExam: false });
     }
   };
 
-  const pickTurma = async (id: number | '') => {
+  const pickTurma = async (id: number | '', opts: { syncExam?: boolean } = {}) => {
+    const { syncExam = true } = opts;
     setTurmaSelId(id);
     setTurmaDetail(null);
     setGenError(null);
     if (id === '') return;
+
+    // Turma -> prova: se a prova atual não pertence à turma escolhida, ativa a
+    // prova vinculada a ela (a mais recente). Assim gerar a turma não reatribui
+    // a prova de outra turma.
+    if (syncExam && activeExam?.turmaId !== id) {
+      const linked = linkedExamForTurma(exams, id);
+      if (linked) changeExam(linked.id);
+    }
+
     setLoadingTurma(true);
     try {
       setTurmaDetail(await getTurma(id));
@@ -392,7 +416,13 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                 <Select
                   id="roster-exam-select"
                   value={selectedExamId}
-                  onChange={(e) => setSelectedExamId(e.target.value)}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    changeExam(id);
+                    const ex = exams.find(x => x.id === id);
+                    // Mantém a turma alinhada à prova, sem reverter a escolha.
+                    void pickTurma(ex?.turmaId ?? '', { syncExam: false });
+                  }}
                 >
                   <option value="">Selecione...</option>
                   {exams.map(x => (
@@ -490,7 +520,13 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                     {turmaDetail && (
                       <div className="callout-info mt-2">
                         {turmaDetail.alunos.length} aluno(s) no catálogo de &quot;{turmaDetail.nome}&quot;.
-                        A prova será vinculada a esta turma e o nome impresso no cartão.
+                        A prova &quot;{activeExam.name}&quot; será vinculada a esta turma e o nome impresso no cartão.
+                      </div>
+                    )}
+                    {turmaSelId !== '' && !linkedExamForTurma(exams, turmaSelId) && (
+                      <div className="callout-warning mt-2">
+                        Nenhuma prova cadastrada para esta turma ainda. A prova selecionada acima será
+                        vinculada a ela ao gerar.
                       </div>
                     )}
                   </Field>
