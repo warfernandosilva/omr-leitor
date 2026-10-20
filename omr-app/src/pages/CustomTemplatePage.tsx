@@ -25,6 +25,7 @@ import {
   testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
 } from '../utils/custom-template-api';
 import type { PrintPreviewResult } from '../utils/custom-template-api';
+import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block';
@@ -598,6 +599,24 @@ function TemplateEditor({
     toast.info('Clique no cartão para posicionar a 1ª alternativa (A) da 1ª questão.');
   };
 
+  /** Adiciona uma âncora clicável (próximo canto livre) sem precisar desenhar. */
+  const addAnchor = () => {
+    const anchor = makeAnchor({
+      id: `anc_${rnd()}`,
+      type: anchorType,
+      arucoId: anchorArucoId,
+      size: anchorSize,
+      page: currentPage,
+      anchors: configRef.current.anchors,
+    });
+    apply({ ...configRef.current, anchors: [...configRef.current.anchors, anchor] });
+    setSelection({ kind: 'anchor', id: anchor.id });
+    if (anchor.type === 'aruco' && anchor.aruco_id != null) {
+      setAnchorArucoId(anchor.aruco_id + 1);
+    }
+    toast.success('Âncora adicionada. Arraste para posicionar e edite tipo/tamanho na barra lateral.');
+  };
+
   // Analisa a imagem importada e sugere bloco(s) de bolhas (ação no undo).
   const detectGrid = async () => {
     setDetecting(true);
@@ -872,6 +891,8 @@ function TemplateEditor({
                    anchorType={anchorType} setAnchorType={setAnchorType}
                    anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
                    onAddBlock={addBlock}
+                   anchorCount={pageConfig.anchors.length}
+                   onAddAnchor={addAnchor}
                    anchorSize={anchorSize} setAnchorSize={setAnchorSize}
                    onDetectGrid={() => void detectGrid()} detecting={detecting}
                     onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors}
@@ -1074,6 +1095,7 @@ function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
 
 function Toolbar({
   tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId, anchorSize, setAnchorSize,
+  anchorCount, onAddAnchor,
   onAddBlock, onDetectGrid, onDetectAnchors, onDetectPageCorners, onManualPageCorners, onRemovePageCorners,
   detecting, detectingAnchors, detectingPageCorners, hasPageCorners,
 }: {
@@ -1081,6 +1103,8 @@ function Toolbar({
   anchorType: 'aruco' | 'quad'; setAnchorType: (t: 'aruco' | 'quad') => void;
   anchorArucoId: number; setAnchorArucoId: (n: number) => void;
   anchorSize: number; setAnchorSize: (n: number) => void;
+  anchorCount: number;
+  onAddAnchor: () => void;
   onAddBlock: () => void;
   onDetectGrid: () => void;
   onDetectAnchors: () => void;
@@ -1108,6 +1132,11 @@ function Toolbar({
             <t.icon size={15} aria-hidden /> {t.label}
           </button>
         ))}
+        <button type="button" onClick={onAddAnchor}
+                title="Adiciona uma âncora no próximo canto livre. Clique nela no cartão para editar tipo e tamanho."
+                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
+          <Plus size={15} aria-hidden /> Adicionar âncora
+        </button>
         <button type="button" onClick={onAddBlock}
                 className={`btn btn-sm min-h-[40px] justify-start col-span-2 ${tool === 'place-block' ? 'btn-primary' : 'btn-secondary'}`}>
           <Boxes size={15} aria-hidden /> Bloco de questões
@@ -1141,29 +1170,39 @@ function Toolbar({
         )}
       </div>
 
-      {tool === 'anchor' && (
-        <div className="grid grid-cols-2 gap-2 pt-1">
-          <Field label="Tipo" htmlFor="anc-type">
-            <Select id="anc-type" value={anchorType} onChange={(e) => setAnchorType(e.target.value as 'aruco' | 'quad')}>
-              <option value="quad">Quadrado</option>
-              <option value="aruco">ArUco</option>
-            </Select>
-          </Field>
-          {anchorType === 'aruco' && (
-            <Field label="ID ArUco" htmlFor="anc-id">
-              <Input id="anc-id" type="number" min={0} value={anchorArucoId}
-                     onChange={(e) => setAnchorArucoId(Number(e.target.value))} />
-            </Field>
+      {(tool === 'anchor' || anchorCount === 0) && (
+        <div className="space-y-2 rounded border border-gray-200 dark:border-gray-800 p-2">
+          {anchorCount === 0 && (
+            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+              Nenhuma âncora neste cartão. Adicione ou use “Detectar âncoras”.
+            </p>
           )}
-          <Field label="Tamanho (%)" htmlFor="anc-size">
-            <Input id="anc-size" type="number" min={1} max={20} step={0.5}
-                   value={Math.round(anchorSize * 100)}
-                   onChange={(e) => {
-                     const v = Number(e.target.value);
-                     if (!Number.isFinite(v)) return;
-                     setAnchorSize(Math.max(0.01, Math.min(0.2, v / 100)));
-                   }} />
-          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Tipo" htmlFor="anc-type">
+              <Select id="anc-type" value={anchorType} onChange={(e) => setAnchorType(e.target.value as 'aruco' | 'quad')}>
+                <option value="quad">Quadrado</option>
+                <option value="aruco">ArUco</option>
+              </Select>
+            </Field>
+            {anchorType === 'aruco' && (
+              <Field label="ID ArUco" htmlFor="anc-id">
+                <Input id="anc-id" type="number" min={0} value={anchorArucoId}
+                       onChange={(e) => setAnchorArucoId(Number(e.target.value))} />
+              </Field>
+            )}
+            <Field label="Tamanho (%)" htmlFor="anc-size">
+              <Input id="anc-size" type="number" min={1} max={20} step={0.5}
+                     value={Math.round(anchorSize * 100)}
+                     onChange={(e) => {
+                       const v = Number(e.target.value);
+                       if (!Number.isFinite(v)) return;
+                       setAnchorSize(Math.max(0.01, Math.min(0.2, v / 100)));
+                     }} />
+            </Field>
+          </div>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+            Clique em uma âncora no cartão para editar tipo, tamanho e canto.
+          </p>
         </div>
       )}
     </div>
@@ -1385,7 +1424,12 @@ function PropertiesPanel({
       <div className="space-y-2">
         <p className="font-semibold text-sm">Âncora</p>
         <Field label="Tipo" htmlFor="p-anc-type">
-          <Select id="p-anc-type" value={a.type} onChange={(e) => upd({ type: e.target.value as 'aruco' | 'quad' })}>
+          <Select id="p-anc-type" value={a.type} onChange={(e) => {
+            const type = e.target.value as 'aruco' | 'quad';
+            upd(type === 'aruco'
+              ? { type, aruco_id: a.aruco_id ?? nextArucoId(config.anchors, a.page ?? 0, 0) }
+              : { type, aruco_id: null });
+          }}>
             <option value="quad">Quadrado</option>
             <option value="aruco">ArUco</option>
           </Select>
