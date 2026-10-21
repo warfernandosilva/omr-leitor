@@ -59,20 +59,45 @@ export function duplicateIds(groups: DuplicateGroup[]): Set<number> {
 
 // ─── Autocomplete de aluno na conferência (cartão sem QR) ───
 // Fonte 1: alunos da prova (ExamStudent, já inclui quem veio de turma).
-// Fonte 2 (fallback): catálogo da turma (TurmaAlunoDTO) quando a prova
-// ainda não materializou ninguém — alunoId null, só preenche o nome.
+// Fonte 2 (fallback): catálogo da turma vinculada (TurmaAlunoDTO) — completa
+// nomes ainda não materializados; alunoId null, só preenche o nome.
+// Fonte 3 (fallback global): catálogo de todas as turmas visíveis, usado só
+// quando a prova não tem alunos nem turma vinculada.
 
 export interface StudentOption {
-  /** Chave React: `String(aluno_id)` ou `turma:${id}`. */
+  /** Chave React: `String(aluno_id)`, `turma:${id}` ou `catalogo:${id}`. */
   key: string;
   nome: string;
   matricula: string | null;
-  /** Id do aluno NA PROVA (p/ atribuição direta); null quando vem só da turma. */
+  /** Id do aluno NA PROVA (p/ atribuição direta); null quando vem só do catálogo. */
   alunoId: number | null;
-  /** undefined = fonte turma (desconhecido). */
+  /** undefined = fonte catálogo (desconhecido). */
   temGabarito?: boolean;
   codigoUnico?: string | null;
+  /** Nome veio de um catálogo (turma ou global) e ainda não foi materializado na prova. */
   fromTurmaOnly?: boolean;
+  /** Rótulo curto da origem exibido no badge ("turma" / "catálogo"). */
+  origemLabel?: string;
+}
+
+/**
+ * Junta os alunos já materializados na prova com as opções do catálogo.
+ * A opção da prova vence: o catálogo só completa nomes que ainda não existem
+ * nela, para o autocomplete não sugerir a mesma pessoa duas vezes.
+ */
+export function mergeStudentOptions(
+  primary: StudentOption[],
+  fallback: StudentOption[],
+): StudentOption[] {
+  if (fallback.length === 0) return primary;
+  const seen = new Set(primary.map(o => normalizeName(o.nome)));
+  return [
+    ...primary,
+    ...fallback.filter(o => {
+      const n = normalizeName(o.nome);
+      return n !== '' && !seen.has(n);
+    }),
+  ];
 }
 
 /** Ordena e filtra sugestões: prefixo de nome primeiro, depois substring — sem acento/caixa. */

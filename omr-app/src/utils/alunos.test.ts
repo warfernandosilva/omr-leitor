@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { duplicateIds, findDuplicateGroups, findStudentMatches, normalizeName } from './alunos';
+import { duplicateIds, findDuplicateGroups, findStudentMatches, mergeStudentOptions, normalizeName } from './alunos';
 import type { StudentOption } from './alunos';
 import type { AlunoListItem } from './api';
 
@@ -84,5 +84,21 @@ describe('findStudentMatches', () => {
 
   it('sem correspondência devolve vazio', () => {
     expect(findStudentMatches(list, 'zzz')).toEqual([]);
+  });
+});
+
+describe('mergeStudentOptions', () => {
+  it('mantém a prova primeiro e completa com nomes do catálogo', () => {
+    const primary = [option({ key: '1', nome: 'Ana Lima', alunoId: 1 })];
+    const fallback = [
+      option({ key: 'turma:1', nome: 'ana lima', alunoId: null, origemLabel: 'turma' }),
+      option({ key: 'turma:2', nome: 'Bruno Souza', alunoId: null, origemLabel: 'turma' }),
+    ];
+    expect(mergeStudentOptions(primary, fallback).map(o => o.key)).toEqual(['1', 'turma:2']);
+  });
+
+  it('sem fallback devolve a própria lista da prova', () => {
+    const primary = [option({ key: '1', nome: 'Ana Lima', alunoId: 1 })];
+    expect(mergeStudentOptions(primary, [])).toBe(primary);
   });
 });

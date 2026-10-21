@@ -13,7 +13,7 @@ import {
   lookupCodigo, saveGabaritoResultado, AlreadyGradedError, postAvulsoResultado,
   fetchExamStudents, ExamStudent, AmbiguousNameError, NameCandidate,
   getExamsFromDB, getExamFromDB, getDeletedExamsFromDB, deleteExamFromDB, getApiBase,
-  checkHealth, loadAdaptiveFlag, saveAdaptiveFlag, getTurma,
+  checkHealth, loadAdaptiveFlag, saveAdaptiveFlag, getTurma, listAlunos,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
 import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange, scoreAnswers } from '../utils/exam';
@@ -47,7 +47,7 @@ import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import ReadStages from '../components/omr/ReadStages';
 import { anchorLabelFor } from '../utils/read-stages';
-import { findStudentMatches, StudentOption } from '../utils/alunos';
+import { findStudentMatches, mergeStudentOptions, StudentOption } from '../utils/alunos';
 
 interface Props {
   examId: string | null;
@@ -207,10 +207,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [examStudents, setExamStudents] = useState<ExamStudent[]>([]);
   const [candidates, setCandidates] = useState<NameCandidate[] | null>(null);
   const [manualInfo, setManualInfo] = useState<string | null>(null);
-  // Autocomplete de nome: aluno travado (atribuição direta) + fallback do catálogo da turma
+  // Autocomplete de nome: aluno travado (atribuição direta) + fallback do catálogo
   const [selectedAlunoId, setSelectedAlunoId] = useState<number | null>(null);
-  const [selectedFromTurma, setSelectedFromTurma] = useState(false);
+  const [selectedFromCatalog, setSelectedFromCatalog] = useState(false);
   const [turmaOnlyOptions, setTurmaOnlyOptions] = useState<StudentOption[]>([]);
+  const [catalogOptions, setCatalogOptions] = useState<StudentOption[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
   // Captura automática por enquadramento
   const [autoMode, setAutoMode] = useState(true);
   const [confirmUrl, setConfirmUrl] = useState<string | null>(null);
@@ -273,37 +275,66 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     streamRef.current = null;
     window.clearTimeout(flashTimerRef.current);
   }, []);
-  // Alunos da prova p/ pareamento manual (só quando o QR não identificou).
-  // Carrega ao entrar na conferência; falha silenciosa mantém o fluxo avulso.
-  // Fallback: prova ainda sem ninguém materializado, mas com turma vinculada —
-  // sugere o catálogo da turma (só preenche o nome; o resultado é criado por nome).
+  // Alunos p/ pareamento manual (só quando o QR não identificou).
+  // Fonte 1: alunos já materializados na prova (inclui quem veio de turma).
+  // Fonte 2: catálogo da turma vinculada — completa nomes ainda não importados.
+  // Fonte 3: catálogo global — usado só quando a prova não tem alunos nem turma
+  //          (ex.: prova de teste), para o campo não ficar sem sugestões.
+  // As fontes 2 e 3 só preenchem o nome; o resultado é criado por nome.
   useEffect(() => {
     if (step !== 'review') return;
     if (identified?.kind === 'ok' || identified?.kind === 'wrong_exam') return;
     const exam = exams.find(e => e.id === selectedExamId);
     if (!exam) return;
     let alive = true;
+    setExamStudents([]);
     setTurmaOnlyOptions([]);
-    fetchExamStudents(exam.id)
-      .then(async list => {
+    setCatalogOptions([]);
+    setStudentsLoading(true);
+
+    (async () => {
+      let examList: ExamStudent[] = [];
+      try {
+        const list = await fetchExamStudents(exam.id);
+        examList = Array.isArray(list) ? list : [];
+      } catch { /* silencioso: mantém o fluxo avulso */ }
+      if (!alive) return;
+      setExamStudents(examList);
+
+      let turmaList: StudentOption[] = [];
+      if (exam.turmaId != null) {
+        try {
+          const detail = await getTurma(exam.turmaId);
+          turmaList = (detail.alunos ?? []).map(a => ({
+            key: `turma:${a.id}`,
+            nome: a.nome,
+            matricula: a.matricula,
+            alunoId: null,
+            fromTurmaOnly: true,
+            origemLabel: 'turma',
+          }));
+        } catch { /* silencioso: mantém o fluxo avulso */ }
         if (!alive) return;
-        const arr = Array.isArray(list) ? list : [];
-        setExamStudents(arr);
-        if (arr.length === 0 && exam.turmaId != null) {
-          try {
-            const detail = await getTurma(exam.turmaId);
-            if (!alive) return;
-            setTurmaOnlyOptions((detail.alunos ?? []).map(a => ({
-              key: `turma:${a.id}`,
-              nome: a.nome,
-              matricula: a.matricula,
-              alunoId: null,
-              fromTurmaOnly: true,
-            })));
-          } catch { /* silencioso: mantém o fluxo avulso */ }
-        }
-      })
-      .catch(() => { if (alive) setExamStudents([]); });
+        setTurmaOnlyOptions(turmaList);
+      }
+
+      // Só busca o catálogo global quando não há nenhuma outra fonte.
+      if (examList.length === 0 && turmaList.length === 0) {
+        try {
+          const catalog = await listAlunos();
+          if (!alive) return;
+          setCatalogOptions(catalog.map(a => ({
+            key: `catalogo:${a.id}`,
+            nome: a.nome,
+            matricula: a.matricula,
+            alunoId: null,
+            fromTurmaOnly: true,
+            origemLabel: a.turma_nome ? `catálogo · ${a.turma_nome}` : 'catálogo',
+          })));
+        } catch { /* silencioso: mantém o fluxo avulso */ }
+      }
+    })().finally(() => { if (alive) setStudentsLoading(false); });
+
     return () => { alive = false; };
   }, [step, identified, selectedExamId, exams]);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -328,28 +359,49 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     })),
     [examStudents],
   );
-  // Fonte das sugestões: prova materializada; senão, catálogo da turma.
-  const nameSource: StudentOption[] = examOptions.length > 0 ? examOptions : turmaOnlyOptions;
+  // Completa a lista da prova com o catálogo da turma; se não houver turma,
+  // usa o catálogo global. O catálogo nunca fornece alunoId (só o nome).
+  const fallbackOptions = useMemo(
+    () => (turmaOnlyOptions.length > 0 ? turmaOnlyOptions : catalogOptions),
+    [turmaOnlyOptions, catalogOptions],
+  );
+  const nameSource: StudentOption[] = useMemo(
+    () => mergeStudentOptions(examOptions, fallbackOptions),
+    [examOptions, fallbackOptions],
+  );
+  const fallbackLabel = turmaOnlyOptions.length > 0 ? 'da turma' : 'do catálogo';
+  const sourceLabel = examOptions.length > 0
+    ? (fallbackOptions.length > 0 ? `da prova e ${fallbackLabel}` : 'da prova')
+    : fallbackLabel;
   const autoOptions: AutocompleteOption[] = useMemo(
     () => findStudentMatches(nameSource, studentName).map(s => ({
       id: s.key,
       label: s.nome,
       sublabel: s.matricula ?? undefined,
-      badge: s.fromTurmaOnly ? 'só na turma' : (s.temGabarito === false ? 'sem cartão gerado' : undefined),
+      badge: s.origemLabel ?? (s.temGabarito === false ? 'sem cartão gerado' : undefined),
     })),
     [nameSource, studentName],
   );
+  const nameHelper = identified?.kind === 'ok'
+    ? 'Identificado pelo banco de dados.'
+    : canMatchByName && studentsLoading
+      ? 'Carregando lista de alunos...'
+      : canMatchByName && nameSource.length > 0
+        ? `Digite para buscar entre os ${nameSource.length} alunos ${sourceLabel} — toque num nome para atribuir o resultado direto a ele. Nomes marcados "turma", "catálogo" ou "sem cartão gerado" são vinculados pelo nome.`
+        : (!studentName.trim()
+          ? 'Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.'
+          : undefined);
 
   const handleStudentNameChange = (v: string) => {
     setStudentName(v);
     setSelectedAlunoId(null);
-    setSelectedFromTurma(false);
+    setSelectedFromCatalog(false);
   };
   const handlePickStudent = (o: AutocompleteOption) => {
     const found = nameSource.find(s => s.key === String(o.id));
     setStudentName(o.label);
     setSelectedAlunoId(found?.alunoId ?? null);
-    setSelectedFromTurma(!!found?.fromTurmaOnly);
+    setSelectedFromCatalog(!!found?.fromTurmaOnly);
   };
 
   // ─── Guia de captura adaptado ao gabarito da prova ───
@@ -1005,7 +1057,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       // Modo contínuo: volta direto à câmera com a mesma prova
       setStudentName('');
       setSelectedAlunoId(null);
-      setSelectedFromTurma(false);
+      setSelectedFromCatalog(false);
       setCapturedImage(null);
       setOmrResult(null);
       setManualAnswers({});
@@ -1106,7 +1158,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const resetForm = () => {
     setStudentName('');
     setSelectedAlunoId(null);
-    setSelectedFromTurma(false);
+    setSelectedFromCatalog(false);
     setCapturedImage(null);
     setOmrResult(null);
     setManualAnswers({});
@@ -2549,15 +2601,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 label="Aluno"
                 htmlFor="review-student-name"
                 required={identified?.kind !== 'ok'}
-                helper={identified?.kind === 'ok'
-                  ? 'Identificado pelo banco de dados.'
-                  : canMatchByName && nameSource.length > 0
-                    ? `Digite para buscar entre os ${nameSource.length} alunos ${examOptions.length > 0 ? 'da prova' : 'da turma'} — toque num nome para atribuir o resultado direto a ele. Nomes marcados "sem cartão gerado" terão o resultado criado e vinculado ao aluno.`
-                    : (!studentName.trim()
-                      ? 'Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.'
-                      : undefined)}
+                helper={nameHelper}
               >
-                {canMatchByName && nameSource.length > 0 ? (
+                {canMatchByName ? (
                   <Autocomplete
                     id="review-student-name"
                     value={studentName}
@@ -2567,7 +2613,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     invalid={!studentName.trim()}
                     ariaLabel="Aluno"
                     placeholder="Digite o nome do aluno (cartão sem QR cadastrado)"
-                    emptyText="Nenhum aluno encontrado — o resultado será criado para o nome digitado."
+                    emptyText={studentsLoading
+                      ? 'Carregando lista de alunos...'
+                      : 'Nenhum aluno encontrado — o resultado será criado para o nome digitado.'}
                   />
                 ) : (
                   <Input
@@ -2586,9 +2634,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   Aluno selecionado na lista — o resultado será atribuído direto a ele.
                 </p>
               )}
-              {selectedAlunoId == null && selectedFromTurma && studentName.trim() && !manualInfo && (
+              {selectedAlunoId == null && selectedFromCatalog && studentName.trim() && !manualInfo && (
                 <p className="text-xs text-brand-800 dark:text-brand-200 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 rounded-lg px-2 py-1 mt-2">
-                  Nome do catálogo da turma (ainda não importado para a prova) — o resultado será criado por nome.
+                  Nome do catálogo (turma ou global, ainda não importado para a prova) — o resultado será criado por nome.
                 </p>
               )}
               {manualInfo && (
