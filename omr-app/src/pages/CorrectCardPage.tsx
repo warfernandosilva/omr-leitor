@@ -33,7 +33,7 @@ import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, ArrowRight, Camera, CheckCircle2, Eye, Flashlight, FlashlightOff, Focus,
-  ImagePlus, ImageUp, Info, Play, RefreshCw, RotateCcw, Save,
+  ImagePlus, ImageUp, Info, PenLine, Play, RefreshCw, RotateCcw, Save,
   SlidersHorizontal, Sun, SwitchCamera, Trash2, X, ZoomIn,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
@@ -199,6 +199,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     } catch { return {}; }
   });
   const [manualAnswers, setManualAnswers] = useState<Record<number, string>>({});
+  // Leitura automática indisponível: o usuário digita as respostas do cartão.
+  const [manualEntry, setManualEntry] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Etapas concluídas da leitura (0–8): marcos reais, nunca temporizador. */
   const [stageDone, setStageDone] = useState(0);
@@ -799,6 +801,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const processOMR = async (dataUrl: string, frames: string[] = [], corners?: [number, number][], page?: number) => {
     setStep('processing');
     setError(null);
+    setManualEntry(false);
+    setOmrResult(null);
     setStageDone(1); // 1. imagem recebida
 
     try {
@@ -920,6 +924,43 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setRetryUrl(dataUrl);
       setStep('form');
     }
+  };
+
+  // Fallback quando o cartão não é lido/detectado: abre a conferência com as
+  // respostas em branco para o usuário digitar o gabarito do aluno. O cartão
+  // físico (ou a foto enviada) serve de referência. Exige gabarito da prova.
+  const startManualEntry = () => {
+    if (!activeExam) {
+      setError(
+        'Prova não encontrada neste aparelho. Volte à seleção, toque em "⟳ Atualizar do servidor" '
+        + 'e tente novamente.'
+      );
+      return;
+    }
+    if (!activeExam.answerKey) {
+      alert('Esta prova ainda não tem gabarito cadastrado. Vá em "Cadastrar gabarito" e informe as respostas corretas antes de corrigir.');
+      return;
+    }
+    setOmrResult({
+      success: true,
+      answers: {},
+      blankQuestions: [],
+      duplicateQuestions: [],
+      duplicateMarks: {},
+      lowConfidence: [],
+      cardId: omrResult?.cardId,
+    });
+    setManualAnswers({});
+    if (retryUrl) setCapturedImage(retryUrl);
+    setIdentified(null);
+    setSelectedAlunoId(null);
+    setSelectedFromCatalog(false);
+    setCandidates(null);
+    setManualInfo(null);
+    setError(null);
+    setStageDone(6);
+    setManualEntry(true);
+    setStep('review');
   };
 
   const handleManualAnswer = (question: number, answer: string) => {
@@ -1061,7 +1102,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setCapturedImage(null);
       setOmrResult(null);
       setManualAnswers({});
-  setReadPages(new Set());
+      setManualEntry(false);
+      setReadPages(new Set());
       setError(null);
       setStageDone(0);
       setIdentified(null);
@@ -1069,6 +1111,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setManualInfo(null);
       setConfirmUrl(null);
       setSharpRetry(null);
+      setRetryUrl(null);
       resetAuto();
       await startCamera();
     } else {
@@ -1105,8 +1148,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       alert('Esta prova ainda não tem gabarito cadastrado. Vá em "Cadastrar gabarito" e informe as respostas corretas antes de corrigir.');
       return;
     }
+    if (manualEntry && Object.keys(manualAnswers).length === 0) {
+      if (!confirm('Nenhuma resposta foi preenchida. Salvar mesmo assim, contando todas as questões como em branco?')) {
+        return;
+      }
+    }
     // Multi-página: avisa se faltam páginas lidas antes de salvar.
-    if (isCustom && (customGeom?.nPages ?? 1) > 1
+    if (!manualEntry && isCustom && (customGeom?.nPages ?? 1) > 1
         && readPages.size < (customGeom?.nPages ?? 1)) {
       const faltam = Array.from({ length: customGeom?.nPages ?? 1 }, (_, i) => i)
         .filter((i) => !readPages.has(i))
@@ -1162,12 +1210,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setCapturedImage(null);
     setOmrResult(null);
     setManualAnswers({});
-  setReadPages(new Set());
+    setManualEntry(false);
+    setReadPages(new Set());
     setError(null);
     setStageDone(0);
     setIdentified(null);
     setCandidates(null);
     setManualInfo(null);
+    setRetryUrl(null);
+    setCornerEdit(null);
     setStep('form');
   };
 
@@ -1372,12 +1423,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   // Envia uma foto problemática para a revisão individual (dados já lidos)
-  const reviewManually = (item: BatchItem) => {
+  // ou, quando a leitura falhou, para preenchimento manual das respostas.
+  const reviewManually = (item: BatchItem, manual = false) => {
+    const hasAnswers = !!item.answers && Object.keys(item.answers).length > 0;
     setMode('individual');
     setCapturedImage(item.dataUrl);
     setOmrResult({
       success: true,
-      answers: item.answers,
+      answers: hasAnswers ? item.answers : {},
       blankQuestions: [],
       duplicateQuestions: item.dupQuestions,
       duplicateMarks: item.dupMarks,
@@ -1385,10 +1438,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       cardId: item.cardId,
     });
     setManualAnswers({ ...(item.answers ?? {}) });
-    setIdentified(item.cardId ? { kind: 'unknown', cardId: item.cardId } : null);
+    setManualEntry(manual || !hasAnswers);
+    setIdentified(manual || !item.cardId ? null : { kind: 'unknown', cardId: item.cardId });
     setStudentName('');
     setCandidates(null);
     setManualInfo(null);
+    setError(null);
     setStep('review');
   };
 
@@ -1541,6 +1596,29 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             >
               Ajustar cantos manualmente e tentar de novo
             </Button>
+          )}
+
+          {error && activeExam && (
+            <div className="p-3 bg-surface dark:bg-gray-800/60 border border-line dark:border-gray-700 rounded-lg space-y-2">
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                O cartão não foi lido automaticamente? Você pode digitar as respostas
+                do aluno questão por questão.
+              </p>
+              <Button
+                variant="secondary"
+                className="w-full"
+                onClick={startManualEntry}
+                disabled={!activeExam.answerKey}
+                icon={<PenLine size={16} aria-hidden />}
+              >
+                Inserir respostas manualmente
+              </Button>
+              {!activeExam.answerKey && (
+                <p className="text-xs text-warning-600 dark:text-warning-100">
+                  Cadastre o gabarito da prova para habilitar o preenchimento manual.
+                </p>
+              )}
+            </div>
           )}
 
           <button
@@ -2219,27 +2297,46 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             const grade = calculateGrade(score.correct, activeExam.totalQuestions, activeExam.gradeScale);
             const readCount = Object.keys(omrResult.answers ?? {}).length
               + (omrResult.blankQuestions?.length ?? 0) + dupList.length;
+            const answeredCount = Object.keys(manualAnswers).length;
             const firm = Math.max(0, activeExam.totalQuestions - lowList.length - dupList.length);
+            const progressCount = manualEntry ? answeredCount : firm;
             const alunoNome = identified?.kind === 'ok' || identified?.kind === 'wrong_exam'
               ? identified.name : (studentName.trim() || '(sem identificação)');
             const cartao = omrResult.cardId ?? identified?.cardId ?? '—';
             return (
               <div className="card">
                 <div className="flex items-center gap-2 mb-3">
-                  <span className="w-9 h-9 rounded-full bg-success-500 flex items-center justify-center text-white shrink-0" aria-hidden>
-                    <CheckCircle2 size={18} strokeWidth={2.2} />
+                  <span className={`w-9 h-9 rounded-full flex items-center justify-center text-white shrink-0 ${manualEntry ? 'bg-brand-500' : 'bg-success-500'}`} aria-hidden>
+                    {manualEntry ? <PenLine size={18} strokeWidth={2.2} /> : <CheckCircle2 size={18} strokeWidth={2.2} />}
                   </span>
-                  <h3 className="text-lg font-bold text-ink dark:text-white">Leitura concluída!</h3>
+                  <h3 className="text-lg font-bold text-ink dark:text-white">
+                    {manualEntry ? 'Preenchimento manual' : 'Leitura concluída!'}
+                  </h3>
                  </div>
+                 {manualEntry && (
+                   <div className="mb-3 p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg text-warning-600 dark:text-warning-100 text-sm">
+                     A leitura automática não detectou as respostas do cartão. Preencha o gabarito do aluno
+                     na grade abaixo, questão por questão.
+                   </div>
+                 )}
                  {isCustom && (customGeom?.nPages ?? 1) > 1
                    && readPages.size < (customGeom?.nPages ?? 1) && (
                    <div className="p-3 bg-amber-50 dark:bg-amber-700/15 border border-amber-400/40 rounded-lg text-amber-800 dark:text-amber-100 text-sm">
-                     Atenção: este cartão tem {customGeom?.nPages ?? 1} páginas e apenas {readPages.size} foi/foram lida(s).
-                     Faltam as páginas {Array.from({ length: customGeom?.nPages ?? 1 }, (_, i) => i)
-                       .filter((i) => !readPages.has(i))
-                       .map((i) => i + 1)
-                       .join(', ')}.
-                     Volte e leia as demais antes de salvar para não perder respostas.
+                     {manualEntry ? (
+                       <>
+                         Este cartão tem {customGeom?.nPages ?? 1} páginas. Preencha abaixo as respostas
+                         de todas as páginas antes de salvar.
+                       </>
+                     ) : (
+                       <>
+                         Atenção: este cartão tem {customGeom?.nPages ?? 1} páginas e apenas {readPages.size} foi/foram lida(s).
+                         Faltam as páginas {Array.from({ length: customGeom?.nPages ?? 1 }, (_, i) => i)
+                           .filter((i) => !readPages.has(i))
+                           .map((i) => i + 1)
+                           .join(', ')}.
+                         Volte e leia as demais antes de salvar para não perder respostas.
+                       </>
+                     )}
                    </div>
                  )}
                 <dl className="text-sm space-y-1.5">
@@ -2252,8 +2349,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     <dd className="font-medium text-ink dark:text-gray-100 text-right font-mono">{cartao}</dd>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <dt className="text-gray-500 dark:text-gray-400">Questões lidas</dt>
-                    <dd className="font-medium text-ink dark:text-gray-100 text-right tabular-nums">{readCount} / {activeExam.totalQuestions}</dd>
+                    <dt className="text-gray-500 dark:text-gray-400">{manualEntry ? 'Respostas preenchidas' : 'Questões lidas'}</dt>
+                    <dd className="font-medium text-ink dark:text-gray-100 text-right tabular-nums">
+                      {manualEntry ? answeredCount : readCount} / {activeExam.totalQuestions}
+                    </dd>
                   </div>
                 </dl>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 text-center">
@@ -2276,13 +2375,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 </div>
                 <div className="mt-3">
                   <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    <span>Leitura firme em {firm} de {activeExam.totalQuestions} questões</span>
-                    <span className="tabular-nums">{Math.round((firm / Math.max(1, activeExam.totalQuestions)) * 100)}%</span>
+                    <span>
+                      {manualEntry
+                        ? `${answeredCount} de ${activeExam.totalQuestions} respostas preenchidas`
+                        : `Leitura firme em ${firm} de ${activeExam.totalQuestions} questões`}
+                    </span>
+                    <span className="tabular-nums">{Math.round((progressCount / Math.max(1, activeExam.totalQuestions)) * 100)}%</span>
                   </div>
                   <div className="w-full bg-line dark:bg-gray-700 rounded-full h-2 overflow-hidden" aria-hidden>
                     <div
-                      className="bg-success-500 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.round((firm / Math.max(1, activeExam.totalQuestions)) * 100)}%` }}
+                      className={`${manualEntry ? 'bg-brand-500' : 'bg-success-500'} h-2 rounded-full transition-all duration-300`}
+                      style={{ width: `${Math.round((progressCount / Math.max(1, activeExam.totalQuestions)) * 100)}%` }}
                     />
                   </div>
                 </div>
@@ -2290,10 +2393,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             );
           })()}
 
-          <div className="card">
-            <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-3">Andamento da leitura</h3>
-            <ReadStages doneCount={7} anchorLabel={anchorLabelFor(activeExam)} />
-          </div>
+          {!manualEntry && (
+            <div className="card">
+              <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-300 mb-3">Andamento da leitura</h3>
+              <ReadStages doneCount={7} anchorLabel={anchorLabelFor(activeExam)} />
+            </div>
+          )}
 
           {identified?.kind === 'ok' && (
             <div className="p-3 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg text-success-600 dark:text-success-100 text-sm">
@@ -2322,13 +2427,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
           {capturedImage && (
             <div className="card">
-              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Imagem Capturada</h3>
-              <img src={capturedImage} alt="Cartão capturado" className="max-h-48 rounded-lg object-contain mx-auto" />
+              <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                {manualEntry ? 'Foto enviada (não lida automaticamente)' : 'Imagem Capturada'}
+              </h3>
+              <img src={capturedImage} alt={manualEntry ? 'Foto do cartão enviada' : 'Cartão capturado'} className="max-h-48 rounded-lg object-contain mx-auto" />
             </div>
           )}
 
           {/* Overlay gabarito na captura — verde=correto, vermelho=incorreto */}
-          {capturedImage && activeExam?.answerKey && !overlayCustom && (
+          {capturedImage && activeExam?.answerKey && !overlayCustom && !manualEntry && (
             <div className="card">
               <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Gabarito recortado</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada</p>
@@ -2497,7 +2604,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
           {/* Overlay do Gabarito Personalizado: bolhas normalizadas do modelo
               (viewBox 0..1) sobre o retificado; radius normalizado ao maior lado. */}
-          {capturedImage && activeExam?.answerKey && overlayCustom && (
+          {capturedImage && activeExam?.answerKey && overlayCustom && !manualEntry && (
             <div className="card">
               <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Gabarito personalizado</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Círculos verdes = acertos · vermelhos = erros · cinza = em branco · laranja = duplicada · âmbar = múltipla resposta</p>
@@ -2593,8 +2700,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
           <div className="card">
             <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">
-              Conferência
+              {manualEntry ? 'Preencha as respostas' : 'Conferência'}
             </h3>
+            {manualEntry && (
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                Clique na alternativa marcada pelo aluno em cada questão. Clique de novo para desmarcar.
+              </p>
+            )}
 
             <div className="mb-4">
               <Field
@@ -2870,7 +2982,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </Button>
           </div>
           <div className="text-left mt-6 pt-4 border-t border-line dark:border-gray-800">
-            <ReadStages doneCount={8} anchorLabel={anchorLabelFor(activeExam)} />
+            {manualEntry ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <PenLine size={15} aria-hidden />
+                Resultado salvo com respostas preenchidas manualmente.
+              </p>
+            ) : (
+              <ReadStages doneCount={8} anchorLabel={anchorLabelFor(activeExam)} />
+            )}
           </div>
         </div>
       )}
@@ -2901,7 +3020,7 @@ interface BatchPanelProps {
   onFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onStart: () => void;
   onResolveConflict: (item: BatchItem) => void;
-  onReviewManually: (item: BatchItem) => void;
+  onReviewManually: (item: BatchItem, manual?: boolean) => void;
   onClear: () => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
 }
@@ -3065,6 +3184,11 @@ function BatchPanel({
                     {(item.status === 'pending_id' || item.status === 'unknown_code') && (
                       <Button size="sm" variant="secondary" onClick={() => onReviewManually(item)} icon={<Eye size={14} aria-hidden />}>
                         Revisar
+                      </Button>
+                    )}
+                    {item.status === 'error' && (
+                      <Button size="sm" variant="secondary" onClick={() => onReviewManually(item, true)} disabled={!exam?.answerKey} icon={<PenLine size={14} aria-hidden />}>
+                        Inserir manualmente
                       </Button>
                     )}
                   </div>
