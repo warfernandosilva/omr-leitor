@@ -546,10 +546,10 @@ def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
     return qps if layout_mode == "single" else 2 * qps
 
 
-def _load_custom_config(db: Session, tid: int, user: User) -> dict | None:
+def _load_custom_config(db: Session, tid: int, user: User, page: int = 0) -> dict | None:
     """Config normalizada do Gabarito Personalizado (com checagem de acesso)."""
     from models import CustomTemplate
-    from omr.custom_template import image_size_from_path, normalize_config
+    from omr.custom_template import normalize_config, page_image_size
     tpl = db.get(CustomTemplate, tid)
     if tpl is None:
         return None
@@ -558,8 +558,9 @@ def _load_custom_config(db: Session, tid: int, user: User) -> dict | None:
     cfg = normalize_config(tpl.config or {})
     # O arquivo é a fonte de verdade: `page_w/page_h` defasados mudam o
     # aspecto canônico e degradam (ou desalinham) a leitura. As coordenadas
-    # são normalizadas, então corrigir só as dimensões é seguro.
-    real = image_size_from_path(tpl.image_path)
+    # são normalizadas, então corrigir só as dimensões é seguro. Cada página
+    # pode ter a própria imagem — e portanto o próprio tamanho canônico.
+    real = page_image_size(cfg, tpl.image_path, page)
     if real is not None:
         cfg["page_w"], cfg["page_h"] = real
     return cfg
@@ -672,7 +673,7 @@ def process_omr(
     if template == "custom":
         if not custom_template_id:
             return ProcessResponse(success=False, error="Gabarito personalizado sem identificador (custom_template_id).")
-        custom_cfg = _load_custom_config(db, custom_template_id, current_user)
+        custom_cfg = _load_custom_config(db, custom_template_id, current_user, page)
         if custom_cfg is None:
             return ProcessResponse(success=False, error="Gabarito personalizado não encontrado.")
         from omr.custom_template import process_custom_image, omr_params_from_config
@@ -1627,22 +1628,19 @@ def generate_gabaritos(external_id: str, turma_id: int | None = None,
 
 
 def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> int:
-    """Imprime o cartão do Gabarito Personalizado no out_buf (1 página por cartão).
+    """Imprime o cartão do Gabarito Personalizado no out_buf (1 folha por página).
 
     Usa a config da VERSÃO vinculada aos gabaritos (fallback: config atual) e o
     `codigo_unico` de cada um no QR. Sem isto, o lote de uma prova personalizada
     sairia no cartão NATIVO e a leitura/correção por QR não casaria com o modelo.
     """
     from models import CustomTemplate, CustomTemplateVersion
-    from omr.custom_template import render_overlay
-    from routers.custom_templates import _load_image
+    from omr.custom_template import n_pages, page_image_path, render_overlay
+    from routers.custom_templates import _fit_page_rect
 
     tpl = db.get(CustomTemplate, av.custom_template_id)
     if tpl is None:
         raise HTTPException(status_code=404, detail="Gabarito personalizado vinculado não encontrado")
-    base = _load_image(tpl)
-    if base is None:
-        raise HTTPException(status_code=404, detail="Imagem do gabarito personalizado não encontrada")
 
     cfg = tpl.config or {}
     vid = next((g.custom_template_version_id for g in gabaritos if g.custom_template_version_id), None)
@@ -1651,10 +1649,19 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
         if ver is not None and ver.config:
             cfg = ver.config
 
+    # Uma imagem por página do modelo (sem imagem própria, repete a base).
+    bases: list = []
+    for i in range(n_pages(cfg)):
+        p = page_image_path(cfg, tpl.image_path, i)
+        img = cv2.imread(p) if p else None
+        if img is None:
+            raise HTTPException(status_code=404,
+                                detail=f"Imagem da página {i + 1} do gabarito personalizado não encontrada")
+        bases.append(img)
+
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
     from reportlab.pdfgen import canvas as pdf_canvas
-    from routers.custom_templates import _fit_page_rect
 
     c = pdf_canvas.Canvas(out_buf, pagesize=A4)
     w_pt, h_pt = A4
@@ -1667,15 +1674,16 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
             "turma": (av.turma or "") or "",
             "exam_title": av.titulo or "",
         }
-        img = render_overlay(cfg, base, fields=fields, qr_payload=g.codigo_unico)
-        ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        if not ok:
-            continue
-        # preserva a proporção do cartão (não estica para A4)
-        ih, iw = img.shape[:2]
-        x, y, dw, dh = _fit_page_rect(iw, ih, w_pt, h_pt)
-        c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), x, y, width=dw, height=dh)
-        c.showPage()
+        for base in bases:
+            img = render_overlay(cfg, base, fields=fields, qr_payload=g.codigo_unico)
+            ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            if not ok:
+                continue
+            # preserva a proporção do cartão (não estica para A4)
+            ih, iw = img.shape[:2]
+            x, y, dw, dh = _fit_page_rect(iw, ih, w_pt, h_pt)
+            c.drawImage(ImageReader(io.BytesIO(jbuf.tobytes())), x, y, width=dw, height=dh)
+            c.showPage()
         drawn += 1
     c.save()
     return drawn

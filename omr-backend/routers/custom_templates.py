@@ -39,6 +39,8 @@ from omr.custom_template import (
     image_size_from_path,
     n_pages,
     normalize_config,
+    page_image_path,
+    page_image_size,
     process_custom_image,
     question_offset_before_page,
     render_overlay,
@@ -150,11 +152,11 @@ def _data_url_jpeg(bgr: np.ndarray, quality: int = 85, max_side: int = 1400) -> 
         return None
 
 
-def _load_image(tpl: CustomTemplate) -> np.ndarray | None:
-    p = Path(tpl.image_path)
-    if not p.exists():
+def _load_image(tpl: CustomTemplate, page: int = 0) -> np.ndarray | None:
+    p = page_image_path(tpl.config or {}, tpl.image_path, page)
+    if not p or not Path(p).exists():
         return None
-    return cv2.imread(str(p))
+    return cv2.imread(p)
 
 
 def _next_codigo(db: Session) -> str:
@@ -212,10 +214,14 @@ def _size_mismatch_issue(tpl: CustomTemplate) -> dict | None:
     return None
 
 
-def _config_for_read(tpl: CustomTemplate) -> dict:
-    """Config pronta para leitura: `page_w/page_h` sincronizados com o arquivo."""
+def _config_for_read(tpl: CustomTemplate, page: int = 0) -> dict:
+    """Config pronta para leitura: `page_w/page_h` da imagem DESTA página.
+
+    Cada página pode ter a própria imagem (e portanto o próprio tamanho
+    canônico); sem imagem própria, cai na base.
+    """
     cfg = normalize_config(tpl.config or {})
-    real = image_size_from_path(tpl.image_path)
+    real = page_image_size(cfg, tpl.image_path, page)
     if real is not None:
         cfg["page_w"], cfg["page_h"] = real
     return cfg
@@ -247,6 +253,22 @@ def _detail(tpl: CustomTemplate) -> dict:
     if real is not None:
         cfg["page_w"], cfg["page_h"] = real
     d["config"] = cfg
+    # Imagem de cada página no editor: página 0 é a base; as demais só têm
+    # imagem própria depois do upload (antes disso repetem a base).
+    npg = max(1, int(cfg.get("n_pages") or 1))
+    base_size = real or (tpl.image_w, tpl.image_h)
+    pages = []
+    for i in range(npg):
+        uploaded = i > 0 and str(i) in (cfg.get("page_images") or {})
+        size = page_image_size(cfg, tpl.image_path, i) if uploaded else base_size
+        pages.append({
+            "page": i,
+            "image_w": int(size[0]) if size else 0,
+            "image_h": int(size[1]) if size else 0,
+            "image_url": f"/api/custom-templates/{tpl.id}/image?page={i}",
+            "own_image": uploaded,
+        })
+    d["page_images"] = pages
     issues = list(tpl.last_issues or [])
     for issue in reversed(_image_issues(tpl)):
         if not any(i.get("code") == issue["code"] for i in issues):
@@ -357,23 +379,41 @@ def update_template(
 def replace_image(
     tid: int,
     file: UploadFile = File(...),
+    page: int = 0,
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
+    """Troca a imagem do modelo (página 0 = base) ou de UMA página.
+
+    Página > 0 grava um arquivo próprio (`img_<id>.png`) e só atualiza
+    `page_images` — o tamanho canônico da leitura passa a ser o desse arquivo.
+    """
     tpl = _get_template(db, tid, current_user)
     contents = _read_upload(file)
     image = _decode_image_bytes(contents)
     if image is None:
         raise HTTPException(status_code=400, detail="Não foi possível decodificar a imagem.")
     h, w = image.shape[:2]
-    img_path = _template_dir(tpl.id) / "original.png"
-    cv2.imwrite(str(img_path), image)
-    tpl.image_path = str(img_path)
-    tpl.image_w = w
-    tpl.image_h = h
     cfg = normalize_config(tpl.config or {})
-    cfg["page_w"] = w
-    cfg["page_h"] = h
+
+    if page > 0:
+        if page >= int(cfg.get("n_pages") or 1):
+            raise HTTPException(status_code=400, detail="Página fora do modelo (aumente o número de páginas primeiro).")
+        # Id novo a cada envio: versões antigas continuam apontando para o
+        # arquivo antigo. shortcut: o arquivo trocado fica órfão em disco,
+        # limpar quando o acúmulo incomodar.
+        img_id = f"img_{uuid.uuid4().hex[:12]}"
+        cv2.imwrite(str(_template_dir(tpl.id) / f"{img_id}.png"), image)
+        cfg["page_images"][str(page)] = img_id
+    else:
+        img_path = _template_dir(tpl.id) / "original.png"
+        cv2.imwrite(str(img_path), image)
+        tpl.image_path = str(img_path)
+        tpl.image_w = w
+        tpl.image_h = h
+        cfg["page_w"] = w
+        cfg["page_h"] = h
+
     tpl.config = cfg
     # A imagem de referência mudou: o modelo precisa ser redesenhado e
     # revalidado antes de voltar a ser usado na leitura.
@@ -398,28 +438,34 @@ def delete_template(tid: int, current_user: User = Depends(auth.get_current_user
 # ---------------------------------------------------------------------------
 
 @router.get("/api/custom-templates/{tid}/image")
-def template_image(tid: int, current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
+def template_image(
+    tid: int,
+    page: int = 0,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
     tpl = _get_template(db, tid, current_user)
-    p = Path(tpl.image_path)
-    if not p.exists():
+    p = page_image_path(tpl.config or {}, tpl.image_path, page)
+    if not p or not Path(p).exists():
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
-    return FileResponse(str(p), media_type="image/png")
+    return FileResponse(p, media_type="image/png")
 
 
 @router.get("/api/custom-templates/{tid}/preview")
 def template_preview(
     tid: int,
     draw: bool = True,
+    page: int = 0,
     current_user: User = Depends(auth.get_current_user),
     db: Session = Depends(get_db),
 ):
-    """PNG da imagem original; com `draw=1`, sobrepõe as regiões configuradas."""
+    """PNG da imagem da página; com `draw=1`, sobrepõe as regiões DELA."""
     tpl = _get_template(db, tid, current_user)
-    image = _load_image(tpl)
+    image = _load_image(tpl, page)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
     if draw:
-        image = render_preview_overlay(tpl.config or {}, image)
+        image = render_preview_overlay(config_for_page(tpl.config or {}, page), image)
     ok, buf = cv2.imencode(".png", image)
     if not ok:
         raise HTTPException(status_code=500, detail="Falha ao gerar a prévia")
@@ -469,7 +515,7 @@ def test_template(
         raise HTTPException(status_code=400, detail="Não foi possível decodificar a foto.")
 
     diag: dict = {}
-    result = process_custom_image(image, _config_for_read(tpl), adaptive=adaptive, debug=debug,
+    result = process_custom_image(image, _config_for_read(tpl, page), adaptive=adaptive, debug=debug,
                                   diagnostics=diag, page=page)
     if result is None:
         detail = diag.get("detail") or ""
@@ -616,24 +662,28 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
     (códigos temporários para quem ainda não tem gabarito). `max_pages` limita
     a renderização (a contagem total é feita à parte em `_print_count`).
     """
-    base = _load_image(tpl)
-    if base is None:
-        raise HTTPException(status_code=404, detail="Imagem original não encontrada")
+    cfg = tpl.config or {}
+    # Multi-página: cada cartão gera UMA folha por página do modelo. Cada
+    # página usa a própria imagem (sem imagem própria, repete a base).
+    npg = n_pages(cfg)
+    bases: list[np.ndarray] = []
+    for i in range(npg):
+        img = _load_image(tpl, i)
+        if img is None:
+            raise HTTPException(status_code=404, detail=f"Imagem da página {i + 1} não encontrada")
+        bases.append(img)
 
-    # Multi-página (mesma folha): cada cartão gera UMA folha impressa por
-    # página do modelo. A imagem é a mesma; só o rótulo diferencia (p. 1/2).
-    npg = n_pages(tpl.config or {})
-
-    def _sheets(nome: str, codigo: str, img: np.ndarray) -> list[tuple[str, str, np.ndarray]]:
-        if npg <= 1:
-            return [(nome, codigo, img)]
-        return [
-            (f"{nome} — Página {i + 1}/{npg}", codigo, img)
-            for i in range(npg)
-        ]
+    def _sheets(nome: str, codigo: str, fields: dict[str, str] | None
+                ) -> list[tuple[str, str, np.ndarray]]:
+        out = []
+        for i, base in enumerate(bases):
+            title = nome if npg <= 1 else f"{nome} — Página {i + 1}/{npg}"
+            out.append((title, codigo,
+                        render_overlay(cfg, base, fields=fields, qr_payload=codigo)))
+        return out
 
     if req.mode == "blank":
-        return _sheets("Cartão em branco", "", base)
+        return _sheets("Cartão em branco", "", None)
 
     if req.mode == "avaliacao":
         if not tpl.avaliacao_id:
@@ -676,8 +726,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
                 "turma": (av.turma if av else "") or "",
                 "exam_title": (av.titulo if av else "") or "",
             }
-            img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=codigo)
-            pages.extend(_sheets(aluno.nome, codigo, img))
+            pages.extend(_sheets(aluno.nome, codigo, fields))
         if persist:
             db.commit()
         return pages
@@ -696,8 +745,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
             "matricula": s.matricula or "",
             "code": codigo,
         }
-        img = render_overlay(tpl.config or {}, base, fields=fields, qr_payload=codigo)
-        pages.extend(_sheets(s.nome.strip(), codigo, img))
+        pages.extend(_sheets(s.nome.strip(), codigo, fields))
     return pages
 
 
@@ -849,7 +897,7 @@ def detect_anchors_endpoint(
     e tamanho normalizados. O frontend aplica na configuração (com undo).
     """
     tpl = _get_template(db, tid, current_user)
-    image = _load_image(tpl)
+    image = _load_image(tpl, page)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
     anchors = detect_anchors_auto(image, page=page, config=tpl.config or {})
@@ -873,11 +921,13 @@ def detect_page_corners_endpoint(
     restringe âncoras/blocos à página editada (modelos multi-página).
     """
     tpl = _get_template(db, tid, current_user)
-    image = _load_image(tpl)
+    image = _load_image(tpl, page)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
     corners, inferred = detect_page_corners_ex(image, tpl.config or {}, page=page)
-    mismatch = _size_mismatch_issue(tpl)
+    # O aviso compara a config com a imagem BASE; nas páginas com imagem
+    # própria o tamanho esperado é o do arquivo daquela página.
+    mismatch = _size_mismatch_issue(tpl) if page == 0 else None
     warning = mismatch["message"] if mismatch else None
     if not corners:
         return {"ok": False, "corners": None, "count": 0, "inferred": False, "warning": warning}
@@ -898,7 +948,7 @@ def detect_grid_endpoint(
     páginas anteriores e já carrega `page` no bloco sugerido.
     """
     tpl = _get_template(db, tid, current_user)
-    image = _load_image(tpl)
+    image = _load_image(tpl, page)
     if image is None:
         raise HTTPException(status_code=404, detail="Imagem original não encontrada")
     res = detect_grid(image, tpl.config or {},

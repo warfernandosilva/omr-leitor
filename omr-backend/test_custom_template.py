@@ -1987,3 +1987,121 @@ def test_read_upload_enforces_limit():
     with pytest.raises(HTTPException) as exc:
         rt._read_upload(_F(), limit=100)
     assert exc.value.status_code == 413
+
+
+# ---------------------------------------------------------------------------
+# Imagem própria por página ("cada página é um gabarito diferente")
+# ---------------------------------------------------------------------------
+
+def test_normalize_page_images_accepts_only_valid_ids_and_pages():
+    cfg = ct.normalize_config({
+        "page_w": 100, "page_h": 100, "n_pages": 3,
+        "page_images": {
+            "1": "img_0123456789ab",
+            "2": "../../etc/passwd",      # não é id
+            "0": "img_0123456789ab",      # página 0 é a base
+            "7": "img_0123456789ab",      # fora do modelo
+            "x": "img_0123456789ab",      # chave não numérica
+        },
+    })
+    assert cfg["page_images"] == {"1": "img_0123456789ab"}
+
+
+def test_page_image_path_falls_back_to_base():
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        base = Path(d) / "original.png"
+        cv2.imwrite(str(base), _make_card({}))
+        cfg = {"page_w": PAGE_W, "page_h": PAGE_H, "n_pages": 2,
+               "page_images": {"1": "img_aaaaaaaaaaaa"}}
+        # arquivo da página ausente -> base
+        assert ct.page_image_path(cfg, str(base), 1) == str(base)
+        own = Path(d) / "img_aaaaaaaaaaaa.png"
+        cv2.imwrite(str(own), np.ones((90, 120, 3), dtype=np.uint8) * 255)
+        assert ct.page_image_path(cfg, str(base), 1) == str(own)
+        assert ct.page_image_size(cfg, str(base), 1) == (120, 90)
+        assert ct.page_image_path(cfg, str(base), 0) == str(base)
+
+
+def test_api_page_image_upload_fetch_and_limits(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Paginas").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_multipage()})
+
+    # página fora do modelo é recusada
+    r = client.post(f"/api/custom-templates/{tid}/image?page=2",
+                    files={"file": ("p.png", _png_bytes(_make_card({})), "image/png")})
+    assert r.status_code == 400
+
+    page2 = cv2.resize(_make_page_card(1, {}), (1200, 900))
+    r = client.post(f"/api/custom-templates/{tid}/image?page=1",
+                    files={"file": ("p2.png", _png_bytes(page2), "image/png")})
+    assert r.status_code == 200, r.text
+    detail = r.json()
+    pages = {p["page"]: p for p in detail["page_images"]}
+    assert pages[0]["own_image"] is False
+    assert pages[1]["own_image"] is True
+    assert (pages[1]["image_w"], pages[1]["image_h"]) == (1200, 900)
+
+    got = client.get(f"/api/custom-templates/{tid}/image?page=1")
+    assert got.status_code == 200
+    decoded = cv2.imdecode(np.frombuffer(got.content, np.uint8), cv2.IMREAD_COLOR)
+    assert decoded.shape[:2] == (900, 1200)
+
+    # a imagem base segue intacta
+    base = cv2.imdecode(np.frombuffer(client.get(f"/api/custom-templates/{tid}/image").content,
+                                      np.uint8), cv2.IMREAD_COLOR)
+    assert base.shape[:2] == (PAGE_H, PAGE_W)
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_config_for_read_uses_each_page_image_size(authed, db_session):
+    client = authed
+    from models import CustomTemplate
+    from routers.custom_templates import _config_for_read
+
+    tid = _create(client, _png_bytes(_make_card({})), "Paginas tamanho").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_multipage()})
+    page2 = cv2.resize(_make_page_card(1, {}), (1200, 900))
+    client.post(f"/api/custom-templates/{tid}/image?page=1",
+                files={"file": ("p2.png", _png_bytes(page2), "image/png")})
+
+    db = db_session()
+    try:
+        tpl = db.get(CustomTemplate, tid)
+        assert (_config_for_read(tpl, 0)["page_w"], _config_for_read(tpl, 0)["page_h"]) == (PAGE_W, PAGE_H)
+        assert (_config_for_read(tpl, 1)["page_w"], _config_for_read(tpl, 1)["page_h"]) == (1200, 900)
+    finally:
+        db.close()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_page_image_reading_and_printing(authed):
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Paginas leitura").json()["id"]
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config_multipage()})
+    page2 = cv2.resize(_make_page_card(1, {}), (1200, 900))
+    client.post(f"/api/custom-templates/{tid}/image?page=1",
+                files={"file": ("p2.png", _png_bytes(page2), "image/png")})
+    client.post(f"/api/custom-templates/{tid}/activate")
+
+    # leitura da página 2 continua funcionando com a imagem própria (outro tamanho)
+    r = client.post(f"/api/custom-templates/{tid}/test",
+                    files={"file": ("p2.png", _png_bytes(_make_page_card(1, {6: "A"})), "image/png")},
+                    data={"page": "1"})
+    assert r.status_code == 200 and r.json()["success"] is True, r.text
+    assert r.json()["answers"].get("6") == "A"
+
+    # impressão: uma folha por página, com imagens diferentes entre elas
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "blank", "format": "PDF"})
+    body = r.json()
+    assert body["ok"] is True and body["n_pages"] == 2 and body["sheets"] == 2
+    assert body["pages"][0]["image"] != body["pages"][1]["image"]
+
+    r = client.post(f"/api/custom-templates/{tid}/print", json={"mode": "blank", "format": "PDF"})
+    assert r.status_code == 200
+    assert r.content.count(b"/Type /Page") - r.content.count(b"/Type /Pages") == 2
+    client.delete(f"/api/custom-templates/{tid}")

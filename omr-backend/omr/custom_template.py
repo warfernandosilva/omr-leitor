@@ -123,6 +123,9 @@ def default_config(page_w: int = 0, page_h: int = 0) -> dict:
         # importada. Âncoras/blocos carregam `page` (0-based); QR, regiões
         # informativas, campos de impressão e parâmetros são compartilhados.
         "n_pages": 1,
+        # Imagem própria por página: {"1": "img_<12 hex>"} → arquivo
+        # `<img_id>.png` na pasta do modelo. Página 0 é sempre a imagem base.
+        "page_images": {},
         "anchors": [],
         # Cantos da FOLHA dentro da imagem do modelo (normalizados, TL/TR/BR/BL).
         # Servem de DESTINO da homografia quando não há 4 âncoras de canto —
@@ -171,6 +174,41 @@ def _page_index(v: Any) -> int:
         return max(0, int(v))
     except (TypeError, ValueError):
         return 0
+
+
+def _page_image_id(v: Any) -> str | None:
+    """Id opaco da imagem de uma página (`img_` + 12 hex). None = inválido.
+
+    O cliente só ecoa este id; o arquivo é resolvido na pasta do modelo, então
+    um id com barra/ponto não pode escapar do diretório.
+    """
+    s = str(v or "")
+    body = s[4:]
+    if s.startswith("img_") and len(body) == 12 and all(c in "0123456789abcdef" for c in body):
+        return s
+    return None
+
+
+def page_image_path(config: dict | None, image_path: str | None, page: int = 0) -> str | None:
+    """Arquivo de imagem da página pedida (0 = imagem base do modelo).
+
+    Página sem imagem própria cai na base — é o comportamento dos modelos
+    multi-página de mesma folha. O arquivo ausente também cai na base.
+    """
+    if not image_path:
+        return None
+    cfg = normalize_config(config)
+    img_id = cfg["page_images"].get(str(max(0, int(page or 0))))
+    if img_id:
+        p = Path(image_path).parent / f"{img_id}.png"
+        if p.exists():
+            return str(p)
+    return image_path
+
+
+def page_image_size(config: dict | None, image_path: str | None, page: int = 0) -> tuple[int, int] | None:
+    """Dimensões (w, h) da imagem da página (base como fallback)."""
+    return image_size_from_path(page_image_path(config, image_path, page))
 
 
 def normalize_config(config: dict | None) -> dict:
@@ -320,6 +358,15 @@ def normalize_config(config: dict | None) -> dict:
     used = [a["page"] for a in out["anchors"]] + [b["page"] for b in out["questions"]]
     out["n_pages"] = max(1, _page_index(cfg.get("n_pages") or 1),
                          (max(used) + 1) if used else 1)
+
+    # Imagem própria por página: só ids válidos e páginas existentes (0 é a base).
+    pimgs = cfg.get("page_images") if isinstance(cfg.get("page_images"), dict) else {}
+    out["page_images"] = {}
+    for k, v in pimgs.items():
+        img_id = _page_image_id(v)
+        idx = _page_index(k)
+        if img_id and 0 < idx < out["n_pages"]:
+            out["page_images"][str(idx)] = img_id
     return out
 
 
