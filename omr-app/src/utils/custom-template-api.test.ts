@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomBlock } from './custom-template-api';
 import {
-  expandBlock, moveBlockTo, shiftOverrides, withBubbleOverride, withoutBubbleOverride,
+  expandBlock, moveBlockTo, removePageImage, shiftOverrides, withBubbleOverride, withoutBubbleOverride,
 } from './custom-template-api';
 
 function block(over: Partial<CustomBlock> = {}): CustomBlock {
@@ -101,5 +101,14 @@ describe('ajustes individuais do bloco', () => {
     expect(out['1'].A.y).toBeUndefined();
     expect(out['2'].B.y!).toBeCloseTo(0.6);
     expect(out['2'].B.x).toBeUndefined();
+  });
+});
+
+describe('removePageImage', () => {
+  it('remove a página e reindexa as imagens seguintes', () => {
+    const before = { '1': 'img_a', '2': 'img_b', '3': 'img_c' };
+    expect(removePageImage(before, 2)).toEqual({ '1': 'img_a', '2': 'img_c' });
+    expect(removePageImage(before, 1)).toEqual({ '1': 'img_b', '2': 'img_c' });
+    expect(removePageImage(undefined, 1)).toEqual({});
   });
 });

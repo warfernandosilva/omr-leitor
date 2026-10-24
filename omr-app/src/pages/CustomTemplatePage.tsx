@@ -24,6 +24,8 @@ import {
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
   createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
   getCustomTemplate, listCustomTemplates, moveBlockTo, printCustomTemplate, printPreviewCustomTemplate,
+  replaceCustomImage,
+  removePageImage,
   shiftOverrides, testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
   withBubbleOverride, withoutBubbleOverride,
 } from '../utils/custom-template-api';
@@ -380,14 +382,19 @@ function TemplateEditor({
     });
   }, []);
 
-  // imagem de fundo
+  // Imagem de fundo (uma por página: 0 = base, demais = imagem própria)
   const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [imgVersion, setImgVersion] = useState(0);
+  const nPages = Math.max(1, config.n_pages ?? 1);
+  // Página efetivamente editada (clampada ao número disponível).
+  const currentPage = Math.min(pageIdx, nPages - 1);
+  const pageMeta = detail.page_images?.find((p) => p.page === currentPage);
   useEffect(() => {
     let url: string | null = null;
     let cancelled = false;
     (async () => {
       try {
-        const blob = await customTemplateImage(detail.id);
+        const blob = await customTemplateImage(detail.id, currentPage);
         if (cancelled) return;
         url = URL.createObjectURL(blob);
         setImgUrl(url);
@@ -396,10 +403,33 @@ function TemplateEditor({
       }
     })();
     return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
-  }, [detail.id]);
+  }, [detail.id, currentPage, imgVersion]);
 
-  const baseW = config.page_w || detail.image_w || 1000;
-  const baseH = config.page_h || detail.image_h || 1400;
+  const baseW = pageMeta?.image_w || config.page_w || detail.image_w || 1000;
+  const baseH = pageMeta?.image_h || config.page_h || detail.image_h || 1400;
+
+  // Troca/atribui a imagem da página editada (página 0 = imagem base).
+  const pageImageInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingPageImage, setUploadingPageImage] = useState(false);
+  const handlePageImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingPageImage(true);
+    try {
+      const d = await replaceCustomImage(detail.id, file, currentPage);
+      onSaved(d);
+      // A imagem já foi gravada no servidor: mantém a referência no config
+      // local para o próximo "Salvar" não apagar o vínculo.
+      setConfig((c) => ({ ...c, page_images: d.config.page_images }));
+      setImgVersion((v) => v + 1);
+      toast.success(`Imagem da página ${currentPage + 1} atualizada.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao enviar a imagem');
+    } finally {
+      setUploadingPageImage(false);
+    }
+  };
 
   // Selecionar uma região (canvas ou lista) traz as propriedades para a frente.
   useEffect(() => {
@@ -416,9 +446,6 @@ function TemplateEditor({
     setPan({ x: (el.clientWidth - baseW * z) / 2, y: (el.clientHeight - baseH * z) / 2 });
   }, [baseW, baseH]);
 
-  const nPages = Math.max(1, config.n_pages ?? 1);
-  // Página efetivamente editada (clampada ao número disponível).
-  const currentPage = Math.min(pageIdx, nPages - 1);
   // Config recortada à página atual: o canvas/overlay/lista mostram só as
   // regiões dessa página. QR, info e print_fields são compartilhados.
   const pageConfig = useMemo<CustomConfig>(
@@ -733,8 +760,9 @@ function TemplateEditor({
     }
   };
 
-  // Multi-página (mesma folha): adiciona uma página nova (copia as âncoras da
-  // 1ª página que as tenha — a folha é a mesma) e remove a página atual.
+  // Páginas do cartão: adiciona uma página nova (copia as âncoras da 1ª página
+  // que as tenha, como ponto de partida) e remove a página atual. Cada página
+  // pode receber a própria imagem; até lá repete a imagem base.
   const addPage = () => {
     const idx = nPages;
     const srcPage: number | null = config.anchors.length
@@ -750,7 +778,7 @@ function TemplateEditor({
     setPageIdx(idx);
     setSelection(null);
     toast.info(copied.length
-      ? `Página ${idx + 1} criada com as âncoras copiadas da página ${(srcPage ?? 0) + 1}.`
+      ? `Página ${idx + 1} criada com as âncoras da página ${(srcPage ?? 0) + 1}. Envie a imagem desta página se ela for diferente.`
       : `Página ${idx + 1} criada.`);
   };
   const removePage = () => {
@@ -760,6 +788,9 @@ function TemplateEditor({
     apply({
       ...cfg,
       n_pages: nPages - 1,
+      // Reindexa as imagens próprias junto com as regiões (o servidor
+      // descarta chaves >= n_pages ao salvar).
+      page_images: removePageImage(cfg.page_images, idx),
       anchors: cfg.anchors
         .filter((a) => (a.page ?? 0) !== idx)
         .map((a) => ((a.page ?? 0) > idx ? { ...a, page: (a.page ?? 0) - 1 } : a)),
@@ -914,6 +945,18 @@ function TemplateEditor({
               Página {currentPage + 1} de {nPages}
               {nPages > 1 ? ' · as regiões editadas pertencem a esta página' : ''}.
             </p>
+            <input ref={pageImageInputRef} type="file" accept="image/*" hidden
+                   onChange={(e) => void handlePageImage(e)} />
+            <Button variant="secondary" size="sm" loading={uploadingPageImage}
+                    icon={<ImageIcon size={14} aria-hidden />}
+                    onClick={() => pageImageInputRef.current?.click()}>
+              {currentPage === 0 ? 'Trocar imagem base' : (pageMeta?.own_image ? 'Trocar imagem desta página' : 'Enviar imagem desta página')}
+            </Button>
+            {nPages > 1 && currentPage > 0 && !pageMeta?.own_image && (
+              <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                Sem imagem própria, esta página repete a imagem da página 1.
+              </p>
+            )}
           </div>
           <Toolbar tool={tool} setTool={(t) => {
                      setTool(t);

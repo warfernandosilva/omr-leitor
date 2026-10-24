@@ -87,6 +87,8 @@ export interface CustomConfig {
   page_h: number;
   // Multi-página (mesma folha): 1 = modelo de 1 página (default).
   n_pages?: number;
+  // Imagem própria por página: { "1": "img_<12 hex>" }. Página 0 é a base.
+  page_images?: Record<string, string>;
   anchors: CustomAnchor[];
   // Cantos da FOLHA dentro da imagem do modelo (normalizados, TL/TR/BR/BL).
   // Usados como DESTINO do alinhamento quando o modelo não tem as 4 âncoras
@@ -139,6 +141,15 @@ export interface CustomTemplateDetail extends CustomTemplateSummary {
   issues: ValidationIssue[] | null;
   image_url: string;
   preview_url: string;
+  page_images: PageImage[];
+}
+
+export interface PageImage {
+  page: number;
+  image_w: number;
+  image_h: number;
+  image_url: string;
+  own_image: boolean;
 }
 
 export interface ExpandedBubble {
@@ -235,10 +246,11 @@ export function updateCustomTemplate(
   return apiJsonBody(`/api/custom-templates/${id}`, 'PUT', patch);
 }
 
-export function replaceCustomImage(id: number, file: File): Promise<CustomTemplateDetail> {
+export function replaceCustomImage(id: number, file: File, page = 0): Promise<CustomTemplateDetail> {
   const form = new FormData();
   form.append('file', file);
-  return apiForm(`/api/custom-templates/${id}/image`, form);
+  const q = page > 0 ? `?page=${page}` : '';
+  return apiForm(`/api/custom-templates/${id}/image${q}`, form);
 }
 
 export function deleteCustomTemplate(id: number): Promise<{ deleted: number }> {
@@ -266,8 +278,9 @@ export function listCustomVersions(id: number): Promise<{ versions: { id: number
 
 // ─── Imagem / bolhas ───
 
-export function customTemplateImage(id: number): Promise<Blob> {
-  return apiBlob(`/api/custom-templates/${id}/image`);
+export function customTemplateImage(id: number, page = 0): Promise<Blob> {
+  const q = page > 0 ? `?page=${page}` : '';
+  return apiBlob(`/api/custom-templates/${id}/image${q}`);
 }
 
 export async function customBubbles(id: number, page?: number): Promise<{ bubbles: ExpandedBubble[]; n_pages?: number }> {
@@ -416,6 +429,19 @@ export function emptyConfig(pageW: number, pageH: number): CustomConfig {
     print_fields: [],
     omr_params: {},
   };
+}
+
+/** Remove a página `idx` do mapa de imagens e reindexa as seguintes. */
+export function removePageImage(
+  pageImages: Record<string, string> | undefined, idx: number,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, id] of Object.entries(pageImages ?? {})) {
+    const p = Number(k);
+    if (p === idx) continue;
+    out[String(p > idx ? p - 1 : p)] = id;
+  }
+  return out;
 }
 
 /** Expande as bolhas de um bloco em coordenadas normalizadas (espelha o backend). */
