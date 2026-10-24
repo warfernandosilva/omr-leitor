@@ -210,11 +210,21 @@ export interface LabSessionMetrics extends LabMetrics {
   template: string;
   n_images: number;
   n_erro_processamento: number;
+  /** Thresholds que a leitura realmente usou — ponto de partida do simulador. */
+  defaults?: {
+    floor: number | null;
+    floor_source: string | null;
+    /** Floors distintos quando o modelo usa adaptativo (varia por foto). */
+    floor_values: number[];
+    margin: number;
+  };
 }
 
 export interface LabReclassifyQuestion {
   image_id: number;
   question: number;
+  /** Floor efetivamente usado nesta questão (por foto quando use_saved_floor). */
+  floor?: number;
   status: LabStatus;
   label: string;
   detected: string | null;
@@ -239,6 +249,8 @@ export async function labReclassify(sid: number, payload: {
   weights?: number[] | null;
   low_conf_threshold?: number | null;
   persist?: boolean;
+  /** Usa o floor gravado de cada foto (reproduz a leitura adaptativa). */
+  use_saved_floor?: boolean;
 }): Promise<LabReclassifyResult> {
   return apiJsonBody(`/api/lab/sessions/${sid}/reclassify`, 'POST', {
     persist: false,

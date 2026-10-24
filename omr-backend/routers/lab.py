@@ -24,7 +24,7 @@ import cv2
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 import auth
@@ -634,6 +634,8 @@ class ReclassifyIn(BaseModel):
     weights: list[float] | None = None
     low_conf_threshold: float | None = None
     persist: bool = False
+    # Reproduz o floor real de cada foto (adaptativo) em vez do floor do slider.
+    use_saved_floor: bool = False
 
 
 @router.get("/api/lab/sessions/{sid}/metrics")
@@ -644,22 +646,28 @@ def lab_session_metrics(
 ):
     """Métricas da sessão usando a classificação armazenada (motor atual)."""
     from omr.lab_metrics import compute_metrics
+    from omr.tuning import get_tuning
 
     session = _get_session(db, sid, current_user)
     questions = _load_questions(db, sid)
-    n_images = db.execute(
-        select(func.count(LabImage.id)).where(LabImage.session_id == sid)
-    ).scalar() or 0
-    n_erro = db.execute(
-        select(func.count(LabImage.id)).where(LabImage.session_id == sid, LabImage.status == "error")
-    ).scalar() or 0
+    imgs = db.execute(
+        select(LabImage).where(LabImage.session_id == sid).order_by(LabImage.id)
+    ).scalars().all()
+    processed = [i for i in imgs if i.status == "processed" and i.floor_used is not None]
     m = compute_metrics(_question_dicts(questions))
     m.update({
         "session_id": sid,
         "nome": session.nome,
         "template": session.template,
-        "n_images": n_images,
-        "n_erro_processamento": n_erro,
+        "n_images": len(imgs),
+        "n_erro_processamento": sum(1 for i in imgs if i.status == "error"),
+        # Ponto de partida do simulador: os thresholds que a leitura realmente usou.
+        "defaults": {
+            "floor": processed[0].floor_used if processed else None,
+            "floor_source": processed[0].floor_source if processed else None,
+            "floor_values": sorted({round(i.floor_used, 3) for i in processed}),
+            "margin": get_tuning(session.template).margin,
+        },
     })
     return m
 
@@ -681,12 +689,20 @@ def lab_reclassify(
     session = _get_session(db, sid, current_user)
     weights = tuple(payload.weights) if payload.weights else None
     questions = _load_questions(db, sid)
+    floors: dict[int, float] = {}
+    if payload.use_saved_floor:
+        floors = {
+            iid: fl for iid, fl in db.execute(
+                select(LabImage.id, LabImage.floor_used).where(LabImage.session_id == sid)
+            ).all() if fl is not None
+        }
     view = []
     for q in questions:
         comps = _comps_for(q)
+        q_floor = floors.get(q.image_id, payload.floor)
         if comps:
             status, letter, marks, gap = reclassify_question(
-                comps, payload.floor, payload.margin, weights, payload.low_conf_threshold
+                comps, q_floor, payload.margin, weights, payload.low_conf_threshold
             )
         else:
             status, letter, marks, gap = q.status, q.detected_answer, q.duplicate_marks or [], 0.0
@@ -697,6 +713,7 @@ def lab_reclassify(
         view.append({
             "image_id": q.image_id,  # permite casar com a questão da imagem no cliente
             "question": q.question_number,
+            "floor": round(q_floor, 3),
             "status": status,
             "label": STATUS_LABEL.get(status, status),
             "detected": letter,

@@ -174,6 +174,21 @@ def test_lab_metrics_reclassify_calibration_export_publish(client, tmp_path, mon
     r2 = client.get(f'/api/lab/sessions/{sid}/metrics')
     assert r2.json()["brancos"] == m["brancos"]
 
+    # ponto de partida do simulador = thresholds que a leitura realmente usou
+    d = r2.json()["defaults"]
+    assert d["floor"] == 0.30 and d["floor_source"] == "fixed", d
+    assert d["margin"] == 0.22 and d["floor_values"] == [0.30], d
+
+    # floor 0.99 no slider zera tudo; use_saved_floor volta à leitura real
+    r = client.post(f'/api/lab/sessions/{sid}/reclassify',
+                    json={'floor': 0.99, 'margin': 0.22})
+    assert r.json()["metrics"]["brancos"] == 44, r.json()["metrics"]
+    r = client.post(f'/api/lab/sessions/{sid}/reclassify',
+                    json={'floor': 0.99, 'margin': 0.22, 'use_saved_floor': True})
+    j = r.json()
+    assert j["metrics"]["acertos"] == 3, j["metrics"]
+    assert {q["floor"] for q in j["questions"]} == {0.30}
+
     # calibration: grid enxuto sobre as questões com gabarito
     r = client.post(f'/api/lab/sessions/{sid}/calibration',
                     json={'floor_grid': [0.20, 0.30], 'margin_grid': [0.15, 0.22]})

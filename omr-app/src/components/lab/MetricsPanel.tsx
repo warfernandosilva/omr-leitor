@@ -70,6 +70,9 @@ export default function MetricsPanel({ session, detail }: Props) {
   const [exportBusy, setExportBusy] = useState(false);
   // Base do diff: a classificação gravada (detail) ou a última gravação feita aqui.
   const [savedBase, setSavedBase] = useState<Map<string, QuestionBase> | null>(null);
+  // O simulador nasce nos thresholds que a leitura realmente usou (não em 0.30/0.15).
+  const [defaultsApplied, setDefaultsApplied] = useState(false);
+  const [perImageFloor, setPerImageFloor] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,13 +89,33 @@ export default function MetricsPanel({ session, detail }: Props) {
   useEffect(() => { load(); }, [load]);
 
   // Trocar de sessão zera o preview (os componentes salvos são outros).
-  useEffect(() => { setSavedBase(null); setSim(null); }, [session.id]);
+  useEffect(() => {
+    setSavedBase(null);
+    setSim(null);
+    setDefaultsApplied(false);
+    setPerImageFloor(false);
+  }, [session.id]);
+
+  // Inicia os sliders no que a leitura usou: floor gravado da primeira foto e
+  // margin do modelo (Herby 0.15, demais 0.22). Assim "0 mudanças" = produção.
+  useEffect(() => {
+    if (!m || m.session_id !== session.id || defaultsApplied) return;
+    if (m.defaults?.floor != null) setFloor(m.defaults.floor);
+    if (m.defaults) setMargin(m.defaults.margin);
+    // Adaptativo varia por foto: nasce reproduzindo o floor de cada uma.
+    setPerImageFloor(
+      m.defaults?.floor_source === 'adaptive' || (m.defaults?.floor_values.length ?? 0) > 1,
+    );
+    setDefaultsApplied(true);
+  }, [m, session.id, defaultsApplied]);
 
   // Preview em TEMPO REAL: cada mudança de parâmetro reclassifica sobre os
   // componentes salvos (sem reler a foto) e atualiza métricas + diff.
   // O contador de sequência descarta resposta fora de ordem enquanto arrasta.
+  const ready = defaultsApplied && m?.session_id === session.id;
   const seq = useRef(0);
   useEffect(() => {
+    if (!ready) return;
     const id = ++seq.current;
     setSimBusy(true);
     const timer = window.setTimeout(async () => {
@@ -102,6 +125,7 @@ export default function MetricsPanel({ session, detail }: Props) {
           margin,
           weights: [w0, w1, w2],
           low_conf_threshold: lowConf.trim() === '' ? null : Number(lowConf),
+          use_saved_floor: perImageFloor,
         });
         if (id !== seq.current) return;
         setSim(j);
@@ -113,7 +137,7 @@ export default function MetricsPanel({ session, detail }: Props) {
       }
     }, PREVIEW_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [session.id, floor, margin, w0, w1, w2, lowConf]);
+  }, [session.id, floor, margin, w0, w1, w2, lowConf, perImageFloor, ready]);
 
   const baseline = useMemo(() => {
     const map = new Map<string, QuestionBase>();
@@ -167,6 +191,7 @@ export default function MetricsPanel({ session, detail }: Props) {
         margin,
         weights: [w0, w1, w2],
         low_conf_threshold: lowConf.trim() === '' ? null : Number(lowConf),
+        use_saved_floor: perImageFloor,
         persist: true,
       });
       setSim(j);
@@ -206,6 +231,13 @@ export default function MetricsPanel({ session, detail }: Props) {
 
   const shown = sim?.metrics ?? m;
   const delta = sim && m ? sim.metrics.acertos - m.acertos : 0;
+  const floorValues = m?.defaults?.floor_values ?? [];
+  // Floor adaptativo varia por foto: um slider único não reproduz a leitura.
+  const showPerImageFloor = floorValues.length > 1 || m?.defaults?.floor_source === 'adaptive';
+  const savedFloorText = m?.defaults?.floor == null ? null
+    : floorValues.length > 1
+      ? `${floorValues.map(v => v.toFixed(2)).join(' · ')} (por foto)`
+      : `${m.defaults.floor.toFixed(2)} (${m.defaults.floor_source === 'adaptive' ? 'adaptativo' : 'fixo'})`;
 
   return (
     <div className="space-y-6">
@@ -251,18 +283,21 @@ export default function MetricsPanel({ session, detail }: Props) {
                 {simBusy && <span className="text-xs text-gray-500 dark:text-gray-400" role="status">simulando…</span>}
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                Atualiza ao arrastar, usando os scores já salvos (sem reler a foto). Mudanças de CLAHE/raio exigem reprocessar.
+                Atualiza ao arrastar, usando os scores já salvos (sem reler a foto). Os sliders partem do que a leitura
+                usou, então “0 mudanças” = produção. Mudanças de CLAHE/raio exigem reprocessar.
               </p>
               <div className="grid grid-cols-2 gap-3">
-                <Field label={`floor · ${floor.toFixed(2)}`} htmlFor="lab-floor">
+                <Field label={perImageFloor ? 'floor · por foto' : `floor · ${floor.toFixed(2)}`} htmlFor="lab-floor">
                   <div className="flex items-center gap-2">
                     <input
                       type="range" min={0} max={1} step={0.01} value={floor}
                       onChange={e => setFloor(Number(e.target.value))}
-                      aria-label="floor (arrastar)" className="flex-1 accent-brand-500"
+                      disabled={perImageFloor}
+                      aria-label="floor (arrastar)" className="flex-1 accent-brand-500 disabled:opacity-40"
                     />
                     <div className="w-20 shrink-0">
                       <Input id="lab-floor" type="number" step="0.01" min="0" max="1" value={floor}
+                        disabled={perImageFloor}
                         onChange={e => setFloor(Number(e.target.value))} />
                     </div>
                   </div>
@@ -294,12 +329,33 @@ export default function MetricsPanel({ session, detail }: Props) {
                 </Field>
               </div>
 
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mt-3 text-xs">
+                {savedFloorText && (
+                  <span className="text-gray-500 dark:text-gray-400">
+                    Leitura original: <span className="tabular-nums">{savedFloorText}</span>
+                    {' · margin '}<span className="tabular-nums">{m?.defaults?.margin?.toFixed(2)}</span>
+                  </span>
+                )}
+                {showPerImageFloor && (
+                  <label className="flex items-center gap-2 cursor-pointer text-gray-600 dark:text-gray-300">
+                    <input
+                      type="checkbox" checked={perImageFloor}
+                      onChange={e => setPerImageFloor(e.target.checked)}
+                      className="accent-brand-500"
+                    />
+                    floor por foto (como foi lido)
+                  </label>
+                )}
+              </div>
+
               {detail && scores.length > 0 && (
                 <div className="mt-5">
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Scores × floor</h4>
                     <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
-                      {belowFloor} de {scores.length} abaixo do floor
+                      {perImageFloor
+                        ? `${scores.length} scores · floor por foto`
+                        : `${belowFloor} de ${scores.length} abaixo do floor`}
                     </span>
                   </div>
                   <div className="relative flex items-end gap-px h-28 border-b border-line dark:border-gray-800" aria-hidden>
@@ -311,13 +367,17 @@ export default function MetricsPanel({ session, detail }: Props) {
                         style={{ height: `${Math.max(1, (n / hist.max) * 100)}%` }}
                       />
                     ))}
-                    <div className="absolute inset-y-0 w-0.5 bg-danger-500" style={{ left: `${floor * 100}%` }} />
+                    {!perImageFloor && (
+                      <div className="absolute inset-y-0 w-0.5 bg-danger-500" style={{ left: `${floor * 100}%` }} />
+                    )}
                   </div>
                   <div className="flex justify-between text-[10px] text-gray-400 dark:text-gray-500 mt-1">
                     <span>0.00</span><span>0.25</span><span>0.50</span><span>0.75</span><span>1.00</span>
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    Linha vermelha = floor; abaixo dela nenhuma bolha conta como marcada.
+                    {perImageFloor
+                      ? 'Sem linha única: cada foto usa o floor com que foi lida (adaptativo). Desmarque para simular um floor global.'
+                      : 'Linha vermelha = floor; abaixo dela nenhuma bolha conta como marcada.'}
                   </p>
                 </div>
               )}
