@@ -182,6 +182,13 @@ describe('status da prova (somente local)', () => {
     localStorage.removeItem(`omr-app-data-${UID}`);
   });
 
+  it('storage antigo do aparelho passa a pertencer ao primeiro usuário', () => {
+    localStorage.setItem('omr-app-data', JSON.stringify({ exams: [localExam()], results: [] }));
+    expect(getExams(UID)).toHaveLength(1);
+    expect(localStorage.getItem('omr-app-data')).toBeNull();
+    expect(getExams('outro')).toHaveLength(0);
+  });
+
   it('prova antiga sem status volta como ativa', () => {
     const semStatus = { ...localExam() };
     delete semStatus.status;

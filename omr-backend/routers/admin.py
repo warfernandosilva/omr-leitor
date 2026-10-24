@@ -154,7 +154,7 @@ def admin_delete_user(user_id: int, admin: User = Depends(_require_admin), db: S
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
-    # avaliações do usuário viram órfãs (visíveis para todos) em vez de apagar dados de provas
+    # avaliações do usuário viram órfãs (só o admin vê) em vez de apagar dados de provas
     db.execute(update(Avaliacao).where(Avaliacao.owner_id == user_id).values(owner_id=None))
     db.delete(user)
     db.commit()

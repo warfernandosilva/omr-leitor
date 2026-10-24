@@ -209,9 +209,8 @@ def lab_list_sessions(
     db: Session = Depends(get_db),
 ):
     stmt = select(LabSession).options(selectinload(LabSession.images))
-    if current_user.role != "admin":
-        # professor vê só as próprias sessões (as legadas sem dono também)
-        stmt = stmt.where((LabSession.owner_id == current_user.id) | (LabSession.owner_id.is_(None)))
+    # professor vê só as próprias sessões; sessão sem dono é só do admin
+    stmt = stmt.where(auth.owner_clause(LabSession, current_user))
     rows = db.execute(stmt.order_by(LabSession.id.desc())).scalars().all()
     return {
         "sessions": [
@@ -841,7 +840,7 @@ def _owned_config(db: Session, cid: int, user: User) -> OmrConfig:
     cfg = db.get(OmrConfig, cid)
     if cfg is None:
         raise HTTPException(status_code=404, detail="Configuração não encontrada")
-    if cfg.owner_id is not None and cfg.owner_id != user.id and user.role != "admin":
+    if cfg.owner_id != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Sem permissão para esta configuração")
     return cfg
 
@@ -852,9 +851,7 @@ def lab_list_configs(
     db: Session = Depends(get_db),
 ):
     from omr.params import get_active_config
-    stmt = select(OmrConfig)
-    if current_user.role != "admin":
-        stmt = stmt.where((OmrConfig.owner_id == current_user.id) | (OmrConfig.owner_id.is_(None)))
+    stmt = select(OmrConfig).where(auth.owner_clause(OmrConfig, current_user))
     rows = db.execute(stmt.order_by(OmrConfig.id.desc())).scalars().all()
     return {
         "active_file": get_active_config(),

@@ -553,7 +553,7 @@ def _load_custom_config(db: Session, tid: int, user: User) -> dict | None:
     tpl = db.get(CustomTemplate, tid)
     if tpl is None:
         return None
-    if tpl.owner_id is not None and tpl.owner_id != user.id and user.role != "admin":
+    if tpl.owner_id != user.id and user.role != "admin":
         return None
     cfg = normalize_config(tpl.config or {})
     # O arquivo é a fonte de verdade: `page_w/page_h` defasados mudam o
@@ -1859,9 +1859,8 @@ def list_exams(limit: int = 100, offset: int = 0, db: Session = Depends(get_db),
     """Lista avaliações do usuário (admin vê todas) — paginado."""
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
-    q = select(Avaliacao).order_by(Avaliacao.created_at.desc()).limit(limit).offset(offset)
-    if current_user.role != "admin":
-        q = q.where((Avaliacao.owner_id == current_user.id) | (Avaliacao.owner_id.is_(None)))
+    q = select(Avaliacao).where(auth.owner_clause(Avaliacao, current_user))
+    q = q.order_by(Avaliacao.created_at.desc()).limit(limit).offset(offset)
     avaliacoes = db.scalars(q).all()
     def _visible_key(av) -> dict | None:
         # Gabarito só para dono/admin; exame órfão sem dono expõe metadados, não a chave
@@ -1900,8 +1899,7 @@ def list_deleted_exams(db: Session = Depends(get_db), current_user: User = Depen
     (seguro: ids são UUIDs).
     """
     q = select(DeletedExam).order_by(DeletedExam.deleted_at.desc())
-    if current_user.role != "admin":
-        q = q.where((DeletedExam.owner_id == current_user.id) | (DeletedExam.owner_id.is_(None)))
+    q = q.where(auth.owner_clause(DeletedExam, current_user))
     return [{"external_id": t.external_id, "deleted_at": t.deleted_at.isoformat()} for t in db.scalars(q).all()]
 
 
@@ -1984,7 +1982,7 @@ def list_resultados(limit: int = 100, offset: int = 0, db: Session = Depends(get
     q = select(GabaritoNomeado).where(GabaritoNomeado.status == GabaritoNomeado.STATUS_CORRIGIDO).order_by(GabaritoNomeado.data_correcao.desc()).limit(limit).offset(offset)
     if current_user.role != "admin":
         q = q.join(Avaliacao, GabaritoNomeado.avaliacao_id == Avaliacao.id).where(
-            (Avaliacao.owner_id == current_user.id) | (Avaliacao.owner_id.is_(None))
+            Avaliacao.owner_id == current_user.id
         )
     gabaritos = db.scalars(q).all()
     return [

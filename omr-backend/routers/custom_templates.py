@@ -101,7 +101,7 @@ def _get_template(db: Session, tid: int, user: User | None = None) -> CustomTemp
     tpl = db.get(CustomTemplate, tid)
     if tpl is None:
         raise HTTPException(status_code=404, detail="Gabarito personalizado não encontrado")
-    if user is not None and tpl.owner_id is not None and tpl.owner_id != user.id and user.role != "admin":
+    if user is not None and tpl.owner_id != user.id and user.role != "admin":
         raise HTTPException(status_code=403, detail="Sem permissão para este gabarito")
     return tpl
 
@@ -311,7 +311,7 @@ def create_template(
 def list_templates(current_user: User = Depends(auth.get_current_user), db: Session = Depends(get_db)):
     stmt = select(CustomTemplate).order_by(CustomTemplate.updated_at.desc())
     rows = db.execute(stmt).scalars().all()
-    rows = [t for t in rows if t.owner_id is None or t.owner_id == current_user.id or current_user.role == "admin"]
+    rows = [t for t in rows if t.owner_id == current_user.id or current_user.role == "admin"]
     return {"templates": [_summary(t) for t in rows]}
 
 

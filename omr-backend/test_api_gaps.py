@@ -85,6 +85,40 @@ def test_api_gaps(isolated, db_session):
     assert owner.get("/api/auth/me").status_code in (401, 403), "me 401 após desativar"
 
 
+def test_registro_sem_dono_so_para_admin(isolated, db_session):
+    """Dado órfão (dono excluído/legado) não vaza: só o admin enxerga."""
+    from models import Avaliacao, CustomTemplate, Turma
+
+    admin = _new_client("admin.orfao@gaps.com", db_session, role="admin")
+    prof = _new_client("prof.orfao@gaps.com", db_session)
+
+    db = db_session()
+    try:
+        db.add(Avaliacao(external_id="ex-orfa", titulo="Órfã", owner_id=None))
+        turma = Turma(nome="Turma órfã", owner_id=None)
+        db.add(turma)
+        tpl = CustomTemplate(nome="Modelo órfão", image_path="", config={}, owner_id=None)
+        db.add(tpl)
+        db.commit()
+        turma_id, tpl_id = turma.id, tpl.id
+    finally:
+        db.close()
+
+    assert prof.get("/api/exams/ex-orfa").status_code == 403, "prova órfã: professor 403"
+    assert admin.get("/api/exams/ex-orfa").status_code == 200, "prova órfã: admin 200"
+    assert "ex-orfa" not in [e["external_id"] for e in prof.get("/api/exams").json()]
+    assert "ex-orfa" in [e["external_id"] for e in admin.get("/api/exams").json()]
+
+    assert prof.get(f"/api/turmas/{turma_id}").status_code == 403, "turma órfã: professor 403"
+    assert turma_id not in [t["id"] for t in prof.get("/api/turmas").json()["turmas"]]
+    assert turma_id in [t["id"] for t in admin.get("/api/turmas").json()["turmas"]]
+
+    assert prof.get(f"/api/custom-templates/{tpl_id}").status_code == 403, "modelo órfão: professor 403"
+    assert tpl_id not in [t["id"] for t in prof.get("/api/custom-templates").json()["templates"]]
+    assert tpl_id in [t["id"] for t in admin.get("/api/custom-templates").json()["templates"]]
+
+
+
 if __name__ == "__main__":
     import pytest as _pytest
     import sys as _sys

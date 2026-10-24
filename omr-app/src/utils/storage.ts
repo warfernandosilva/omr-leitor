@@ -46,7 +46,16 @@ function loadData(userId?: string | number): AppData {
     // tenta chave do usuário, com fallback legado para migração
     const key = getStorageKey(userId);
     let raw = localStorage.getItem(key);
-    if (!raw && userId != null) raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw && userId != null) {
+      // O storage era um só para o aparelho. Na primeira leitura ele passa a
+      // pertencer a este usuário (os dados continuam, só deixam de ser de todos).
+      const legado = localStorage.getItem(STORAGE_KEY);
+      if (legado) {
+        localStorage.setItem(key, legado);
+        localStorage.removeItem(STORAGE_KEY);
+        raw = legado;
+      }
+    }
     if (raw) {
       const parsed = JSON.parse(raw);
       exams = (parsed.exams || []).map(migrateExam);

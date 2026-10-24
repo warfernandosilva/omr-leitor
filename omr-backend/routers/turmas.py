@@ -71,9 +71,7 @@ def _get_turma(db: Session, turma_id: int, current_user: User) -> Turma:
 @router.get("/api/turmas")
 def list_turmas(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
     """Lista as turmas visíveis ao usuário (dono ou admin) com contagem de alunos."""
-    q = select(Turma).order_by(Turma.nome)
-    if current_user.role != "admin":
-        q = q.where((Turma.owner_id == current_user.id) | (Turma.owner_id.is_(None)))
+    q = select(Turma).where(auth.owner_clause(Turma, current_user)).order_by(Turma.nome)
     turmas = db.scalars(q).all()
     counts = dict(
         db.execute(

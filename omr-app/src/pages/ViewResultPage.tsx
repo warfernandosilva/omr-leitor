@@ -53,7 +53,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
   }, [resultId, local]);
 
   const result = local || dbResult;
-  const exam = result ? getExam(result.examId, userId) || getExam(result.examId) : null;
+  const exam = result ? getExam(result.examId, userId) : null;
 
   const reviewed = justReviewed || result?.reviewed === true;
   const pendingDup = result && !reviewed ? (result.duplicateQuestions ?? []) : [];

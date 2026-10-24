@@ -5,7 +5,7 @@ from jose import JWTError, jwt
 import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -102,25 +102,33 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
     return current_user
 
 
+def owner_clause(model, user: models.User):
+    """Cláusula SQL de visibilidade: admin vê tudo, usuário vê só o que criou.
+
+    Registro sem dono (legado ou de usuário excluído) fica só para o admin:
+    ninguém herda o que não criou.
+    """
+    if user.role == "admin":
+        return true()
+    return model.owner_id == user.id
+
+
 def require_owner_or_admin(avaliacao: models.Avaliacao, user: models.User):
-    """Garante que apenas dono ou admin acesse a avaliação."""
-    if avaliacao.owner_id is None:
-        return  # legado sem dono — visível para todos até migração
-    if avaliacao.owner_id != user.id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Sem permissão para esta avaliação")
+    """Garante que apenas dono ou admin acesse a avaliação (sem dono = só admin)."""
+    if user.role == "admin" or avaliacao.owner_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="Sem permissão para esta avaliação")
 
 
 def require_turma_owner_or_admin(turma: models.Turma, user: models.User):
     """Mesma política de `require_owner_or_admin` para turmas."""
-    if turma.owner_id is None:
-        return  # legado sem dono — visível para todos até migração
-    if turma.owner_id != user.id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Sem permissão para esta turma")
+    if user.role == "admin" or turma.owner_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="Sem permissão para esta turma")
 
 
 def require_lab_owner_or_admin(session: models.LabSession, user: models.User):
     """Mesma política de `require_owner_or_admin` para sessões do Laboratório."""
-    if session.owner_id is None:
-        return  # legado sem dono — visível para todos até migração
-    if session.owner_id != user.id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Sem permissão para esta sessão do Laboratório")
+    if user.role == "admin" or session.owner_id == user.id:
+        return
+    raise HTTPException(status_code=403, detail="Sem permissão para esta sessão do Laboratório")

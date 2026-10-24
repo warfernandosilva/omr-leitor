@@ -40,9 +40,8 @@ def list_alunos(
         select(TurmaAluno, Turma.nome)
         .join(Turma, Turma.id == TurmaAluno.turma_id)
         .order_by(Turma.nome, TurmaAluno.nome)
+        .where(auth.owner_clause(Turma, current_user))
     )
-    if current_user.role != "admin":
-        q = q.where((Turma.owner_id == current_user.id) | (Turma.owner_id.is_(None)))
     if turma_id is not None:
         q = q.where(TurmaAluno.turma_id == turma_id)
     if search and search.strip():
