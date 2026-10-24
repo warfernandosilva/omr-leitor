@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
   ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
@@ -12,6 +12,7 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
 import EmptyState from '../components/ui/EmptyState';
+import Tabs from '../components/ui/Tabs';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../context/AuthContext';
 import { syncExam } from '../utils/api';
@@ -32,6 +33,8 @@ import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble';
 type Selection = { kind: RegionType; id: string } | null;
+
+const LAYER_LABELS = { anchors: 'Âncoras', qr: 'QR', info: 'Info', bubbles: 'Bolhas' } as const;
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -334,6 +337,9 @@ function TemplateEditor({
   const [copyCandidates, setCopyCandidates] = useState<CustomTemplateSummary[]>([]);
   const [copyFromId, setCopyFromId] = useState<number | null>(null);
   const [copying, setCopying] = useState(false);
+  // Painel direito: uma aba por vez evita empilhar propriedades + diagnóstico + ações.
+  const [rightTab, setRightTab] = useState<'props' | 'diag' | 'actions'>('props');
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
 
   const configRef = useRef(config);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -394,6 +400,21 @@ function TemplateEditor({
 
   const baseW = config.page_w || detail.image_w || 1000;
   const baseH = config.page_h || detail.image_h || 1400;
+
+  // Selecionar uma região (canvas ou lista) traz as propriedades para a frente.
+  useEffect(() => {
+    if (selection) setRightTab('props');
+  }, [selection]);
+
+  /** Zoom que faz o cartão inteiro caber na área visível, centralizado. */
+  const fitToScreen = useCallback(() => {
+    const el = canvasWrapRef.current;
+    if (!el) return;
+    const pad = 24;
+    const z = clamp(Math.min((el.clientWidth - pad) / baseW, (el.clientHeight - pad) / baseH), 0.1, 4);
+    setZoom(z);
+    setPan({ x: (el.clientWidth - baseW * z) / 2, y: (el.clientHeight - baseH * z) / 2 });
+  }, [baseW, baseH]);
 
   const nPages = Math.max(1, config.n_pages ?? 1);
   // Página efetivamente editada (clampada ao número disponível).
@@ -844,7 +865,7 @@ function TemplateEditor({
     <div className="space-y-3 animate-fade-in">
       <PageHeader
         title={detail.nome}
-        subtitle={`Gabarito personalizado · ${STATUS_LABEL[status] ?? status}`}
+        subtitle={`Gabarito personalizado · ${STATUS_LABEL[status] ?? status}${dirty ? ' · alterações não salvas' : ''}`}
         actions={
           <>
             <Button variant="ghost" size="sm" onClick={onClose}
@@ -861,7 +882,7 @@ function TemplateEditor({
         }
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-[240px_minmax(0,1fr)_280px] gap-3">
+      <div className="grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)_320px] gap-3">
         {/* Painel esquerdo */}
         <div className="card space-y-3 max-h-[85vh] overflow-y-auto">
           {/* Multi-página (mesma folha): abas de página */}
@@ -894,10 +915,50 @@ function TemplateEditor({
               {nPages > 1 ? ' · as regiões editadas pertencem a esta página' : ''}.
             </p>
           </div>
-          {/* Cópia de configuração de outro modelo */}
-          <div className="space-y-2">
+          <Toolbar tool={tool} setTool={(t) => {
+                     setTool(t);
+                     // A ferramenta de bolhas só faz sentido com a camada visível.
+                     if (t === 'bubble') setShow((s) => ({ ...s, bubbles: true }));
+                   }}
+                   anchorType={anchorType} setAnchorType={setAnchorType}
+                   anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
+                   onAddBlock={addBlock}
+                   anchorCount={pageConfig.anchors.length}
+                   onAddAnchor={addAnchor}
+                   anchorSize={anchorSize} setAnchorSize={setAnchorSize}
+                   onDetectGrid={() => void detectGrid()} detecting={detecting}
+                    onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors}
+                    onDetectPageCorners={() => void handleDetectPageCorners()} detectingPageCorners={detectingPageCorners}
+                    onManualPageCorners={startManualPageCorners}
+                    onRemovePageCorners={removePageCorners}
+                    hasPageCorners={Array.isArray(config.page_corners) && config.page_corners.length === 4} />
+
+          <div>
+            <p className="label">Camadas</p>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(LAYER_LABELS) as (keyof typeof LAYER_LABELS)[]).map((k) => (
+                <button key={k} type="button"
+                        className={`btn btn-sm ${show[k] ? 'btn-secondary' : 'btn-ghost opacity-60'}`}
+                        aria-pressed={show[k]}
+                        title={`${show[k] ? 'Ocultar' : 'Mostrar'} ${LAYER_LABELS[k].toLowerCase()}`}
+                        onClick={() => setShow((s) => ({ ...s, [k]: !s[k] }))}>
+                  {show[k] ? <Eye size={14} /> : <EyeOff size={14} />}
+                  <span className="text-[11px]">{LAYER_LABELS[k]}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <RegionalList config={pageConfig} selection={selection} setSelection={setSelection}
+                        onDelete={(kind, id) => {
+                          apply(removeRegion(configRef.current, kind, id));
+                          setSelection(null);
+                        }} />
+
+          {/* Cópia de configuração: ação secundária, depois dos elementos. */}
+          <div className="space-y-2 border-t border-line dark:border-gray-800 pt-3">
             <button type="button" onClick={() => void openCopy()}
-                    className="btn btn-secondary btn-sm w-full justify-start">
+                    className="btn btn-ghost btn-sm w-full justify-start">
               Copiar configuração de outro modelo
             </button>
             {copyOpen && (
@@ -920,43 +981,6 @@ function TemplateEditor({
               </div>
             )}
           </div>
-          <Toolbar tool={tool} setTool={(t) => {
-                     setTool(t);
-                     // A ferramenta de bolhas só faz sentido com a camada visível.
-                     if (t === 'bubble') setShow((s) => ({ ...s, bubbles: true }));
-                   }}
-                   anchorType={anchorType} setAnchorType={setAnchorType}
-                   anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
-                   onAddBlock={addBlock}
-                   anchorCount={pageConfig.anchors.length}
-                   onAddAnchor={addAnchor}
-                   anchorSize={anchorSize} setAnchorSize={setAnchorSize}
-                   onDetectGrid={() => void detectGrid()} detecting={detecting}
-                    onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors}
-                    onDetectPageCorners={() => void handleDetectPageCorners()} detectingPageCorners={detectingPageCorners}
-                    onManualPageCorners={startManualPageCorners}
-                    onRemovePageCorners={removePageCorners}
-                    hasPageCorners={Array.isArray(config.page_corners) && config.page_corners.length === 4} />
-
-          <div>
-            <p className="label">Camadas</p>
-            <div className="flex flex-wrap gap-2">
-              {(['anchors', 'qr', 'info', 'bubbles'] as const).map((k) => (
-                <button key={k} type="button" className="btn btn-secondary btn-sm"
-                        title={`Mostrar/ocultar ${k}`}
-                        onClick={() => setShow((s) => ({ ...s, [k]: !s[k] }))}>
-                  {show[k] ? <Eye size={14} /> : <EyeOff size={14} className="opacity-50" />}
-                  <span className="text-[10px] ml-1 capitalize">{k}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <RegionalList config={pageConfig} selection={selection} setSelection={setSelection}
-                        onDelete={(kind, id) => {
-                          apply(removeRegion(configRef.current, kind, id));
-                          setSelection(null);
-                        }} />
         </div>
 
         {/* Área central */}
@@ -972,8 +996,8 @@ function TemplateEditor({
                    className="text-xs w-12 text-center border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 bg-transparent" />
             <span className="text-xs text-gray-500">%</span>
             <Button size="icon" variant="ghost" title="Ampliar" onClick={() => setZoom((z) => Math.min(4, z + 0.05))}><ZoomIn size={16} /></Button>
-            <Button size="icon" variant="ghost" title="Ajustar"
-                    onClick={() => { setZoom(0.5); setPan({ x: 0, y: 0 }); }}><Maximize size={16} /></Button>
+            <Button size="icon" variant="ghost" title="Ajustar à tela"
+                    onClick={fitToScreen}><Maximize size={16} /></Button>
             <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
             <Button size="icon" variant="ghost" title="Desfazer" disabled={!past.length} onClick={undo}><Undo2 size={16} /></Button>
             <Button size="icon" variant="ghost" title="Refazer" disabled={!future.length} onClick={redo}><Redo2 size={16} /></Button>
@@ -989,7 +1013,8 @@ function TemplateEditor({
             )}
           </div>
 
-          <div className="relative overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800 flex-1"
+          <div ref={canvasWrapRef}
+               className="relative overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800 flex-1"
                style={{
                  cursor: dragKind === 'pan' ? 'grabbing' : (tool === 'select' || tool === 'bubble') ? 'default' : 'crosshair',
                  userSelect: 'none',
@@ -1031,7 +1056,8 @@ function TemplateEditor({
             </div>
           </div>
           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Alt+arrastar, botão do meio ou Shift+botão direito move a visualização. {bubbles.length} bolha(s) configurada(s).
+            Página {currentPage + 1} de {nPages} · Alt+arrastar, botão do meio ou Shift+botão direito move a visualização.
+            {' '}{bubbles.length} bolha(s) configurada(s).
             {Array.isArray(config.page_corners) && config.page_corners.length === 4 && (
               <> Cantos da folha (roxo) ativos — arraste os 4 pontos para ajustar. Usados como destino
               do alinhamento quando o modelo não tem as 4 âncoras de canto.</>
@@ -1039,11 +1065,25 @@ function TemplateEditor({
           </p>
         </div>
 
-        {/* Painel direito */}
-        <div className="card space-y-3 max-h-[85vh] overflow-y-auto">
-          <PropertiesPanel config={config} selection={selection} updateField={updateField} />
-          <ValidationPanel issues={issues} onGoTo={setSelection} />
-          <ActionsPanel detailId={detail.id} />
+        {/* Painel direito: uma aba por vez (propriedades, diagnóstico, ações). */}
+        <div className="card flex max-h-[85vh] flex-col overflow-hidden">
+          <Tabs
+            ariaLabel="Painel do modelo"
+            active={rightTab}
+            onChange={(id) => setRightTab(id as typeof rightTab)}
+            tabs={[
+              { id: 'props', label: 'Propriedades' },
+              { id: 'diag', label: 'Diagnóstico', badge: issues.length || undefined },
+              { id: 'actions', label: 'Ações' },
+            ]}
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto pt-3">
+            {rightTab === 'props' && (
+              <PropertiesPanel config={config} selection={selection} updateField={updateField} />
+            )}
+            {rightTab === 'diag' && <ValidationPanel issues={issues} onGoTo={setSelection} />}
+            {rightTab === 'actions' && <ActionsPanel detailId={detail.id} />}
+          </div>
         </div>
       </div>
     </div>
@@ -1176,52 +1216,24 @@ function Toolbar({
     { id: 'bubble', label: 'Ajustar bolhas', icon: Move },
   ];
   return (
-    <div className="space-y-2">
-      <p className="label">Ferramentas</p>
-      <div className="grid grid-cols-2 gap-2">
-        {tools.map((t) => (
-          <button key={t.id} type="button" onClick={() => setTool(t.id)}
-                  title={t.id === 'bubble' ? 'Arraste uma bolha no cartão para corrigir o alinhamento individual' : undefined}
-                  className={`btn btn-sm min-h-[40px] justify-start ${t.id === 'bubble' ? 'col-span-2' : ''} ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}>
-            <t.icon size={15} aria-hidden /> {t.label}
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <p className="label">Ferramentas</p>
+        <div className="grid grid-cols-2 gap-2">
+          {tools.map((t) => (
+            <button key={t.id} type="button" onClick={() => setTool(t.id)}
+                    aria-pressed={tool === t.id}
+                    title={t.id === 'bubble' ? 'Arraste uma bolha no cartão para corrigir o alinhamento individual' : undefined}
+                    className={`btn btn-sm min-h-[40px] justify-start ${t.id === 'bubble' ? 'col-span-2' : ''} ${tool === t.id ? 'btn-primary' : 'btn-secondary'}`}>
+              <t.icon size={15} aria-hidden /> {t.label}
+            </button>
+          ))}
+          <button type="button" onClick={onAddBlock}
+                  aria-pressed={tool === 'place-block'}
+                  className={`btn btn-sm min-h-[40px] justify-start col-span-2 ${tool === 'place-block' ? 'btn-primary' : 'btn-secondary'}`}>
+            <Boxes size={15} aria-hidden /> Bloco de questões
           </button>
-        ))}
-        <button type="button" onClick={onAddAnchor}
-                title="Adiciona uma âncora no próximo canto livre. Clique nela no cartão para editar tipo e tamanho."
-                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
-          <Plus size={15} aria-hidden /> Adicionar âncora
-        </button>
-        <button type="button" onClick={onAddBlock}
-                className={`btn btn-sm min-h-[40px] justify-start col-span-2 ${tool === 'place-block' ? 'btn-primary' : 'btn-secondary'}`}>
-          <Boxes size={15} aria-hidden /> Bloco de questões
-        </button>
-        <button type="button" onClick={onDetectGrid} disabled={detecting}
-                title="Analisa a imagem importada e sugere os blocos de questões automaticamente"
-                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
-          <ScanSearch size={15} aria-hidden /> {detecting ? 'Detectando…' : 'Detectar grade'}
-        </button>
-        <button type="button" onClick={onDetectAnchors} disabled={detectingAnchors}
-                title="Detecta e centraliza automaticamente as 4 âncoras de canto da imagem importada"
-                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
-          <Crosshair size={15} aria-hidden /> {detectingAnchors ? 'Detectando…' : 'Detectar âncoras'}
-        </button>
-        <button type="button" onClick={onDetectPageCorners} disabled={detectingPageCorners}
-                title="Detecta os 4 cantos da folha (marcadores de canto ou maior quadrilátero)"
-                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
-          <Maximize size={15} aria-hidden /> {detectingPageCorners ? 'Detectando…' : 'Detectar cantos da folha'}
-        </button>
-        <button type="button" onClick={onManualPageCorners}
-                title="Cria os 4 cantos da folha para ajuste manual (arraste os pontos no cartão)"
-                className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
-          <Move size={15} aria-hidden /> Ajustar cantos manualmente
-        </button>
-        {hasPageCorners && (
-          <button type="button" onClick={onRemovePageCorners}
-                  title="Remove os cantos da folha do modelo"
-                  className="btn btn-sm min-h-[40px] justify-start col-span-2 btn-secondary">
-              <Trash2 size={15} aria-hidden /> Remover cantos
-          </button>
-        )}
+        </div>
       </div>
 
       {(tool === 'anchor' || anchorCount === 0) && (
@@ -1254,11 +1266,54 @@ function Toolbar({
                      }} />
             </Field>
           </div>
+          <button type="button" onClick={onAddAnchor}
+                  title="Adiciona uma âncora no próximo canto livre. Clique nela no cartão para editar tipo e tamanho."
+                  className="btn btn-secondary btn-sm w-full justify-start">
+            <Plus size={14} aria-hidden /> Adicionar no próximo canto livre
+          </button>
           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Clique em uma âncora no cartão para editar tipo, tamanho e canto.
+            Ou desenhe com a ferramenta Âncora. Clique numa âncora para editar.
           </p>
         </div>
       )}
+
+      <div className="space-y-2 border-t border-line dark:border-gray-800 pt-3">
+        <p className="label">Detectar automaticamente</p>
+        <button type="button" onClick={onDetectGrid} disabled={detecting}
+                title="Analisa a imagem importada e sugere os blocos de questões automaticamente"
+                className="btn btn-primary btn-sm min-h-[40px] w-full justify-start">
+          <ScanSearch size={15} aria-hidden /> {detecting ? 'Detectando…' : 'Detectar grade'}
+        </button>
+        <button type="button" onClick={onDetectAnchors} disabled={detectingAnchors}
+                title="Detecta e centraliza automaticamente as 4 âncoras de canto da imagem importada"
+                className="btn btn-secondary btn-sm min-h-[40px] w-full justify-start">
+          <Crosshair size={15} aria-hidden /> {detectingAnchors ? 'Detectando…' : 'Detectar âncoras'}
+        </button>
+        <details className="rounded border border-gray-200 dark:border-gray-800">
+          <summary className="cursor-pointer select-none px-2 py-2 text-sm font-medium">
+            Cantos da folha
+          </summary>
+          <div className="space-y-2 border-t border-gray-200 p-2 dark:border-gray-800">
+            <button type="button" onClick={onDetectPageCorners} disabled={detectingPageCorners}
+                    title="Detecta os 4 cantos da folha (marcadores de canto ou maior quadrilátero)"
+                    className="btn btn-secondary btn-sm min-h-[40px] w-full justify-start">
+              <Maximize size={15} aria-hidden /> {detectingPageCorners ? 'Detectando…' : 'Detectar cantos'}
+            </button>
+            <button type="button" onClick={onManualPageCorners}
+                    title="Cria os 4 cantos da folha para ajuste manual (arraste os pontos no cartão)"
+                    className="btn btn-secondary btn-sm min-h-[40px] w-full justify-start">
+              <Move size={15} aria-hidden /> Ajustar manualmente
+            </button>
+            {hasPageCorners && (
+              <button type="button" onClick={onRemovePageCorners}
+                      title="Remove os cantos da folha do modelo"
+                      className="btn btn-ghost btn-sm min-h-[40px] w-full justify-start text-red-600 dark:text-red-400">
+                <Trash2 size={15} aria-hidden /> Remover cantos
+              </button>
+            )}
+          </div>
+        </details>
+      </div>
     </div>
   );
 }
@@ -1456,20 +1511,44 @@ function RegionalList({
     </div>
   );
   const empty = !config.anchors.length && !config.qr && !config.info_regions.length && !config.questions.length;
+  const Group = ({ title, children }: { title: string; children: ReactNode }) => (
+    <section className="space-y-0.5">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{title}</p>
+      {children}
+    </section>
+  );
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <p className="label">Elementos</p>
-      {config.anchors.map((a) => (
-        <Item key={a.id} kind="anchor" id={a.id} color="#f59e0b"
-              label={`Âncora ${a.type}${a.type === 'aruco' && a.aruco_id != null ? ` #${a.aruco_id}` : ''}`} />
-      ))}
-      {config.qr && <Item kind="qr" id={config.qr.id} color="#2563eb" label="QR Code" />}
-      {config.info_regions.map((i) => <Item key={i.id} kind="info" id={i.id} color="#10b981" label={`Info · ${i.kind}`} />)}
-      {config.questions.map((b) => (
-        <Item key={b.id} kind="block" id={b.id} color="#ef4444"
-              label={`Q${b.start_question}–Q${b.start_question + b.n_questions - 1} (${b.n_questions}×${b.labels.length})`} />
-      ))}
       {empty && <p className="text-xs text-gray-400">Nada configurado ainda.</p>}
+      {config.anchors.length > 0 && (
+        <Group title={`Âncoras (${config.anchors.length})`}>
+          {config.anchors.map((a) => (
+            <Item key={a.id} kind="anchor" id={a.id} color="#f59e0b"
+                  label={`Âncora ${a.type}${a.type === 'aruco' && a.aruco_id != null ? ` #${a.aruco_id}` : ''}`} />
+          ))}
+        </Group>
+      )}
+      {config.qr && (
+        <Group title="QR Code">
+          <Item kind="qr" id={config.qr.id} color="#2563eb" label="QR Code" />
+        </Group>
+      )}
+      {config.info_regions.length > 0 && (
+        <Group title={`Regiões informativas (${config.info_regions.length})`}>
+          {config.info_regions.map((i) => (
+            <Item key={i.id} kind="info" id={i.id} color="#10b981" label={`Info · ${i.kind}`} />
+          ))}
+        </Group>
+      )}
+      {config.questions.length > 0 && (
+        <Group title={`Blocos de questões (${config.questions.length})`}>
+          {config.questions.map((b) => (
+            <Item key={b.id} kind="block" id={b.id} color="#ef4444"
+                  label={`Q${b.start_question}–Q${b.start_question + b.n_questions - 1} (${b.n_questions}×${b.labels.length})`} />
+          ))}
+        </Group>
+      )}
     </div>
   );
 }
@@ -1621,8 +1700,16 @@ function PropertiesPanel({
     upd({ overrides: withoutBubbleOverride(b, q, option).overrides });
   const clearAllOverrides = () => upd({ overrides: {} });
   return (
-    <div className="space-y-2">
-      <p className="font-semibold text-sm">Bloco de questões</p>
+    <div className="space-y-3">
+      <div>
+        <p className="font-semibold text-sm">Bloco de questões</p>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          Q{b.start_question}–Q{b.start_question + b.n_questions - 1}
+          {' · '}{b.columns} coluna(s) × {b.labels.length} alternativa(s)
+          {b.annulled ? ' · anulada' : ''}{b.multi_answer ? ' · múltipla' : ''}
+        </p>
+      </div>
+
       <div className="grid grid-cols-2 gap-2">
         <Field label="1ª questão" htmlFor="p-blk-start">
           <Input id="p-blk-start" type="number" min={1} value={b.start_question}
@@ -1649,114 +1736,122 @@ function PropertiesPanel({
           </Select>
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <PctInput id="p-blk-osx" label="Espaço horizontal (%)" value={b.option_step_x} onChange={(v) => upd({ option_step_x: v })} />
-        <PctInput id="p-blk-qsy" label="Espaço vertical (%)" value={b.question_step_y} onChange={(v) => upd({ question_step_y: v })} />
-        <PctInput id="p-blk-csx" label="Passo da coluna (%)" value={b.column_step_x ?? b.option_step_x * b.labels.length}
-                  onChange={(v) => upd({ column_step_x: v })} />
-        <PctInput id="p-blk-r" label="Raio da bolha (%)" value={b.radius} onChange={(v) => upd({ radius: v })} />
-        <PctInput id="p-blk-fx" label="Início X (%)" value={b.first_x} onChange={(v) => updStart({ first_x: v })} />
-        <PctInput id="p-blk-fy" label="Início Y (%)" value={b.first_y} onChange={(v) => updStart({ first_y: v })} />
-      </div>
-      <div className="space-y-1 rounded border border-amber-200 dark:border-amber-900/60 p-2">
-        <div className="flex items-center justify-between gap-2">
-          <p className="label mb-0">Ajustes individuais ({overrideRows.length})</p>
-          {overrideRows.length > 0 && (
-            <button type="button" className="text-xs text-red-600 hover:underline" onClick={clearAllOverrides}>
-              Limpar todos
-            </button>
-          )}
-        </div>
-        {overrideRows.length === 0 ? (
-          <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Use a ferramenta <strong>Ajustar bolhas</strong> e arraste uma bolha para corrigir o alinhamento.
-          </p>
-        ) : (
-          <div className="max-h-32 space-y-0.5 overflow-y-auto">
-            {overrideRows.map((o) => (
-              <div key={`${o.q}-${o.option}`} className="flex items-center justify-between gap-2 text-xs">
-                <span className="font-mono">Q{o.q} · {o.option}</span>
-                <span className="tabular-nums text-gray-400">
-                  {o.x != null ? `${(o.x * 100).toFixed(1)}%` : '—'}, {o.y != null ? `${(o.y * 100).toFixed(1)}%` : '—'}
-                </span>
-                <button type="button" className="text-gray-400 hover:text-red-500" title="Remover ajuste"
-                        onClick={() => clearOneOverride(o.q, o.option)}>
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      <Field label="Formato da bolha" htmlFor="p-blk-shape">
-        <Select id="p-blk-shape" value={b.shape} onChange={(e) => upd({ shape: e.target.value as 'circle' | 'square' })}>
-          <option value="circle">Círculo</option>
-          <option value="square">Quadrado</option>
-        </Select>
-      </Field>
-      <Field label="Estilo de marcação" htmlFor="p-blk-mark">
-        <Select id="p-blk-mark" value={b.mark_style}
-                onChange={(e) => upd({ mark_style: e.target.value as 'filled' | 'marks' })}>
-          <option value="filled">Bolha preenchida</option>
-          <option value="marks">Marca (X / check)</option>
-        </Select>
-      </Field>
-      <div className="grid grid-cols-2 gap-2">
-        <Field label="Valor (pontos)" htmlFor="p-blk-points">
-          <Input id="p-blk-points" type="number" step={0.1} value={b.points}
-                 onChange={(e) => upd({ points: Number(e.target.value) })} />
-        </Field>
-        <div className="flex items-end gap-3 pb-1 text-sm">
-          <label className="inline-flex items-center gap-1">
-            <input type="checkbox" checked={b.multi_answer} onChange={(e) => upd({ multi_answer: e.target.checked })} />
-            Múltiplas
-          </label>
-          <label className="inline-flex items-center gap-1">
-            <input type="checkbox" checked={b.annulled} onChange={(e) => upd({ annulled: e.target.checked })} />
-            Anulada
-          </label>
-        </div>
-      </div>
-      {b.multi_answer && (
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Mín. de marcas (2+)" htmlFor="p-blk-mmin">
-            <Input id="p-blk-mmin" type="number" min={2} placeholder="2"
-                   value={b.multi_marks_min ?? ''}
-                   onChange={(e) => upd({ multi_marks_min: e.target.value === '' ? null : Math.max(2, Number(e.target.value)) })} />
-          </Field>
-          <Field label="Máx. de marcas" htmlFor="p-blk-mmax">
-            <Input id="p-blk-mmax" type="number" min={2} placeholder={String(b.labels.length)}
-                   value={b.multi_marks_max ?? ''}
-                   onChange={(e) => upd({ multi_marks_max: e.target.value === '' ? null : Math.max(2, Number(e.target.value)) })} />
-          </Field>
-        </div>
-      )}
 
-      <div className="space-y-1 rounded border border-gray-200 dark:border-gray-800 p-2">
-        <p className="label mb-1">Regras de decisão</p>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={b.pick_darkest_mark} disabled={b.multi_answer}
-                 onChange={(e) => upd({ pick_darkest_mark: e.target.checked })} />
-          Marca mais escura resolve dupla
-        </label>
-        {b.pick_darkest_mark && !b.multi_answer && (
-          <div className="pl-6">
-            <PctInput id="p-blk-dmt" label="Gap mínimo (%)" value={b.darkest_mark_threshold ?? 0.11}
-                      onChange={(v) => upd({ darkest_mark_threshold: v })} />
+      <details className="rounded border border-gray-200 dark:border-gray-800">
+        <summary className="cursor-pointer select-none px-2 py-2 text-sm font-medium">
+          Avançado — posição, bolhas e regras
+        </summary>
+        <div className="space-y-2 border-t border-gray-200 p-2 dark:border-gray-800">
+          <div className="grid grid-cols-2 gap-2">
+            <PctInput id="p-blk-osx" label="Espaço X (%)" value={b.option_step_x} onChange={(v) => upd({ option_step_x: v })} />
+            <PctInput id="p-blk-qsy" label="Espaço Y (%)" value={b.question_step_y} onChange={(v) => upd({ question_step_y: v })} />
+            <PctInput id="p-blk-csx" label="Passo coluna (%)" value={b.column_step_x ?? b.option_step_x * b.labels.length}
+                      onChange={(v) => upd({ column_step_x: v })} />
+            <PctInput id="p-blk-r" label="Raio da bolha (%)" value={b.radius} onChange={(v) => upd({ radius: v })} />
+            <PctInput id="p-blk-fx" label="Início X (%)" value={b.first_x} onChange={(v) => updStart({ first_x: v })} />
+            <PctInput id="p-blk-fy" label="Início Y (%)" value={b.first_y} onChange={(v) => updStart({ first_y: v })} />
           </div>
-        )}
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={b.fallback_on_empty}
-                 onChange={(e) => upd({ fallback_on_empty: e.target.checked })} />
-          Reler questões vazias (fallback)
-        </label>
-        {b.fallback_on_empty && (
-          <div className="pl-6">
-            <PctInput id="p-blk-fbf" label="Piso alternativo (%)" value={b.fallback_floor ?? 0.20}
-                      onChange={(v) => upd({ fallback_floor: v })} />
+          <div className="space-y-1 rounded border border-amber-200 dark:border-amber-900/60 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="label mb-0">Ajustes individuais ({overrideRows.length})</p>
+              {overrideRows.length > 0 && (
+                <button type="button" className="text-xs text-red-600 hover:underline" onClick={clearAllOverrides}>
+                  Limpar todos
+                </button>
+              )}
+            </div>
+            {overrideRows.length === 0 ? (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Use a ferramenta <strong>Ajustar bolhas</strong> e arraste uma bolha para corrigir o alinhamento.
+              </p>
+            ) : (
+              <div className="max-h-32 space-y-0.5 overflow-y-auto">
+                {overrideRows.map((o) => (
+                  <div key={`${o.q}-${o.option}`} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="font-mono">Q{o.q} · {o.option}</span>
+                    <span className="tabular-nums text-gray-400">
+                      {o.x != null ? `${(o.x * 100).toFixed(1)}%` : '—'}, {o.y != null ? `${(o.y * 100).toFixed(1)}%` : '—'}
+                    </span>
+                    <button type="button" className="text-gray-400 hover:text-red-500" title="Remover ajuste"
+                            onClick={() => clearOneOverride(o.q, o.option)}>
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+          <Field label="Formato da bolha" htmlFor="p-blk-shape">
+            <Select id="p-blk-shape" value={b.shape} onChange={(e) => upd({ shape: e.target.value as 'circle' | 'square' })}>
+              <option value="circle">Círculo</option>
+              <option value="square">Quadrado</option>
+            </Select>
+          </Field>
+          <Field label="Estilo de marcação" htmlFor="p-blk-mark">
+            <Select id="p-blk-mark" value={b.mark_style}
+                    onChange={(e) => upd({ mark_style: e.target.value as 'filled' | 'marks' })}>
+              <option value="filled">Bolha preenchida</option>
+              <option value="marks">Marca (X / check)</option>
+            </Select>
+          </Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Valor (pontos)" htmlFor="p-blk-points">
+              <Input id="p-blk-points" type="number" step={0.1} value={b.points}
+                     onChange={(e) => upd({ points: Number(e.target.value) })} />
+            </Field>
+            <div className="flex items-end gap-3 pb-1 text-sm">
+              <label className="inline-flex items-center gap-1">
+                <input type="checkbox" checked={b.multi_answer} onChange={(e) => upd({ multi_answer: e.target.checked })} />
+                Múltiplas
+              </label>
+              <label className="inline-flex items-center gap-1">
+                <input type="checkbox" checked={b.annulled} onChange={(e) => upd({ annulled: e.target.checked })} />
+                Anulada
+              </label>
+            </div>
+          </div>
+          {b.multi_answer && (
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Mín. de marcas (2+)" htmlFor="p-blk-mmin">
+                <Input id="p-blk-mmin" type="number" min={2} placeholder="2"
+                       value={b.multi_marks_min ?? ''}
+                       onChange={(e) => upd({ multi_marks_min: e.target.value === '' ? null : Math.max(2, Number(e.target.value)) })} />
+              </Field>
+              <Field label="Máx. de marcas" htmlFor="p-blk-mmax">
+                <Input id="p-blk-mmax" type="number" min={2} placeholder={String(b.labels.length)}
+                       value={b.multi_marks_max ?? ''}
+                       onChange={(e) => upd({ multi_marks_max: e.target.value === '' ? null : Math.max(2, Number(e.target.value)) })} />
+              </Field>
+            </div>
+          )}
+
+          <div className="space-y-1 rounded border border-gray-200 dark:border-gray-800 p-2">
+            <p className="label mb-1">Regras de decisão</p>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={b.pick_darkest_mark} disabled={b.multi_answer}
+                     onChange={(e) => upd({ pick_darkest_mark: e.target.checked })} />
+              Marca mais escura resolve dupla
+            </label>
+            {b.pick_darkest_mark && !b.multi_answer && (
+              <div className="pl-6">
+                <PctInput id="p-blk-dmt" label="Gap mínimo (%)" value={b.darkest_mark_threshold ?? 0.11}
+                          onChange={(v) => upd({ darkest_mark_threshold: v })} />
+              </div>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={b.fallback_on_empty}
+                     onChange={(e) => upd({ fallback_on_empty: e.target.checked })} />
+              Reler questões vazias (fallback)
+            </label>
+            {b.fallback_on_empty && (
+              <div className="pl-6">
+                <PctInput id="p-blk-fbf" label="Piso alternativo (%)" value={b.fallback_floor ?? 0.20}
+                          onChange={(v) => upd({ fallback_floor: v })} />
+              </div>
+            )}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
