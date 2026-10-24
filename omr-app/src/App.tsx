@@ -68,6 +68,49 @@ function AppInner() {
     saveNav({ view, examId: selectedExamId, resultId: selectedResultId });
   }, [view, selectedExamId, selectedResultId]);
 
+  // Cada tela vira uma entrada do histórico: voltar retorna à tela anterior em
+  // vez de sair do app (voltar do navegador/Android). Sem isso o app tem uma
+  // única entrada e o voltar fecha a página.
+  const historyBootedRef = useRef(false);
+  useEffect(() => {
+    const state = { omrView: view, examId: selectedExamId, resultId: selectedResultId };
+    try {
+      if (!historyBootedRef.current) {
+        historyBootedRef.current = true;
+        window.history.replaceState(state, '');
+        return;
+      }
+      // Navegou com o drawer aberto: a entrada do drawer vira a tela nova,
+      // senão o primeiro voltar não faria nada.
+      if (window.history.state?.omrDrawer) {
+        drawerPushedRef.current = false;
+        window.history.replaceState(state, '');
+        return;
+      }
+      const atual = window.history.state as typeof state | null;
+      if (atual?.omrView === state.omrView
+        && atual.examId === state.examId
+        && atual.resultId === state.resultId) {
+        return; // restauração do próprio voltar — não empilha de novo
+      }
+      window.history.pushState(state, '');
+    } catch {
+      /* histórico indisponível — navegação só por estado */
+    }
+  }, [view, selectedExamId, selectedResultId]);
+
+  useEffect(() => {
+    const onPop = (event: PopStateEvent) => {
+      const state = event.state as { omrView?: AppView; examId?: string | null; resultId?: string | null } | null;
+      if (!state?.omrView) return;
+      setView(state.omrView);
+      setSelectedExamId(state.examId ?? null);
+      setSelectedResultId(state.resultId ?? null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   // Drawer + botão voltar: abrir empurra uma entrada; voltar fecha o menu.
   useEffect(() => {
     if (drawerOpen && !drawerPushedRef.current) {
