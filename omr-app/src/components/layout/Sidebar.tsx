@@ -30,7 +30,7 @@ export default function Sidebar({
         ${collapsed ? 'lg:w-[76px]' : ''}`}
     >
       {/* Topo: logo + colapso */}
-      <div className={`flex items-center gap-3 p-4 border-b border-line dark:border-gray-800 ${collapsed ? 'lg:justify-center lg:px-2' : ''}`}>
+      <div className={`flex items-center gap-3 p-4 border-b border-line dark:border-gray-800 ${collapsed ? 'lg:flex-col lg:justify-center lg:gap-2 lg:px-2 lg:py-3' : ''}`}>
         <div className="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center shrink-0" aria-hidden>
           <ScanSearch size={22} strokeWidth={2} className="text-white" />
         </div>
@@ -118,7 +118,7 @@ export default function Sidebar({
       {/* Rodapé: usuário + sair */}
       <div className="p-3 border-t border-line dark:border-gray-800">
         {auth.user && (
-          <div className={`flex items-center gap-2.5 px-1 py-1 ${collapsed ? 'lg:justify-center' : ''}`}>
+          <div className={`flex items-center gap-2.5 px-1 py-1 ${collapsed ? 'lg:flex-col lg:justify-center lg:gap-1.5 lg:px-0' : ''}`}>
             <Avatar name={userName} size="sm" />
             <div className={`flex-1 min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
               <p className="text-xs font-medium text-ink dark:text-gray-100 truncate">{userName}</p>
