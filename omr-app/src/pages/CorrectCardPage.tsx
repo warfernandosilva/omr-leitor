@@ -181,7 +181,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [omrResult, setOmrResult] = useState<ProcessResult | null>(null);
   /** Geometria do Gabarito Personalizado (bolhas normalizadas + âncoras + página). */
-  const [customGeom, setCustomGeom] = useState<{ pageW: number; pageH: number; nPages: number; pages: { bubbles: ExpandedBubble[]; anchorBox: AnchorBox }[] } | null>(null);
+  const [customGeom, setCustomGeom] = useState<{ pageW: number; pageH: number; nPages: number; pages: { bubbles: ExpandedBubble[]; anchorBox: AnchorBox; pageW: number; pageH: number }[] } | null>(null);
   // Multi-página (mesma folha): página do modelo que o usuário está lendo.
   const [customPage, setCustomPage] = useState(0);
   // Multi-página: quais páginas já foram lidas para o cartão atual.
@@ -438,8 +438,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   }, [step]);
   // Gabarito Personalizado: o quadro do guia usa a proporção da página do
   // modelo importado e os alvos ficam nas âncoras do próprio modelo.
-  const customAspect = isCustom && customGeom && customGeom.pageH > 0
-    ? customGeom.pageW / customGeom.pageH : null;
+  const curPageGeom = customGeom?.pages?.[Math.min(customPage, (customGeom?.nPages ?? 1) - 1)];
+  const customAspect = isCustom && curPageGeom && curPageGeom.pageH > 0
+    ? curPageGeom.pageW / curPageGeom.pageH : null;
   const guide = useMemo(
     () => (viewSize.w > 0 && viewSize.h > 0
       ? (customAspect
@@ -507,9 +508,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         const pages = Array.from({ length: nPages }, (_, i) => {
           const pageCfg = cfg.questions.filter((b) => (b.page ?? 0) === i);
           const pageAnchors = (cfg.anchors ?? []).filter((a) => (a.page ?? 0) === i);
+          // Cada página pode ter a própria imagem (e o próprio aspecto).
+          const meta = detail.page_images?.find((p) => p.page === i);
           return {
             bubbles: pageCfg.flatMap(expandBlock),
             anchorBox: customAnchorBox(pageAnchors),
+            pageW: meta?.image_w || cfg.page_w || 1,
+            pageH: meta?.image_h || cfg.page_h || 1,
           };
         });
         // Fallback: se a página 0 não tiver âncoras (modelo antigo), usa todas.
@@ -836,6 +841,23 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       // 2–5. concluíram no servidor (âncoras, perspectiva, regiões, marcações)
       setStageDone(5);
 
+      // Multi-página: todas as páginas do cartão têm de ser do MESMO aluno.
+      // Sem esta trava, a página 2 de outro cartão misturaria as respostas e o
+      // salvamento iria para o último QR lido.
+      if (isCustom && (customGeom?.nPages ?? 1) > 1 && result.cardId
+          && identified?.cardId && result.cardId !== identified.cardId) {
+        const dono = identified.kind === 'ok' || identified.kind === 'wrong_exam'
+          ? ` (${identified.name})` : '';
+        setError(
+          `Esta página pertence ao cartão ${result.cardId}, mas a leitura aberta é do cartão `
+          + `${identified.cardId}${dono}. Use "Nova leitura" para corrigir o outro cartão.`
+        );
+        setCapturedImage(null);
+        setRetryUrl(dataUrl);
+        setStep('form');
+        return;
+      }
+
       setOmrResult(result);
 
       if (result.success && result.answers) {
@@ -905,9 +927,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             identification = { kind: 'unknown', cardId: result.cardId };
           }
         }
-        setIdentified(identification);
-        setCandidates(null);
-        setManualInfo(null);
+        // Página de um cartão multi-página sem QR (ex.: só a página 1 tem o
+        // cabeçalho): mantém a identificação já feita em vez de apagá-la e
+        // cair no salvamento por nome.
+        const semQrNaPagina = isCustom && (customGeom?.nPages ?? 1) > 1 && !result.cardId;
+        if (!(semQrNaPagina && identified)) {
+          setIdentified(identification);
+          setCandidates(null);
+          setManualInfo(null);
+        }
         // 6. comparação com o gabarito oficial (identificação resolvida)
         setStageDone(6);
         setRetryUrl(null);
@@ -2611,13 +2639,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               {!customGeom ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">Carregando o modelo do cartão…</p>
               ) : (
-                <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: `${customGeom.pageW}/${customGeom.pageH}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: `${curPageGeom?.pageW ?? customGeom.pageW}/${curPageGeom?.pageH ?? customGeom.pageH}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
                   <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
                   <svg viewBox="0 0 1 1" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
                     {(customGeom.pages?.[Math.min(customPage, (customGeom.nPages ?? 1) - 1)]?.bubbles ?? []).map((b) => {
-                      const m = Math.max(customGeom.pageW, customGeom.pageH);
+                      const m = Math.max(curPageGeom?.pageW ?? customGeom.pageW, curPageGeom?.pageH ?? customGeom.pageH);
                       const inv = 1 / m;
-                      const { rx, ry } = customBubbleShape(b, customGeom.pageW, customGeom.pageH);
+                      const { rx, ry } = customBubbleShape(b, curPageGeom?.pageW ?? customGeom.pageW, curPageGeom?.pageH ?? customGeom.pageH);
                       const ans = manualAnswers[b.question] ?? '';
                       const key = activeExam.answerKey?.[b.question] ?? '';
                       const isMarked = ans.includes(b.option);
