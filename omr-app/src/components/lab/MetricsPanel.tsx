@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Download, Play, RefreshCw, Table2 } from 'lucide-react';
+import { Download, RefreshCw, Save, Table2 } from 'lucide-react';
 import StatCard from '../ui/StatCard';
 import Field from '../ui/Field';
 import Input from '../ui/Input';
 import Button from '../ui/Button';
+import Badge from '../ui/Badge';
+import DataTable from '../ui/DataTable';
 import {
-  LabMetrics, LabSessionMetrics, LabSessionSummary,
-  labExportCsv, labExportJson, labReclassify, labSessionMetrics,
+  LAB_STATUS_LABEL, LabMetrics, LabReclassifyQuestion, LabReclassifyResult,
+  LabSessionDetail, LabSessionMetrics, LabSessionSummary,
+  labExportCsv, labExportJson, labReclassify, labSessionMetrics, labStatusTone,
 } from '../../utils/lab-api';
 import { exportSheetsToXlsx } from '../../utils/lab-truth';
 
 interface Props {
   session: LabSessionSummary;
+  /** Sessão carregada (questões + componentes salvos): base do diff e do histograma. */
+  detail: LabSessionDetail | null;
 }
+
+const PREVIEW_DEBOUNCE_MS = 250;
+const HIST_BINS = 20;
 
 function pct(v: number | null | undefined): string {
   return v == null ? '—' : `${(v * 100).toFixed(1)}%`;
@@ -28,7 +36,24 @@ function chartData(m: LabMetrics) {
   ];
 }
 
-export default function MetricsPanel({ session }: Props) {
+type QuestionBase = { status: string; detected: string | null };
+
+const keyOf = (imageId: number, question: number) => `${imageId}:${question}`;
+
+function labelOf(q: { status: string; detected: string | null }): string {
+  const label = LAB_STATUS_LABEL[q.status as keyof typeof LAB_STATUS_LABEL] ?? q.status;
+  return q.detected ? `${label} · ${q.detected}` : label;
+}
+
+/** Resultado da questão frente ao gabarito (cor da coluna "Efeito"). */
+function outcome(q: { status: string; detected: string | null; truth: string | null }): 'good' | 'bad' | 'mid' {
+  if (!q.truth) return 'mid';
+  if (q.status === 'ok' && q.detected === q.truth) return 'good';
+  if (q.status === 'blank' || q.status === 'ok') return 'bad';
+  return 'mid';
+}
+
+export default function MetricsPanel({ session, detail }: Props) {
   const [m, setM] = useState<LabSessionMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,17 +64,18 @@ export default function MetricsPanel({ session }: Props) {
   const [w1, setW1] = useState(0.4);
   const [w2, setW2] = useState(0.2);
   const [lowConf, setLowConf] = useState('');
-  const [persist, setPersist] = useState(false);
-  const [sim, setSim] = useState<LabMetrics | null>(null);
+  const [sim, setSim] = useState<LabReclassifyResult | null>(null);
   const [simBusy, setSimBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+  // Base do diff: a classificação gravada (detail) ou a última gravação feita aqui.
+  const [savedBase, setSavedBase] = useState<Map<string, QuestionBase> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       setM(await labSessionMetrics(session.id));
-      setSim(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao carregar métricas');
     } finally {
@@ -59,8 +85,81 @@ export default function MetricsPanel({ session }: Props) {
 
   useEffect(() => { load(); }, [load]);
 
-  const runReclassify = async () => {
+  // Trocar de sessão zera o preview (os componentes salvos são outros).
+  useEffect(() => { setSavedBase(null); setSim(null); }, [session.id]);
+
+  // Preview em TEMPO REAL: cada mudança de parâmetro reclassifica sobre os
+  // componentes salvos (sem reler a foto) e atualiza métricas + diff.
+  // O contador de sequência descarta resposta fora de ordem enquanto arrasta.
+  const seq = useRef(0);
+  useEffect(() => {
+    const id = ++seq.current;
     setSimBusy(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const j = await labReclassify(session.id, {
+          floor,
+          margin,
+          weights: [w0, w1, w2],
+          low_conf_threshold: lowConf.trim() === '' ? null : Number(lowConf),
+        });
+        if (id !== seq.current) return;
+        setSim(j);
+        setError(null);
+      } catch (err) {
+        if (id === seq.current) setError(err instanceof Error ? err.message : 'Falha na simulação');
+      } finally {
+        if (id === seq.current) setSimBusy(false);
+      }
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [session.id, floor, margin, w0, w1, w2, lowConf]);
+
+  const baseline = useMemo(() => {
+    const map = new Map<string, QuestionBase>();
+    for (const img of detail?.images ?? [])
+      for (const q of img.questions) map.set(keyOf(img.id, q.question), { status: q.status, detected: q.detected });
+    return map;
+  }, [detail]);
+
+  const base = savedBase ?? baseline;
+
+  const filenames = useMemo(
+    () => new Map((detail?.images ?? []).map(img => [img.id, img.filename])),
+    [detail],
+  );
+
+  const changes = useMemo(() => {
+    if (!sim) return [];
+    const out: { row: LabReclassifyQuestion; before: QuestionBase; image: string }[] = [];
+    for (const row of sim.questions) {
+      const before = base.get(keyOf(row.image_id, row.question));
+      if (before && (before.status !== row.status || before.detected !== row.detected))
+        out.push({ row, before, image: filenames.get(row.image_id) ?? `#${row.image_id}` });
+    }
+    return out;
+  }, [sim, base, filenames]);
+
+  // Histograma dos scores (recalculado com os pesos atuais) × linha do floor.
+  const scores = useMemo(() => {
+    const out: number[] = [];
+    for (const img of detail?.images ?? [])
+      for (const q of img.questions)
+        for (const o of q.options ?? [])
+          out.push(w0 * o.mean_intensity + w1 * o.dark_ratio + w2 * o.contrast);
+    return out;
+  }, [detail, w0, w1, w2]);
+
+  const hist = useMemo(() => {
+    const counts = new Array<number>(HIST_BINS).fill(0);
+    for (const s of scores) counts[Math.min(HIST_BINS - 1, Math.max(0, Math.floor(s * HIST_BINS)))] += 1;
+    return { counts, max: Math.max(1, ...counts) };
+  }, [scores]);
+
+  const belowFloor = useMemo(() => scores.filter(s => s < floor).length, [scores, floor]);
+
+  const persistNow = async () => {
+    setSaving(true);
     setError(null);
     try {
       const j = await labReclassify(session.id, {
@@ -68,14 +167,15 @@ export default function MetricsPanel({ session }: Props) {
         margin,
         weights: [w0, w1, w2],
         low_conf_threshold: lowConf.trim() === '' ? null : Number(lowConf),
-        persist,
+        persist: true,
       });
-      setSim(j.metrics);
-      if (persist) setM(await labSessionMetrics(session.id));
+      setSim(j);
+      setSavedBase(new Map(j.questions.map(q => [keyOf(q.image_id, q.question), { status: q.status, detected: q.detected }])));
+      setM(await labSessionMetrics(session.id));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Falha na reclassificação');
+      setError(err instanceof Error ? err.message : 'Falha ao gravar a reclassificação');
     } finally {
-      setSimBusy(false);
+      setSaving(false);
     }
   };
 
@@ -104,7 +204,8 @@ export default function MetricsPanel({ session }: Props) {
     }
   };
 
-  const shown = sim ?? m;
+  const shown = sim?.metrics ?? m;
+  const delta = sim && m ? sim.metrics.acertos - m.acertos : 0;
 
   return (
     <div className="space-y-6">
@@ -114,9 +215,9 @@ export default function MetricsPanel({ session }: Props) {
       {m && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <StatCard label="Com gabarito" value={m.com_gabarito} tone="info" />
-            <StatCard label="Taxa de acerto" value={pct(m.taxa_acerto)} tone="success" />
-            <StatCard label="Ambíguas" value={m.ambiguas} tone="warning" />
+            <StatCard label="Com gabarito" value={shown?.com_gabarito ?? 0} tone="info" />
+            <StatCard label="Taxa de acerto" value={pct(shown?.taxa_acerto)} tone="success" />
+            <StatCard label="Ambíguas" value={shown?.ambiguas ?? 0} tone="warning" />
             <StatCard label="Erros de leitura" value={m.n_erro_processamento} tone={m.n_erro_processamento ? 'danger' : 'default'} />
           </div>
 
@@ -145,18 +246,39 @@ export default function MetricsPanel({ session }: Props) {
             </div>
 
             <div className="card">
-              <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-1">Simular reclassificação</h3>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Simular reclassificação</h3>
+                {simBusy && <span className="text-xs text-gray-500 dark:text-gray-400" role="status">simulando…</span>}
+              </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                Usa os scores já salvos (sem reler a foto). Mudanças de CLAHE/raio exigem reprocessar.
+                Atualiza ao arrastar, usando os scores já salvos (sem reler a foto). Mudanças de CLAHE/raio exigem reprocessar.
               </p>
               <div className="grid grid-cols-2 gap-3">
-                <Field label="floor" htmlFor="lab-floor">
-                  <Input id="lab-floor" type="number" step="0.01" min="0" max="1" value={floor}
-                    onChange={e => setFloor(Number(e.target.value))} />
+                <Field label={`floor · ${floor.toFixed(2)}`} htmlFor="lab-floor">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range" min={0} max={1} step={0.01} value={floor}
+                      onChange={e => setFloor(Number(e.target.value))}
+                      aria-label="floor (arrastar)" className="flex-1 accent-brand-500"
+                    />
+                    <div className="w-20 shrink-0">
+                      <Input id="lab-floor" type="number" step="0.01" min="0" max="1" value={floor}
+                        onChange={e => setFloor(Number(e.target.value))} />
+                    </div>
+                  </div>
                 </Field>
-                <Field label="margin" htmlFor="lab-margin">
-                  <Input id="lab-margin" type="number" step="0.01" min="0" max="1" value={margin}
-                    onChange={e => setMargin(Number(e.target.value))} />
+                <Field label={`margin · ${margin.toFixed(2)}`} htmlFor="lab-margin">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range" min={0} max={1} step={0.01} value={margin}
+                      onChange={e => setMargin(Number(e.target.value))}
+                      aria-label="margin (arrastar)" className="flex-1 accent-brand-500"
+                    />
+                    <div className="w-20 shrink-0">
+                      <Input id="lab-margin" type="number" step="0.01" min="0" max="1" value={margin}
+                        onChange={e => setMargin(Number(e.target.value))} />
+                    </div>
+                  </div>
                 </Field>
                 <div className="col-span-2">
                   <span className="label">Pesos (média, razão escura, contraste)</span>
@@ -170,26 +292,101 @@ export default function MetricsPanel({ session }: Props) {
                   <Input id="lab-lowconf" type="number" step="0.01" placeholder="vazio = padrão"
                     value={lowConf} onChange={e => setLowConf(e.target.value)} />
                 </Field>
-                <label className="flex items-end gap-2 text-sm text-gray-600 dark:text-gray-300 pb-3 min-h-[44px]">
-                  <input type="checkbox" checked={persist} onChange={e => setPersist(e.target.checked)} className="w-4 h-4 accent-brand-500" />
-                  Gravar no banco
-                </label>
               </div>
-              <Button onClick={runReclassify} loading={simBusy} icon={<Play size={16} aria-hidden />} className="mt-3">
-                Simular
-              </Button>
+
+              {detail && scores.length > 0 && (
+                <div className="mt-5">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Scores × floor</h4>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+                      {belowFloor} de {scores.length} abaixo do floor
+                    </span>
+                  </div>
+                  <div className="relative flex items-end gap-px h-28 border-b border-line dark:border-gray-800" aria-hidden>
+                    {hist.counts.map((n, i) => (
+                      <div
+                        key={i}
+                        title={`${(i / HIST_BINS).toFixed(2)}–${((i + 1) / HIST_BINS).toFixed(2)}: ${n}`}
+                        className="flex-1 bg-brand-500/60 rounded-t-sm"
+                        style={{ height: `${Math.max(1, (n / hist.max) * 100)}%` }}
+                      />
+                    ))}
+                    <div className="absolute inset-y-0 w-0.5 bg-danger-500" style={{ left: `${floor * 100}%` }} />
+                  </div>
+                  <div className="flex justify-between text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+                    <span>0.00</span><span>0.25</span><span>0.50</span><span>0.75</span><span>1.00</span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    Linha vermelha = floor; abaixo dela nenhuma bolha conta como marcada.
+                  </p>
+                </div>
+              )}
+
               {sim && (
                 <div className="callout-info mt-4 text-sm">
                   <p className="font-medium">
-                    {persist ? 'Aplicado e gravado' : 'Simulação'} — acerto {pct(sim.taxa_acerto)} ({sim.acertos}/{sim.com_gabarito})
+                    Acerto {pct(sim.metrics.taxa_acerto)} ({sim.metrics.acertos}/{sim.metrics.com_gabarito})
+                    {delta !== 0 && (
+                      <span className={delta > 0 ? 'text-success-600 dark:text-success-100' : 'text-danger-600 dark:text-danger-100'}>
+                        {' '}({delta > 0 ? '+' : ''}{delta} vs. gravado)
+                      </span>
+                    )}
                   </p>
                   <p className="text-xs mt-1">
-                    {sim.ambiguas} ambíguas · {sim.erros - sim.brancos} erros · {sim.brancos} brancos
+                    {sim.metrics.ambiguas} ambíguas · {sim.metrics.brancos} brancos · {changes.length} questão(ões) mudaram
                   </p>
                 </div>
               )}
             </div>
           </div>
+
+          {sim && (
+            <div className="card">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">O que muda com estes valores</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Comparação com a classificação gravada ({changes.length} alterada(s)). Nada é gravado sem o botão.
+                  </p>
+                </div>
+                <Button variant="secondary" size="sm" onClick={persistNow} loading={saving} icon={<Save size={15} aria-hidden />}>
+                  Gravar no banco
+                </Button>
+              </div>
+              <DataTable
+                ariaLabel="Questões alteradas pela simulação"
+                minWidth={620}
+                pageSize={10}
+                rows={changes}
+                rowKey={c => `${c.row.image_id}:${c.row.question}`}
+                empty="Nenhuma questão muda com estes valores."
+                columns={[
+                  {
+                    key: 'imagem', header: 'Imagem',
+                    render: c => <span className="text-xs text-gray-600 dark:text-gray-300 block max-w-[180px] truncate">{c.image}</span>,
+                  },
+                  { key: 'questao', header: 'Questão', render: c => <span className="tabular-nums font-medium">{c.row.question}</span> },
+                  { key: 'antes', header: 'Antes', render: c => <Badge tone={labStatusTone(c.before.status)}>{labelOf(c.before)}</Badge> },
+                  { key: 'depois', header: 'Depois', render: c => <Badge tone={labStatusTone(c.row.status)}>{labelOf(c.row)}</Badge> },
+                  {
+                    key: 'efeito', header: 'Efeito',
+                    render: c => {
+                      const o = outcome(c.row);
+                      return (
+                        <span className={
+                          o === 'good' ? 'text-success-600 dark:text-success-100'
+                            : o === 'bad' ? 'text-danger-600 dark:text-danger-100'
+                              : 'text-warning-600 dark:text-warning-100'
+                        }>
+                          {o === 'good' ? 'acertou' : o === 'bad' ? 'errou' : 'ambígua'}
+                        </span>
+                      );
+                    },
+                  },
+                ]}
+              />
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-2">
             <Button variant="secondary" onClick={exportXlsx} loading={exportBusy} icon={<Table2 size={16} aria-hidden />}>

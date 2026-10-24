@@ -167,6 +167,8 @@ def test_lab_metrics_reclassify_calibration_export_publish(client, tmp_path, mon
     j = r.json()
     assert j["persist"] is False
     assert j["metrics"]["brancos"] == 0, j["metrics"]
+    # image_id em cada questão: o diff em tempo real no cliente casa por imagem
+    assert {q["image_id"] for q in j["questions"]} == {res[0]["image_id"]}
 
     # ...e o banco NÃO mudou (métricas iguais)
     r2 = client.get(f'/api/lab/sessions/{sid}/metrics')

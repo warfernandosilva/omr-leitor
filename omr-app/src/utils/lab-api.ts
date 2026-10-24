@@ -213,6 +213,7 @@ export interface LabSessionMetrics extends LabMetrics {
 }
 
 export interface LabReclassifyQuestion {
+  image_id: number;
   question: number;
   status: LabStatus;
   label: string;

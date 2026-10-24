@@ -166,7 +166,7 @@ export default function LabPage({ onNavigate }: Props) {
           {tab === 'revisao' && detail && <ReviewPanel images={detail.images} />}
           {tab === 'revisao' && !detail && detailLoading && <div className="card text-center py-10 text-gray-500 dark:text-gray-400" role="status">Carregando fotos…</div>}
 
-          {tab === 'metricas' && <MetricsPanel session={summary} />}
+          {tab === 'metricas' && <MetricsPanel session={summary} detail={detail} />}
         </>
       )}
 

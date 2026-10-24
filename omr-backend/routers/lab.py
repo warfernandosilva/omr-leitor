@@ -695,6 +695,7 @@ def lab_reclassify(
             q.detected_answer = letter
             q.duplicate_marks = marks or None
         view.append({
+            "image_id": q.image_id,  # permite casar com a questão da imagem no cliente
             "question": q.question_number,
             "status": status,
             "label": STATUS_LABEL.get(status, status),
