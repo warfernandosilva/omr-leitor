@@ -27,6 +27,7 @@ import type { AnchorBox } from '../utils/anchors';
 import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
 import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor, customBubbleShape } from '../utils/overlay-bubbles';
 import { getCustomTemplate, expandBlock, ExpandedBubble } from '../utils/custom-template-api';
+import { mergePageAnswers, missingPages } from '../utils/custom-pages';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
@@ -184,6 +185,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [customGeom, setCustomGeom] = useState<{ pageW: number; pageH: number; nPages: number; pages: { bubbles: ExpandedBubble[]; anchorBox: AnchorBox; pageW: number; pageH: number }[] } | null>(null);
   // Multi-página (mesma folha): página do modelo que o usuário está lendo.
   const [customPage, setCustomPage] = useState(0);
+  // Página do resultado exibido na revisão (pode diferir da página selecionada
+  // para a próxima captura — ex.: captura da página 2 cancelada).
+  const [resultPage, setResultPage] = useState(0);
   // Multi-página: quais páginas já foram lidas para o cartão atual.
   const [readPages, setReadPages] = useState<Set<number>>(new Set());
   // Configurações globais de detecção (item 5 da Fase 2)
@@ -264,6 +268,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const batchInputRef = useRef<HTMLInputElement>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // De onde a câmera foi aberta: voltar do capture deve devolver à revisão
+  // quando a captura foi iniciada pelo botão "Capturar página 2".
+  const captureReturnStepRef = useRef<'form' | 'review'>('form');
 
   // Auto-merge ao abrir a correção: gabarito preenchido no PC chega ao celular.
   // (Servidor vence conflitos; provas só-locais são preservadas.)
@@ -439,6 +446,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   // Gabarito Personalizado: o quadro do guia usa a proporção da página do
   // modelo importado e os alvos ficam nas âncoras do próprio modelo.
   const curPageGeom = customGeom?.pages?.[Math.min(customPage, (customGeom?.nPages ?? 1) - 1)];
+  // Multi-página: páginas do cartão ainda não lidas (alvo do CTA na revisão).
+  const missingCustomPages = isCustom && (customGeom?.nPages ?? 1) > 1
+    ? missingPages(readPages, customGeom?.nPages ?? 1)
+    : [];
+  const nextMissingPage = missingCustomPages[0];
   const customAspect = isCustom && curPageGeom && curPageGeom.pageH > 0
     ? curPageGeom.pageW / curPageGeom.pageH : null;
   const guide = useMemo(
@@ -476,6 +488,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const overlayHerby = overlayModel === 'herby';
   const overlaySimulado = overlayModel === 'simulado';
   const overlayCustom = overlayModel === 'custom';
+  // Overlay do cartão personalizado: usa a página do resultado exibido, não a
+  // página armada para a próxima captura.
+  const overlayPageGeom = customGeom?.pages?.[Math.min(resultPage, (customGeom?.nPages ?? 1) - 1)];
   const templateMismatch = !!omrResult?.templateUsed && !!activeExam
     && canonicalModel(omrResult.templateUsed) !== examCanonicalModel;
 
@@ -499,6 +514,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   useEffect(() => {
     if (!isCustom || activeExam?.customTemplateId == null) { setCustomGeom(null); return; }
     setCustomPage(0);
+    setResultPage(0);
     let alive = true;
     getCustomTemplate(activeExam.customTemplateId)
       .then(detail => {
@@ -533,7 +549,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     return () => { alive = false; };
   }, [isCustom, activeExam?.customTemplateId]);
 
-  const startCamera = async (preferredDeviceId?: string | null, allowFileFallback = true) => {
+  const startCamera = async (
+    preferredDeviceId?: string | null,
+    allowFileFallback = true,
+    returnTo: 'form' | 'review' = 'form',
+  ) => {
+    captureReturnStepRef.current = returnTo;
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       fileInputRef.current?.click();
       return;
@@ -603,7 +624,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     resetAuto();
     setConfirmUrl(null);
     setSharpRetry(null);
-    await startCamera(videoDevices[next], false);
+    await startCamera(videoDevices[next], false, captureReturnStepRef.current);
   };
 
   // Toque-para-focar no visor (só onde o aparelho expõe pointsOfInterest)
@@ -765,12 +786,27 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     }
   };
 
-  // Volta da tela de captura em tela cheia para o formulário
+  // Volta da tela de captura em tela cheia para o formulário — ou para a
+  // revisão, quando a captura foi aberta pelo CTA "Capturar página N".
   const goBackFromCapture = () => {
     stopCamera();
     setConfirmUrl(null);
     setSharpRetry(null);
-    setStep('form');
+    setStep(captureReturnStepRef.current);
+  };
+
+  // Inicia a captura de uma página específica do Gabarito Personalizado
+  // (usado pelo CTA da revisão para ler a página 2 sem perder as respostas
+  // já acumuladas da página 1).
+  const startPageCapture = (page: number, source: 'camera' | 'file') => {
+    setCustomPage(page);
+    setError(null);
+    setRetryUrl(null);
+    if (source === 'file' || !window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      fileInputRef.current?.click();
+      return;
+    }
+    void startCamera(null, true, 'review');
   };
 
   // Tela de captura em tela cheia: trava o scroll do fundo + Escape volta
@@ -791,6 +827,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -804,10 +841,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   const processOMR = async (dataUrl: string, frames: string[] = [], corners?: [number, number][], page?: number) => {
+    // Página que está sendo lida: o parâmetro vence o estado (evita corrida
+    // quando a captura foi disparada logo após trocar de página).
+    const readPage = isCustom ? (page ?? customPage) : 0;
+    // Leitura de página seguinte (página 1 já conferida): mantém o resultado
+    // anterior montado para que uma falha volte à revisão, e não ao formulário.
+    const isFollowUpPage = isCustom && (customGeom?.nPages ?? 1) > 1 && readPages.size > 0;
     setStep('processing');
     setError(null);
     setManualEntry(false);
-    setOmrResult(null);
+    if (!isFollowUpPage) setOmrResult(null);
     setStageDone(1); // 1. imagem recebida
 
     try {
@@ -854,7 +897,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         );
         setCapturedImage(null);
         setRetryUrl(dataUrl);
-        setStep('form');
+        setStep(isFollowUpPage ? 'review' : 'form');
         return;
       }
 
@@ -863,21 +906,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       if (result.success && result.answers) {
         // Multi-página: acumula respostas por página, substituindo as questões
         // da página lida (evita respostas velhas em releituras).
-        setManualAnswers((prev) => {
-          if (isCustom && (customGeom?.nPages ?? 1) > 1) {
-            const pageQs = new Set(
-              customGeom?.pages?.[customPage]?.bubbles.map((b) => b.question) ?? [],
-            );
-            const kept = Object.fromEntries(
-              Object.entries(prev).filter(([q]) => !pageQs.has(Number(q))),
-            );
-            return { ...kept, ...result.answers };
-          }
-          return { ...result.answers };
-        });
-        if (isCustom && (customGeom?.nPages ?? 1) > 1) {
-          setReadPages((s) => new Set(s).add(customPage));
+        const pageAnswers = result.answers;
+        const pageQuestionIds = customGeom?.pages?.[readPage]?.bubbles.map((b) => b.question) ?? [];
+        const multiPage = isCustom && (customGeom?.nPages ?? 1) > 1;
+        setManualAnswers((prev) => (multiPage
+          ? mergePageAnswers(prev, pageAnswers, pageQuestionIds)
+          : { ...pageAnswers }));
+        if (multiPage) {
+          setReadPages((s) => new Set(s).add(readPage));
         }
+        setResultPage(readPage);
 
         // ─── Identificação: QR → codigo_unico → banco → aluno (§12-13) ───
         let identification: Identification = null;
@@ -944,13 +982,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         setError(result.error || 'Erro ao processar a imagem');
         setCapturedImage(null);
         setRetryUrl(dataUrl); // custom: permite tentar de novo marcando os cantos
-        setStep('form');
+        setStep(isFollowUpPage ? 'review' : 'form');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao processar a imagem. Verifique se o backend Python está rodando.');
       setCapturedImage(null);
       setRetryUrl(dataUrl);
-      setStep('form');
+      setStep(isFollowUpPage ? 'review' : 'form');
     }
   };
 
@@ -1132,6 +1170,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setManualAnswers({});
       setManualEntry(false);
       setReadPages(new Set());
+      setCustomPage(0);
+      setResultPage(0);
       setError(null);
       setStageDone(0);
       setIdentified(null);
@@ -1240,6 +1280,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setManualAnswers({});
     setManualEntry(false);
     setReadPages(new Set());
+    setCustomPage(0);
+    setResultPage(0);
     setError(null);
     setStageDone(0);
     setIdentified(null);
@@ -1766,7 +1808,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </button>
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-medium uppercase tracking-widest text-sky-200/70 leading-none">correção OMR</p>
-              <h2 className="mt-0.5 truncate text-lg font-semibold leading-tight">Nova leitura</h2>
+              <h2 className="mt-0.5 truncate text-lg font-semibold leading-tight">
+                {isCustom && (customGeom?.nPages ?? 1) > 1
+                  ? `Página ${customPage + 1} de ${customGeom?.nPages ?? 1}`
+                  : 'Nova leitura'}
+              </h2>
             </div>
             {sessionCount > 0 && (
               <span className="shrink-0 rounded-full border border-emerald-400/40 bg-emerald-400/15 px-2 py-0.5 text-xs font-medium text-emerald-200">
@@ -1792,7 +1838,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               {confirmUrl
                 ? 'Prévia travada — confira e envie para correção.'
                 : autoMode
-                  ? 'Enquadre o cartão-resposta na moldura. Mantenha o cartão bem iluminado e plano.'
+                  ? (isCustom && (customGeom?.nPages ?? 1) > 1
+                    ? `Enquadre a página ${customPage + 1} do cartão-resposta na moldura. Mantenha o cartão bem iluminado e plano.`
+                    : 'Enquadre o cartão-resposta na moldura. Mantenha o cartão bem iluminado e plano.')
                   : 'Enquadre o cartão-resposta e toque no obturador para capturar.'}
             </p>
           </div>
@@ -2318,16 +2366,26 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
       {step === 'review' && omrResult && activeExam && (
         <div className="space-y-4 max-w-4xl">
+          {error && (
+            <div className="p-3 bg-danger-50 dark:bg-danger-700/15 border border-danger-500/30 rounded-lg text-danger-600 dark:text-danger-100 text-sm">
+              {error}
+            </div>
+          )}
           {(() => {
             const dupList = omrResult.duplicateQuestions ?? [];
             const lowList = omrResult.lowConfidence ?? [];
             const score = countResults(activeExam, manualAnswers, dupList);
             const grade = calculateGrade(score.correct, activeExam.totalQuestions, activeExam.gradeScale);
-            const readCount = Object.keys(omrResult.answers ?? {}).length
-              + (omrResult.blankQuestions?.length ?? 0) + dupList.length;
             const answeredCount = Object.keys(manualAnswers).length;
+            // Multi-página: o resultado exibido é só da última página lida; as
+            // respostas e o progresso vêm do acumulado (manualAnswers).
+            const isMultiPage = isCustom && (customGeom?.nPages ?? 1) > 1;
+            const readCount = isMultiPage
+              ? answeredCount + dupList.length
+              : Object.keys(omrResult.answers ?? {}).length
+                + (omrResult.blankQuestions?.length ?? 0) + dupList.length;
             const firm = Math.max(0, activeExam.totalQuestions - lowList.length - dupList.length);
-            const progressCount = manualEntry ? answeredCount : firm;
+            const progressCount = manualEntry || isMultiPage ? answeredCount : firm;
             const alunoNome = identified?.kind === 'ok' || identified?.kind === 'wrong_exam'
               ? identified.name : (studentName.trim() || '(sem identificação)');
             const cartao = omrResult.cardId ?? identified?.cardId ?? '—';
@@ -2358,11 +2416,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                      ) : (
                        <>
                          Atenção: este cartão tem {customGeom?.nPages ?? 1} páginas e apenas {readPages.size} foi/foram lida(s).
-                         Faltam as páginas {Array.from({ length: customGeom?.nPages ?? 1 }, (_, i) => i)
-                           .filter((i) => !readPages.has(i))
-                           .map((i) => i + 1)
-                           .join(', ')}.
-                         Volte e leia as demais antes de salvar para não perder respostas.
+                         Faltam as páginas {missingCustomPages.map((i) => i + 1).join(', ')}.
+                         As respostas já lidas estão preservadas — leia as demais antes de salvar.
                        </>
                      )}
                    </div>
@@ -2377,7 +2432,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     <dd className="font-medium text-ink dark:text-gray-100 text-right font-mono">{cartao}</dd>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <dt className="text-gray-500 dark:text-gray-400">{manualEntry ? 'Respostas preenchidas' : 'Questões lidas'}</dt>
+                    <dt className="text-gray-500 dark:text-gray-400">{manualEntry ? 'Respostas preenchidas' : isMultiPage ? 'Respostas lidas' : 'Questões lidas'}</dt>
                     <dd className="font-medium text-ink dark:text-gray-100 text-right tabular-nums">
                       {manualEntry ? answeredCount : readCount} / {activeExam.totalQuestions}
                     </dd>
@@ -2406,7 +2461,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     <span>
                       {manualEntry
                         ? `${answeredCount} de ${activeExam.totalQuestions} respostas preenchidas`
-                        : `Leitura firme em ${firm} de ${activeExam.totalQuestions} questões`}
+                        : isMultiPage
+                          ? `${answeredCount} de ${activeExam.totalQuestions} respostas · ${readPages.size}/${customGeom?.nPages ?? 1} páginas`
+                          : `Leitura firme em ${firm} de ${activeExam.totalQuestions} questões`}
                     </span>
                     <span className="tabular-nums">{Math.round((progressCount / Math.max(1, activeExam.totalQuestions)) * 100)}%</span>
                   </div>
@@ -2420,6 +2477,49 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               </div>
             );
           })()}
+
+          {!manualEntry && nextMissingPage != null && (
+            <div className="card border-2 border-brand-500/40">
+              <div className="flex items-start gap-3">
+                <span className="w-9 h-9 rounded-full flex items-center justify-center text-white bg-brand-500 shrink-0" aria-hidden>
+                  <Camera size={18} strokeWidth={2.2} />
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-base font-bold text-ink dark:text-white">
+                    {missingCustomPages.length === 1
+                      ? `Falta ler a página ${nextMissingPage + 1}`
+                      : `Faltam ${missingCustomPages.length} páginas`}
+                  </h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mt-0.5">
+                    As {readPages.size} página(s) já lida(s) estão guardadas.
+                    Leia a página {nextMissingPage + 1} para completar este cartão.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <Button
+                  onClick={() => startPageCapture(nextMissingPage, 'camera')}
+                  icon={<Camera size={16} aria-hidden />}
+                  className="flex-1"
+                >
+                  Capturar página {nextMissingPage + 1}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => startPageCapture(nextMissingPage, 'file')}
+                  icon={<ImageUp size={16} aria-hidden />}
+                  className="flex-1"
+                >
+                  Enviar imagem
+                </Button>
+              </div>
+              {missingCustomPages.length > 1 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                  Também faltam: {missingCustomPages.slice(1).map((i) => `página ${i + 1}`).join(', ')}.
+                </p>
+              )}
+            </div>
+          )}
 
           {!manualEntry && (
             <div className="card">
@@ -2639,13 +2739,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               {!customGeom ? (
                 <p className="text-xs text-gray-500 dark:text-gray-400">Carregando o modelo do cartão…</p>
               ) : (
-                <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: `${curPageGeom?.pageW ?? customGeom.pageW}/${curPageGeom?.pageH ?? customGeom.pageH}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ position: 'relative', width: '100%', maxWidth: 560, margin: '0 auto', aspectRatio: `${overlayPageGeom?.pageW ?? customGeom.pageW}/${overlayPageGeom?.pageH ?? customGeom.pageH}`, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
                   <img src={omrResult?.rectifiedImage || capturedImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', opacity: omrResult?.rectifiedImage ? 1 : 0.35 }} />
                   <svg viewBox="0 0 1 1" preserveAspectRatio="none" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-                    {(customGeom.pages?.[Math.min(customPage, (customGeom.nPages ?? 1) - 1)]?.bubbles ?? []).map((b) => {
-                      const m = Math.max(curPageGeom?.pageW ?? customGeom.pageW, curPageGeom?.pageH ?? customGeom.pageH);
+                    {(overlayPageGeom?.bubbles ?? []).map((b) => {
+                      const m = Math.max(overlayPageGeom?.pageW ?? customGeom.pageW, overlayPageGeom?.pageH ?? customGeom.pageH);
                       const inv = 1 / m;
-                      const { rx, ry } = customBubbleShape(b, curPageGeom?.pageW ?? customGeom.pageW, curPageGeom?.pageH ?? customGeom.pageH);
+                      const { rx, ry } = customBubbleShape(b, overlayPageGeom?.pageW ?? customGeom.pageW, overlayPageGeom?.pageH ?? customGeom.pageH);
                       const ans = manualAnswers[b.question] ?? '';
                       const key = activeExam.answerKey?.[b.question] ?? '';
                       const isMarked = ans.includes(b.option);
