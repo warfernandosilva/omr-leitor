@@ -323,7 +323,6 @@ function TemplateEditor({
   const [selection, setSelection] = useState<Selection>(null);
   const [tool, setTool] = useState<Tool>('select');
   const [zoom, setZoom] = useState(0.5);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [show, setShow] = useState({ anchors: true, qr: true, info: true, bubbles: true });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -447,7 +446,9 @@ function TemplateEditor({
     const pad = 24;
     const z = clamp(Math.min((el.clientWidth - pad) / baseW, (el.clientHeight - pad) / baseH), 0.1, 4);
     setZoom(z);
-    setPan({ x: (el.clientWidth - baseW * z) / 2, y: (el.clientHeight - baseH * z) / 2 });
+    // Centralização é do CSS (margin auto): quando o cartão cabe, não há barra.
+    el.scrollLeft = 0;
+    el.scrollTop = 0;
   }, [baseW, baseH]);
 
   // Config recortada à página atual: o canvas/overlay/lista mostram só as
@@ -497,7 +498,11 @@ function TemplateEditor({
       const d = dragRef.current;
       if (!d) return;
       if (d.kind === 'pan') {
-        setPan({ x: d.origX + (e.clientX - d.startX), y: d.origY + (e.clientY - d.startY) });
+        const el = canvasWrapRef.current;
+        if (el) {
+          el.scrollLeft = d.origX - (e.clientX - d.startX);
+          el.scrollTop = d.origY - (e.clientY - d.startY);
+        }
         return;
       }
       const p = toBase(e.clientX, e.clientY);
@@ -1061,7 +1066,7 @@ function TemplateEditor({
         </div>
 
         {/* Área central */}
-        <div className="card p-2 flex flex-col gap-2 min-h-[78vh]">
+        <div className="card p-2 flex flex-col gap-2 h-[78vh]">
           <div className="flex items-center flex-wrap gap-2">
             <Button size="icon" variant="ghost" title="Reduzir" onClick={() => setZoom((z) => Math.max(0.1, z - 0.05))}><ZoomOut size={16} /></Button>
             <input type="number" min={10} max={400} step={1} value={Math.round(zoom * 100)}
@@ -1091,7 +1096,7 @@ function TemplateEditor({
           </div>
 
           <div ref={canvasWrapRef}
-               className="relative overflow-hidden rounded-lg bg-gray-200 dark:bg-gray-800 flex-1"
+               className="relative min-h-0 flex-1 overflow-auto rounded-lg bg-gray-200 dark:bg-gray-800"
                style={{
                  cursor: dragKind === 'pan' ? 'grabbing' : (tool === 'select' || tool === 'bubble') ? 'default' : 'crosshair',
                  userSelect: 'none',
@@ -1099,41 +1104,46 @@ function TemplateEditor({
                onPointerDown={(e) => {
                  if (!isPanGesture(e)) return;
                  e.preventDefault();
-                 dragRef.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, origX: pan.x, origY: pan.y };
+                 const el = canvasWrapRef.current;
+                 dragRef.current = { kind: 'pan', startX: e.clientX, startY: e.clientY, origX: el?.scrollLeft ?? 0, origY: el?.scrollTop ?? 0 };
                  setDragKind('pan');
                }}
                onContextMenu={(e) => { if (e.shiftKey) e.preventDefault(); }}>
-            <div style={{ transform: `translate(${pan.x}px, ${pan.y}px)`, position: 'absolute', left: 0, top: 0, width: baseW * zoom, height: baseH * zoom }}>
-              {imgUrl ? (
-                <img src={imgUrl} alt="Cartão importado" draggable={false}
-                     style={{ width: baseW * zoom, height: baseH * zoom, userSelect: 'none' }} />
-              ) : (
-                <div style={{ width: baseW * zoom, height: baseH * zoom }} className="bg-white flex items-center justify-center text-gray-400">
-                  <ImageIcon size={32} />
-                </div>
-              )}
-              <svg ref={svgRef} width={baseW * zoom} height={baseH * zoom} viewBox={`0 0 ${baseW} ${baseH}`}
-                   className="absolute inset-0" style={{ touchAction: 'none' }}
-                   onPointerDown={onSvgPointerDown} onClick={onSvgClick}>
-                <OverlayRegions
-                  config={pageConfig} show={show} selection={selection} zoom={zoom} tool={tool}
-                  onSelect={setSelection} onStartDrag={startDragRegion} onStartResize={startResize}
-                  onStartBubbleDrag={startBubbleDrag}
-                  onStartPageCorner={startPageCornerDrag}
-                />
-                {creating && (
-                  <rect
-                    x={Math.min(creating.x0, creating.x1)}
-                    y={Math.min(creating.y0, creating.y1)}
-                    width={Math.abs(creating.x1 - creating.x0)}
-                    height={Math.abs(creating.y1 - creating.y0)}
-                    fill="rgba(37,99,235,0.15)" stroke="#2563eb" strokeDasharray="6 4" strokeWidth={2 / zoom} />
+            {/* Área rolável: o cartão fica no fluxo (centralizado quando cabe) para
+                o navegador criar as barras quando o zoom passa do visor. */}
+            <div className="flex min-h-full min-w-full">
+              <div className="relative m-auto shrink-0" style={{ width: baseW * zoom, height: baseH * zoom }}>
+                {imgUrl ? (
+                  <img src={imgUrl} alt="Cartão importado" draggable={false}
+                       style={{ width: baseW * zoom, height: baseH * zoom, userSelect: 'none' }} />
+                ) : (
+                  <div style={{ width: baseW * zoom, height: baseH * zoom }} className="bg-white flex items-center justify-center text-gray-400">
+                    <ImageIcon size={32} />
+                  </div>
                 )}
-              </svg>
+                <svg ref={svgRef} width={baseW * zoom} height={baseH * zoom} viewBox={`0 0 ${baseW} ${baseH}`}
+                     className="absolute inset-0" style={{ touchAction: 'none' }}
+                     onPointerDown={onSvgPointerDown} onClick={onSvgClick}>
+                  <OverlayRegions
+                    config={pageConfig} show={show} selection={selection} zoom={zoom} tool={tool}
+                    onSelect={setSelection} onStartDrag={startDragRegion} onStartResize={startResize}
+                    onStartBubbleDrag={startBubbleDrag}
+                    onStartPageCorner={startPageCornerDrag}
+                  />
+                  {creating && (
+                    <rect
+                      x={Math.min(creating.x0, creating.x1)}
+                      y={Math.min(creating.y0, creating.y1)}
+                      width={Math.abs(creating.x1 - creating.x0)}
+                      height={Math.abs(creating.y1 - creating.y0)}
+                      fill="rgba(37,99,235,0.15)" stroke="#2563eb" strokeDasharray="6 4" strokeWidth={2 / zoom} />
+                  )}
+                </svg>
+              </div>
             </div>
           </div>
           <p className="text-[11px] text-gray-500 dark:text-gray-400">
-            Página {currentPage + 1} de {nPages} · Alt+arrastar, botão do meio ou Shift+botão direito move a visualização.
+            Página {currentPage + 1} de {nPages} · Role para navegar ou use Alt+arrastar, botão do meio ou Shift+botão direito.
             {' '}{bubbles.length} bolha(s) configurada(s).
             {Array.isArray(config.page_corners) && config.page_corners.length === 4 && (
               <> Cantos da folha (roxo) ativos — arraste os 4 pontos para ajustar. Usados como destino
