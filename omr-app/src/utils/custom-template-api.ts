@@ -272,8 +272,25 @@ export function activateCustomTemplate(id: number): Promise<{ ok: boolean; statu
   return apiJsonBody(`/api/custom-templates/${id}/activate`, 'POST', {});
 }
 
-export function listCustomVersions(id: number): Promise<{ versions: { id: number; version: number; created_at: string; summary: unknown }[] }> {
+export interface CustomVersionRow {
+  id: number;
+  version: number;
+  created_at: string | null;
+  summary: CustomTemplateSummary['config_summary'];
+}
+
+export function listCustomVersions(id: number): Promise<{ versions: CustomVersionRow[] }> {
   return apiJson(`/api/custom-templates/${id}/versions`);
+}
+
+/** Config completa de uma versão (o editor aplica como rascunho, com undo). */
+export function getCustomVersion(id: number, version: number): Promise<{
+  ok: boolean;
+  version: number;
+  created_at: string | null;
+  config: CustomConfig;
+}> {
+  return apiJson(`/api/custom-templates/${id}/versions/${version}`);
 }
 
 // ─── Imagem / bolhas ───
@@ -344,6 +361,24 @@ export interface DetectAnchorsResult {
 
 export function detectCustomAnchors(id: number, page = 0): Promise<DetectAnchorsResult> {
   return apiJsonBody(`/api/custom-templates/${id}/detect-anchors?page=${page}`, 'POST', {});
+}
+
+export interface AutoConfigureResult {
+  ok: boolean;
+  config: CustomConfig;
+  report: {
+    anchors: number;
+    page_corners: boolean;
+    page_corners_inferred: boolean;
+    blocks: number;
+    questions: number;
+  };
+  issues: ValidationIssue[];
+}
+
+/** Âncoras → cantos da folha → grade numa passada. Não grava: devolve a config. */
+export function autoConfigureCustomTemplate(id: number, page = 0): Promise<AutoConfigureResult> {
+  return apiJsonBody(`/api/custom-templates/${id}/auto-configure?page=${page}`, 'POST', {});
 }
 
 // ─── Teste ───

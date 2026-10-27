@@ -2105,3 +2105,52 @@ def test_api_page_image_reading_and_printing(authed):
     assert r.status_code == 200
     assert r.content.count(b"/Type /Page") - r.content.count(b"/Type /Pages") == 2
     client.delete(f"/api/custom-templates/{tid}")
+
+
+# ---------------------------------------------------------------------------
+# Configurar automaticamente (âncoras → cantos → grade) e versões
+# ---------------------------------------------------------------------------
+
+def test_api_auto_configure_suggests_without_saving(authed):
+    client = authed
+    r = _create(client, _png_bytes(_make_card({})))
+    assert r.status_code == 201, r.text
+    tid = r.json()["id"]
+
+    r = client.post(f"/api/custom-templates/{tid}/auto-configure")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True, body
+    assert body["report"]["anchors"] == 4, body["report"]
+    assert body["report"]["blocks"] >= 1, body["report"]
+    assert body["report"]["questions"] >= 5, body["report"]
+    assert len(body["config"]["anchors"]) == 4
+    assert not [i for i in body["issues"] if i["level"] == "error"], body["issues"]
+
+    # nada foi gravado: a config salva continua vazia
+    saved = client.get(f"/api/custom-templates/{tid}").json()["config"]
+    assert saved["anchors"] == [] and saved["questions"] == []
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_version_detail_is_read_only(authed):
+    client = authed
+    r = _create(client, _png_bytes(_make_card({})))
+    tid = r.json()["id"]
+
+    client.put(f"/api/custom-templates/{tid}", json={"config": _config()})
+    assert client.post(f"/api/custom-templates/{tid}/activate").json()["version"] == 1
+
+    cfg2 = _config()
+    cfg2["questions"][0]["n_questions"] = 3
+    client.put(f"/api/custom-templates/{tid}", json={"config": cfg2})
+    assert client.post(f"/api/custom-templates/{tid}/activate").json()["version"] == 2
+
+    r = client.get(f"/api/custom-templates/{tid}/versions/1")
+    assert r.status_code == 200, r.text
+    assert r.json()["config"]["questions"][0]["n_questions"] == 5
+
+    # restaurar é só leitura: o modelo continua com a config atual
+    assert client.get(f"/api/custom-templates/{tid}").json()["config"]["questions"][0]["n_questions"] == 3
+    assert client.get(f"/api/custom-templates/{tid}/versions/99").status_code == 404
+    client.delete(f"/api/custom-templates/{tid}")

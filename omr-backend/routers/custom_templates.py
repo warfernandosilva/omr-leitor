@@ -649,6 +649,32 @@ def list_versions(tid: int, current_user: User = Depends(auth.get_current_user),
     ]}
 
 
+@router.get("/api/custom-templates/{tid}/versions/{version}")
+def get_version(tid: int, version: int,
+                current_user: User = Depends(auth.get_current_user),
+                db: Session = Depends(get_db)):
+    """Config completa de uma versão — o editor aplica como rascunho (com undo).
+
+    Só lê: restaurar não escreve no banco. Nada é perdido — a config atual
+    continua salva até o usuário decidir salvar a versão restaurada.
+    """
+    _get_template(db, tid, current_user)
+    row = db.scalar(
+        select(CustomTemplateVersion).where(
+            CustomTemplateVersion.template_id == tid,
+            CustomTemplateVersion.version == version,
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Versão não encontrada")
+    return {
+        "ok": True,
+        "version": row.version,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "config": row.config or {},
+    }
+
+
 # ---------------------------------------------------------------------------
 # Impressão (seção 7)
 # ---------------------------------------------------------------------------
@@ -957,6 +983,57 @@ def detect_grid_endpoint(
         for b in res["blocks"]:
             b["page"] = max(0, int(page or 0))
     return res
+
+
+@router.post("/api/custom-templates/{tid}/auto-configure")
+def auto_configure_endpoint(
+    tid: int,
+    page: int = 0,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Configura a página de uma vez: âncoras → cantos da folha → grade.
+
+    NÃO grava: devolve a config sugerida para o editor aplicar (com undo) e
+    salvar quando quiser. Substitui âncoras e blocos APENAS desta página —
+    as demais páginas ficam intactas.
+    """
+    tpl = _get_template(db, tid, current_user)
+    image = _load_image(tpl, page)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Imagem original não encontrada")
+
+    pg = max(0, int(page or 0))
+    cfg = normalize_config(tpl.config or {})
+
+    anchors = detect_anchors_auto(image, page=pg, config=cfg)
+    for a in anchors:
+        a["page"] = pg
+    cfg["anchors"] = [a for a in cfg["anchors"] if int(a.get("page") or 0) != pg] + anchors
+
+    # Cantos depois das âncoras: a detecção prioriza os marcadores de canto.
+    corners, inferred = detect_page_corners_ex(image, cfg, page=pg)
+    if corners:
+        cfg["page_corners"] = corners
+
+    grid = detect_grid(image, cfg, start_question=question_offset_before_page(cfg, pg))
+    blocks = grid["blocks"] if grid.get("ok") else []
+    for b in blocks:
+        b["page"] = pg
+    cfg["questions"] = [q for q in cfg["questions"] if int(q.get("page") or 0) != pg] + blocks
+
+    return {
+        "ok": bool(anchors or blocks),
+        "config": cfg,
+        "report": {
+            "anchors": len(anchors),
+            "page_corners": bool(corners),
+            "page_corners_inferred": bool(inferred),
+            "blocks": len(blocks),
+            "questions": sum(int(b.get("n_questions") or 0) for b in blocks),
+        },
+        "issues": validate_config(cfg),
+    }
 
 
 # ---------------------------------------------------------------------------

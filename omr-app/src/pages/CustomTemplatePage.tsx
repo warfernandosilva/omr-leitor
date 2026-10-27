@@ -4,6 +4,7 @@ import {
   ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
   Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus, Move,
+  History, Wand2,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -22,14 +23,16 @@ import {
   CustomAnchor, CustomBlock, CustomConfig, CustomInfoRegion, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
-  createCustomTemplate, customTemplateImage, deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
-  getCustomTemplate, listCustomTemplates, moveBlockTo, printCustomTemplate, printPreviewCustomTemplate,
+  autoConfigureCustomTemplate, createCustomTemplate, customTemplateImage, deleteCustomTemplate,
+  detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
+  getCustomTemplate, getCustomVersion, listCustomTemplates, listCustomVersions,
+  moveBlockTo, printCustomTemplate, printPreviewCustomTemplate,
   replaceCustomImage,
   removePageImage,
   shiftOverrides, testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
   withBubbleOverride, withoutBubbleOverride,
 } from '../utils/custom-template-api';
-import type { PrintPreviewResult } from '../utils/custom-template-api';
+import type { CustomVersionRow, PrintPreviewResult } from '../utils/custom-template-api';
 import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
@@ -332,6 +335,7 @@ function TemplateEditor({
   const [detecting, setDetecting] = useState(false);
   const [detectingAnchors, setDetectingAnchors] = useState(false);
   const [detectingPageCorners, setDetectingPageCorners] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
   // Multi-página (mesma folha): página do modelo atualmente editada.
   const [pageIdx, setPageIdx] = useState(0);
   // Cópia de configuração de outro modelo
@@ -877,6 +881,35 @@ function TemplateEditor({
     }
   };
 
+  // Configura a página de uma vez (âncoras → cantos da folha → grade).
+  // Salva antes: o servidor parte da config salva, e assim alterações
+  // pendentes das outras páginas não são descartadas.
+  const autoConfigure = async () => {
+    if (dirty && !(await save())) return;
+    setAutoBusy(true);
+    try {
+      const res = await autoConfigureCustomTemplate(detail.id, currentPage);
+      if (!res.ok) {
+        toast.info('Não encontrei âncoras nem grade nesta imagem — configure manualmente.');
+        return;
+      }
+      apply(res.config);
+      setIssues(res.issues);
+      setSelection(null);
+      const r = res.report;
+      const parts = [
+        r.anchors ? `${r.anchors} âncora(s)` : 'sem âncoras',
+        r.blocks ? `${r.blocks} bloco(s) · ${r.questions} questão(ões)` : 'sem grade',
+        r.page_corners ? (r.page_corners_inferred ? 'cantos estimados' : 'cantos da folha') : 'sem cantos da folha',
+      ];
+      toast.success(`Página ${currentPage + 1}: ${parts.join(' · ')}. Revise e salve.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao configurar automaticamente');
+    } finally {
+      setAutoBusy(false);
+    }
+  };
+
   const activate = async () => {
     if (dirty && !(await save())) return;
     try {
@@ -970,6 +1003,7 @@ function TemplateEditor({
                    onAddAnchor={addAnchor}
                    anchorSize={anchorSize} setAnchorSize={setAnchorSize}
                    onDetectGrid={() => void detectGrid()} detecting={detecting}
+                    onAutoConfigure={() => void autoConfigure()} autoBusy={autoBusy}
                     onDetectAnchors={() => void detectAnchors()} detectingAnchors={detectingAnchors}
                     onDetectPageCorners={() => void handleDetectPageCorners()} detectingPageCorners={detectingPageCorners}
                     onManualPageCorners={startManualPageCorners}
@@ -1125,7 +1159,7 @@ function TemplateEditor({
               <PropertiesPanel config={config} selection={selection} updateField={updateField} />
             )}
             {rightTab === 'diag' && <ValidationPanel issues={issues} onGoTo={setSelection} />}
-            {rightTab === 'actions' && <ActionsPanel detailId={detail.id} />}
+            {rightTab === 'actions' && <ActionsPanel detailId={detail.id} onRestore={apply} />}
           </div>
         </div>
       </div>
@@ -1231,7 +1265,8 @@ function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
 function Toolbar({
   tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId, anchorSize, setAnchorSize,
   anchorCount, onAddAnchor,
-  onAddBlock, onDetectGrid, onDetectAnchors, onDetectPageCorners, onManualPageCorners, onRemovePageCorners,
+  onAddBlock, onDetectGrid, onAutoConfigure, autoBusy,
+  onDetectAnchors, onDetectPageCorners, onManualPageCorners, onRemovePageCorners,
   detecting, detectingAnchors, detectingPageCorners, hasPageCorners,
 }: {
   tool: Tool; setTool: (t: Tool) => void;
@@ -1242,6 +1277,8 @@ function Toolbar({
   onAddAnchor: () => void;
   onAddBlock: () => void;
   onDetectGrid: () => void;
+  onAutoConfigure: () => void;
+  autoBusy: boolean;
   onDetectAnchors: () => void;
   onDetectPageCorners: () => void;
   onManualPageCorners: () => void;
@@ -1322,9 +1359,14 @@ function Toolbar({
 
       <div className="space-y-2 border-t border-line dark:border-gray-800 pt-3">
         <p className="label">Detectar automaticamente</p>
+        <button type="button" onClick={onAutoConfigure} disabled={autoBusy}
+                title="Detecta âncoras, cantos da folha e a grade desta página de uma vez (substitui âncoras e blocos desta página — dá para desfazer)"
+                className="btn btn-primary btn-sm min-h-[40px] w-full justify-start">
+          <Wand2 size={15} aria-hidden /> {autoBusy ? 'Configurando…' : 'Configurar automaticamente'}
+        </button>
         <button type="button" onClick={onDetectGrid} disabled={detecting}
                 title="Analisa a imagem importada e sugere os blocos de questões automaticamente"
-                className="btn btn-primary btn-sm min-h-[40px] w-full justify-start">
+                className="btn btn-secondary btn-sm min-h-[40px] w-full justify-start">
           <ScanSearch size={15} aria-hidden /> {detecting ? 'Detectando…' : 'Detectar grade'}
         </button>
         <button type="button" onClick={onDetectAnchors} disabled={detectingAnchors}
@@ -1945,14 +1987,45 @@ function ValidationPanel({ issues, onGoTo }: { issues: ValidationIssue[]; onGoTo
 // Ações: testar com foto + imprimir
 // ───────────────────────────────────────────────────────────────────────────
 
-function ActionsPanel({ detailId }: { detailId: number }) {
+function ActionsPanel({ detailId, onRestore }: { detailId: number; onRestore: (c: CustomConfig) => void }) {
   const toast = useNotify();
   const [testOpen, setTestOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [versions, setVersions] = useState<CustomVersionRow[]>([]);
+  const [versionsBusy, setVersionsBusy] = useState(false);
   const [result, setResult] = useState<CustomTestResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [truth, setTruth] = useState('');
   const testFileRef = useRef<HTMLInputElement>(null);
+
+  const openVersions = async () => {
+    setVersionsBusy(true);
+    try {
+      const r = await listCustomVersions(detailId);
+      setVersions(r.versions);
+      setVersionsOpen(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao listar as versões');
+    } finally {
+      setVersionsBusy(false);
+    }
+  };
+
+  // Restaurar só aplica no editor (com Desfazer) — nada é gravado até Salvar.
+  const restoreVersion = async (v: number) => {
+    setVersionsBusy(true);
+    try {
+      const r = await getCustomVersion(detailId, v);
+      onRestore(r.config);
+      setVersionsOpen(false);
+      toast.info(`Versão ${v} aplicada no editor. Salve para manter.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao restaurar a versão');
+    } finally {
+      setVersionsBusy(false);
+    }
+  };
 
   const parseTruth = (raw: string): Record<string, string> => {
     const t = raw.trim();
@@ -1992,6 +2065,40 @@ function ActionsPanel({ detailId }: { detailId: number }) {
               onClick={() => setTestOpen(true)}>Testar com foto</Button>
       <Button size="sm" variant="secondary" className="w-full" icon={<Printer size={15} aria-hidden />}
               onClick={() => setPrintOpen(true)}>Imprimir / exportar</Button>
+      <Button size="sm" variant="secondary" className="w-full" icon={<History size={15} aria-hidden />}
+              loading={versionsBusy} onClick={() => void openVersions()}>Versões</Button>
+
+      <Modal open={versionsOpen} onClose={() => setVersionsOpen(false)} title="Versões do modelo">
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Cada ativação guarda uma cópia da configuração. Restaurar aplica a versão no
+            editor (dá para desfazer) — nada é gravado até você clicar em <strong>Salvar</strong>.
+            A imagem importada não é versionada, só as regiões.
+          </p>
+          {versions.length === 0 ? (
+            <p className="text-sm text-gray-500">Nenhuma versão ainda — ative o modelo para criar a primeira.</p>
+          ) : (
+            <ul className="space-y-2">
+              {versions.map((v) => (
+                <li key={v.version} className="flex items-center justify-between gap-2 rounded border border-gray-200 p-2 dark:border-gray-800">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">Versão {v.version}</p>
+                    <p className="text-[11px] text-gray-500">
+                      {v.created_at ? new Date(v.created_at).toLocaleString('pt-BR') : '—'}
+                      {' · '}{v.summary.n_anchors} âncora(s)
+                      {' · '}{v.summary.n_blocks} bloco(s)
+                      {' · '}{v.summary.n_questions} questão(ões)
+                      {' · '}{v.summary.n_pages} página(s)
+                    </p>
+                  </div>
+                  <Button size="sm" variant="secondary" loading={versionsBusy}
+                          onClick={() => void restoreVersion(v.version)}>Restaurar</Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Modal>
 
       <Modal open={testOpen} onClose={() => setTestOpen(false)} wide title="Testar leitura com uma foto real">
         <div className="space-y-3">
