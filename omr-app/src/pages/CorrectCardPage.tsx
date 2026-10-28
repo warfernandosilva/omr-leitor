@@ -28,12 +28,17 @@ import { CARD_WIDTH, CARD_HEIGHT } from '../utils/card-template';
 import { overlayRowFor, overlayBubbleFor, overlaySaevRowFor, overlaySaevBubbleFor, overlayHerbyRowFor, overlayHerbyBubbleFor, overlaySimuladoRowFor, overlaySimuladoBubbleFor, customBubbleShape } from '../utils/overlay-bubbles';
 import { getCustomTemplate, expandBlock, ExpandedBubble } from '../utils/custom-template-api';
 import { mergePageAnswers, missingPages } from '../utils/custom-pages';
+import { classifyOmrFailure, failureMessage, type OmrFailure } from '../utils/omr-errors';
+import { logOmrTelemetry } from '../utils/telemetry';
+import {
+  addPendingRead, loadPendingReads, removePendingRead, updatePendingRead, type PendingRead,
+} from '../utils/pending-reads';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 import {
-  ArrowLeft, ArrowRight, Camera, CheckCircle2, Eye, Flashlight, FlashlightOff, Focus,
+  ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudOff, Eye, Flashlight, FlashlightOff, Focus,
   ImagePlus, ImageUp, Info, PenLine, Play, RefreshCw, RotateCcw, Save,
   SlidersHorizontal, Sun, SwitchCamera, Trash2, X, ZoomIn,
 } from 'lucide-react';
@@ -130,6 +135,7 @@ function scoreSharpness(dataUrl: string): Promise<number> {
 export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const { user } = useAuth();
   const userId = user?.id;
+  const userKey = userId != null ? String(userId) : undefined;
   const [exams, setExams] = useState<Exam[]>(() => getExams(userId));
   const [syncMsg, setSyncMsg] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -190,6 +196,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [resultPage, setResultPage] = useState(0);
   // Multi-página: quais páginas já foram lidas para o cartão atual.
   const [readPages, setReadPages] = useState<Set<number>>(new Set());
+  // Capturas que falharam por rede/servidor e ficaram guardadas para reprocessar.
+  const [pendingReads, setPendingReads] = useState<PendingRead[]>(() => loadPendingReads(userKey));
+  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
+  const [reprocessing, setReprocessing] = useState(false);
+  const reprocessingRef = useRef(false);
+  const reprocessPendingIdRef = useRef<string | null>(null);
+  const onlineRetryRef = useRef<() => void>(() => {});
   // Configurações globais de detecção (item 5 da Fase 2)
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -278,6 +291,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     refreshExamsFromServer(true).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
+  // Fila local de leituras pendentes (escopo por usuário do aparelho).
+  useEffect(() => { setPendingReads(loadPendingReads(userKey)); }, [userKey]);
   // Cleanup: libera a câmera ao desmontar (navegação pela Sidebar/logout)
   useEffect(() => () => {
     try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
@@ -555,6 +570,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     returnTo: 'form' | 'review' = 'form',
   ) => {
     captureReturnStepRef.current = returnTo;
+    setPendingNotice(null);
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       fileInputRef.current?.click();
       return;
@@ -802,6 +818,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setCustomPage(page);
     setError(null);
     setRetryUrl(null);
+    setPendingNotice(null);
     if (source === 'file' || !window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       fileInputRef.current?.click();
       return;
@@ -829,6 +846,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
+    setPendingNotice(null);
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
@@ -840,10 +858,57 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     reader.readAsDataURL(file);
   };
 
-  const processOMR = async (dataUrl: string, frames: string[] = [], corners?: [number, number][], page?: number) => {
+  // ─── Fila local de leituras pendentes (rede/servidor fora) ───
+  const refreshPending = () => setPendingReads(loadPendingReads(userKey));
+
+  const queuePendingRead = (dataUrl: string, page: number | undefined, failure: OmrFailure) => {
+    if (!activeExam || !dataUrl.startsWith('data:image')) return;
+    const existingId = reprocessPendingIdRef.current;
+    reprocessPendingIdRef.current = null;
+    if (!failure.retryable) {
+      // Erro da foto/modelo: reprocessar não ajuda; descarta a pendência.
+      if (existingId) {
+        removePendingRead(existingId);
+        refreshPending();
+      }
+      return;
+    }
+    if (existingId) {
+      updatePendingRead(existingId, { error: failure.title, errorKind: failure.kind });
+      refreshPending();
+      setPendingNotice('A leitura continua guardada para reprocessar.');
+      return;
+    }
+    const r = addPendingRead({
+      userId: userKey,
+      examId: activeExam.id,
+      examName: activeExam.name,
+      page,
+      dataUrl,
+      error: failure.title,
+      errorKind: failure.kind,
+    });
+    if (r.ok) {
+      refreshPending();
+      setPendingNotice(r.evicted > 0
+        ? 'Captura guardada para reprocessar (a mais antiga foi descartada).'
+        : 'Captura guardada para reprocessar quando a conexão voltar.');
+    } else {
+      setPendingNotice('Não foi possível guardar a captura: armazenamento cheio. Libere leituras pendentes.');
+    }
+  };
+
+  const discardPending = (id: string) => {
+    removePendingRead(id);
+    refreshPending();
+  };
+
+  const processOMR = async (dataUrl: string, frames: string[] = [], corners?: [number, number][], page?: number): Promise<boolean> => {
     // Página que está sendo lida: o parâmetro vence o estado (evita corrida
     // quando a captura foi disparada logo após trocar de página).
     const readPage = isCustom ? (page ?? customPage) : 0;
+    const startedAt = Date.now();
+    const reprocessed = reprocessPendingIdRef.current != null;
     // Leitura de página seguinte (página 1 já conferida): mantém o resultado
     // anterior montado para que uma falha volte à revisão, e não ao formulário.
     const isFollowUpPage = isCustom && (customGeom?.nPages ?? 1) > 1 && readPages.size > 0;
@@ -898,7 +963,19 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         setCapturedImage(null);
         setRetryUrl(dataUrl);
         setStep(isFollowUpPage ? 'review' : 'form');
-        return;
+        logOmrTelemetry({
+          userId: userKey,
+          examId: activeExam?.id,
+          template: 'custom',
+          customTemplateId: activeExam?.customTemplateId,
+          page: readPage,
+          success: false,
+          errorKind: 'processing',
+          error: 'cartao_divergente',
+          durationMs: Date.now() - startedAt,
+          reprocessed,
+        });
+        return false;
       }
 
       setOmrResult(result);
@@ -978,19 +1055,121 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         setStageDone(6);
         setRetryUrl(null);
         setStep('review');
+        logOmrTelemetry({
+          userId: userKey,
+          examId: activeExam?.id,
+          template: isCustom ? 'custom' : activeExam?.templateType,
+          customTemplateId: activeExam?.customTemplateId,
+          page: isCustom ? readPage : undefined,
+          success: true,
+          cardId: result.cardId,
+          readCount: Object.keys(result.answers ?? {}).length,
+          blankCount: result.blankQuestions?.length ?? 0,
+          dupCount: result.duplicateQuestions?.length ?? 0,
+          lowCount: result.lowConfidence?.length ?? 0,
+          durationMs: Date.now() - startedAt,
+          reprocessed,
+        });
+        if (reprocessed && reprocessPendingIdRef.current) {
+          removePendingRead(reprocessPendingIdRef.current);
+          reprocessPendingIdRef.current = null;
+          refreshPending();
+          setPendingNotice('Leitura pendente reprocessada com sucesso.');
+        }
+        return true;
       } else {
-        setError(result.error || 'Erro ao processar a imagem');
+        const failure = classifyOmrFailure(result.error || 'Falha na leitura do cartão.');
+        setError(failureMessage(failure));
+        queuePendingRead(dataUrl, isCustom ? readPage : undefined, failure);
+        logOmrTelemetry({
+          userId: userKey,
+          examId: activeExam?.id,
+          template: isCustom ? 'custom' : activeExam?.templateType,
+          customTemplateId: activeExam?.customTemplateId,
+          page: isCustom ? readPage : undefined,
+          success: false,
+          errorKind: failure.kind,
+          error: result.error ?? failure.title,
+          durationMs: Date.now() - startedAt,
+          reprocessed,
+        });
         setCapturedImage(null);
         setRetryUrl(dataUrl); // custom: permite tentar de novo marcando os cantos
         setStep(isFollowUpPage ? 'review' : 'form');
+        return false;
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao processar a imagem. Verifique se o backend Python está rodando.');
+      const failure = classifyOmrFailure(err);
+      setError(failureMessage(failure));
+      queuePendingRead(dataUrl, isCustom ? readPage : undefined, failure);
+      logOmrTelemetry({
+        userId: userKey,
+        examId: activeExam?.id,
+        template: isCustom ? 'custom' : activeExam?.templateType,
+        customTemplateId: activeExam?.customTemplateId,
+        page: isCustom ? readPage : undefined,
+        success: false,
+        errorKind: failure.kind,
+        error: err instanceof Error ? err.message : String(err),
+        durationMs: Date.now() - startedAt,
+        reprocessed,
+      });
       setCapturedImage(null);
       setRetryUrl(dataUrl);
       setStep(isFollowUpPage ? 'review' : 'form');
+      return false;
     }
   };
+
+  // Reprocessa uma captura guardada. Devolve true quando a leitura concluiu.
+  const reprocessPending = async (item: PendingRead): Promise<boolean> => {
+    if (reprocessingRef.current) return false;
+    if (!activeExam || item.examId !== activeExam.id) {
+      setError(`A leitura pendente é da prova "${item.examName ?? item.examId}". Abra essa prova para reprocessar.`);
+      return false;
+    }
+    reprocessingRef.current = true;
+    setReprocessing(true);
+    reprocessPendingIdRef.current = item.id;
+    setPendingNotice(item.page != null
+      ? `Reprocessando a página ${item.page + 1}…`
+      : 'Reprocessando a captura…');
+    if (isCustom && item.page != null) setCustomPage(item.page);
+    try {
+      return await processOMR(item.dataUrl, [], undefined, item.page);
+    } finally {
+      reprocessingRef.current = false;
+      setReprocessing(false);
+      reprocessPendingIdRef.current = null;
+      refreshPending();
+    }
+  };
+
+  const reprocessAllPending = async () => {
+    if (!activeExam) return;
+    const items = loadPendingReads(userKey).filter((i) => i.examId === activeExam.id);
+    for (const item of items) {
+      const ok = await reprocessPending(item);
+      if (!ok) break;
+    }
+  };
+
+  // Ao voltar a conexão, tenta reprocessar a primeira pendência da prova aberta
+  // (somente no formulário, para não interromper uma revisão em andamento).
+  useEffect(() => {
+    onlineRetryRef.current = () => {
+      if (!activeExam || step !== 'form' || reprocessingRef.current) return;
+      const item = loadPendingReads(userKey).find((i) => i.examId === activeExam.id);
+      if (!item) return;
+      setPendingNotice('Conexão restabelecida — reprocessando a leitura pendente…');
+      void reprocessPending(item);
+    };
+  });
+  useEffect(() => {
+    const onOnline = () => onlineRetryRef.current();
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
 
   // Fallback quando o cartão não é lido/detectado: abre a conferência com as
   // respostas em branco para o usuário digitar o gabarito do aluno. O cartão
@@ -1180,6 +1359,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setConfirmUrl(null);
       setSharpRetry(null);
       setRetryUrl(null);
+      setPendingNotice(null);
       resetAuto();
       await startCamera();
     } else {
@@ -1289,6 +1469,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setManualInfo(null);
     setRetryUrl(null);
     setCornerEdit(null);
+    setPendingNotice(null);
     setStep('form');
   };
 
@@ -1691,6 +1872,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
+          {pendingNotice && (
+            <p className="callout-info text-sm" role="status">{pendingNotice}</p>
+          )}
+
           <button
             type="button"
             role="switch"
@@ -1731,6 +1916,68 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               )}
             </div>
           )}
+
+          {pendingReads.length > 0 && (
+            <div className="card space-y-2 border border-amber-400/40">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CloudOff size={16} className="text-amber-600 dark:text-amber-300 shrink-0" aria-hidden />
+                  <h3 className="text-sm font-semibold text-ink dark:text-white truncate">
+                    Leituras pendentes ({pendingReads.length})
+                  </h3>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void reprocessAllPending()}
+                  loading={reprocessing}
+                  disabled={!activeExam || !pendingReads.some((p) => p.examId === activeExam.id)}
+                >
+                  Reprocessar todas
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Capturas que não chegaram ao servidor. Ficam guardadas neste aparelho até serem reprocessadas.
+              </p>
+              <ul className="space-y-2">
+                {pendingReads.map((p) => (
+                  <li key={p.id} className="flex items-center gap-2 rounded-lg bg-surface dark:bg-gray-800/60 p-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-ink dark:text-gray-100 truncate">
+                        {p.examName ?? 'Prova'} · {p.page != null ? `página ${p.page + 1}` : 'captura'}
+                      </p>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                        {new Date(p.createdAt).toLocaleString()} · {p.error}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void reprocessPending(p)}
+                      disabled={reprocessing || !activeExam || p.examId !== activeExam.id}
+                    >
+                      Reprocessar
+                    </Button>
+                    <button
+                      type="button"
+                      onClick={() => discardPending(p.id)}
+                      aria-label="Descartar leitura pendente"
+                      title="Descartar"
+                      className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                    >
+                      <Trash2 size={15} aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {activeExam && pendingReads.some((p) => p.examId !== activeExam.id) && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                  Itens de outra prova só podem ser reprocessados com essa prova aberta.
+                </p>
+              )}
+            </div>
+          )}
+
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}

@@ -34,6 +34,7 @@ import {
 } from '../utils/custom-template-api';
 import type { CustomVersionRow, PrintPreviewResult } from '../utils/custom-template-api';
 import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
+import { pageWarnings } from '../utils/template-warnings';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble';
@@ -389,6 +390,8 @@ function TemplateEditor({
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [imgVersion, setImgVersion] = useState(0);
   const nPages = Math.max(1, config.n_pages ?? 1);
+  // Avisos de completude por página (não bloqueiam salvar/ativar).
+  const warnings = useMemo(() => pageWarnings(config), [config]);
   // Página efetivamente editada (clampada ao número disponível).
   const currentPage = Math.min(pageIdx, nPages - 1);
   const pageMeta = detail.page_images?.find((p) => p.page === currentPage);
@@ -983,6 +986,23 @@ function TemplateEditor({
               Página {currentPage + 1} de {nPages}
               {nPages > 1 ? ' · as regiões editadas pertencem a esta página' : ''}.
             </p>
+            {warnings.length > 0 && (
+              <ul className="space-y-1" aria-label="Avisos do modelo">
+                {warnings.map((w) => (
+                  <li key={`${w.page}-${w.code}`}>
+                    <button
+                      type="button"
+                      onClick={() => { setPageIdx(w.page); setSelection(null); }}
+                      className="flex w-full items-start gap-1.5 rounded-md px-1.5 py-1 text-left text-[11px] text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-500/10"
+                      title="Ir para esta página"
+                    >
+                      <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />
+                      <span>{w.message}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             <input ref={pageImageInputRef} type="file" accept="image/*" hidden
                    onChange={(e) => void handlePageImage(e)} />
             <Button variant="secondary" size="sm" loading={uploadingPageImage}

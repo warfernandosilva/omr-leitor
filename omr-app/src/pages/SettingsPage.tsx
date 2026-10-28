@@ -1,16 +1,20 @@
 import { useRef, useState } from 'react';
 import {
-  Bell, ChevronRight, Database, Download, FileUp, Info, Printer,
-  ScanLine, Table2, TriangleAlert,
+  Activity, Bell, ChevronRight, Database, Download, FileUp, Info, Printer,
+  ScanLine, Table2, Trash2, TriangleAlert,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { AppView } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
-  adminDownloadBackup, adminRestoreBackup, getApiBase,
+  adminDownloadBackup, adminRestoreBackup, getApiBase, saveBlob,
   loadAdaptiveFlag, saveAdaptiveFlag, testConnection,
   type ConnectionTest, type RestoreCounts,
 } from '../utils/api';
+import {
+  clearTelemetryLog, isTelemetryEnabled, readTelemetryLog,
+  setTelemetryEnabled, telemetryCsv,
+} from '../utils/telemetry';
 import { getResults } from '../utils/storage';
 import { pendingFromResults } from '../utils/pending';
 import PageHeader from '../components/ui/PageHeader';
@@ -50,8 +54,38 @@ export default function SettingsPage({ onNavigate }: Props) {
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreCounts, setRestoreCounts] = useState<RestoreCounts | null>(null);
   const [confirmRestore, setConfirmRestore] = useState(false);
+  const [telemetry, setTelemetry] = useState(() => isTelemetryEnabled());
+  const [telemetryCount, setTelemetryCount] = useState(() => readTelemetryLog().length);
+  const [telemetryMsg, setTelemetryMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const pending = pendingFromResults(getResults(undefined, user?.id));
+
+  const toggleTelemetry = (enabled: boolean) => {
+    setTelemetry(enabled);
+    setTelemetryEnabled(enabled);
+    setTelemetryMsg(enabled
+      ? 'Telemetria ligada: as próximas leituras serão registradas neste aparelho.'
+      : 'Telemetria desligada. Os registros existentes continuam aqui até você limpá-los.');
+  };
+
+  const exportTelemetry = () => {
+    const entries = readTelemetryLog();
+    if (!entries.length) {
+      setTelemetryMsg('Não há registros para exportar.');
+      return;
+    }
+    // BOM para o Excel reconhecer UTF-8 nos acentos.
+    const csv = `\uFEFF${telemetryCsv(entries)}`;
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `telemetria-omr-${stamp}.csv`);
+    setTelemetryMsg(`${entries.length} registro(s) exportados.`);
+  };
+
+  const clearTelemetry = () => {
+    clearTelemetryLog();
+    setTelemetryCount(0);
+    setTelemetryMsg('Registros de telemetria apagados.');
+  };
 
   const doDownload = async () => {
     setBackupBusy(true);
@@ -130,6 +164,53 @@ export default function SettingsPage({ onNavigate }: Props) {
           desc={pending.length > 0 ? `${pending.length} revisão(ões) pendente(s) no sino` : 'Revisões pendentes aparecem no sino do cabeçalho'}
           action={<Button size="sm" variant="secondary" onClick={() => onNavigate('pending')} className="min-h-[44px]">Ver fila <ChevronRight size={15} aria-hidden /></Button>}
         />
+      </div>
+
+      <div className="card">
+        <div className="flex items-center gap-2 mb-1">
+          <Activity size={16} className="text-brand-600 dark:text-brand-200" aria-hidden />
+          <h2 className="text-base font-semibold text-ink dark:text-white">Telemetria local (opt-in)</h2>
+        </div>
+        <p className="field-helper">
+          Registra métricas das leituras (acertos, falhas, tempo) <strong>somente neste aparelho</strong>.
+          Nada é enviado para servidores. Desligada por padrão.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 min-h-[44px] cursor-pointer mt-2">
+          <input
+            type="checkbox"
+            checked={telemetry}
+            onChange={e => toggleTelemetry(e.target.checked)}
+            className="w-5 h-5 accent-brand-500"
+            aria-label="Ativar telemetria local das leituras"
+          />
+          Ativar telemetria neste aparelho
+        </label>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {telemetryCount} registro(s) guardado(s){telemetryCount > 0 ? ' (máximo 500)' : ''}.
+        </p>
+        {telemetryMsg && (
+          <p className="callout-info mt-3" role="status">{telemetryMsg}</p>
+        )}
+        <div className="flex flex-col sm:flex-row gap-2 mt-3">
+          <Button
+            variant="secondary"
+            onClick={exportTelemetry}
+            disabled={telemetryCount === 0}
+            icon={<Download size={15} aria-hidden />}
+            className="min-h-[44px] flex-1"
+          >
+            Exportar CSV
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={clearTelemetry}
+            disabled={telemetryCount === 0}
+            icon={<Trash2 size={15} aria-hidden />}
+            className="min-h-[44px] flex-1"
+          >
+            Limpar registros
+          </Button>
+        </div>
       </div>
 
       {isAdmin && (
