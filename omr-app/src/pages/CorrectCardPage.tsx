@@ -31,7 +31,8 @@ import { mergePageAnswers, missingPages } from '../utils/custom-pages';
 import { classifyOmrFailure, failureMessage, type OmrFailure } from '../utils/omr-errors';
 import { logOmrTelemetry } from '../utils/telemetry';
 import {
-  addPendingRead, loadPendingReads, removePendingRead, updatePendingRead, type PendingRead,
+  addPendingRead, loadPendingReads, removePendingRead, removePendingReads, updatePendingRead,
+  type PendingRead,
 } from '../utils/pending-reads';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
@@ -198,6 +199,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [readPages, setReadPages] = useState<Set<number>>(new Set());
   // Capturas que falharam por rede/servidor e ficaram guardadas para reprocessar.
   const [pendingReads, setPendingReads] = useState<PendingRead[]>(() => loadPendingReads(userKey));
+  const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const reprocessingRef = useRef(false);
@@ -293,6 +295,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   }, [userId]);
   // Fila local de leituras pendentes (escopo por usuário do aparelho).
   useEffect(() => { setPendingReads(loadPendingReads(userKey)); }, [userKey]);
+  // Trocar de prova invalida a seleção em lote.
+  useEffect(() => { setSelectedPendingIds(new Set()); }, [selectedExamId]);
   // Cleanup: libera a câmera ao desmontar (navegação pela Sidebar/logout)
   useEffect(() => () => {
     try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
@@ -859,7 +863,30 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   // ─── Fila local de leituras pendentes (rede/servidor fora) ───
-  const refreshPending = () => setPendingReads(loadPendingReads(userKey));
+  const refreshPending = () => {
+    const next = loadPendingReads(userKey);
+    setPendingReads(next);
+    setSelectedPendingIds((prev) => {
+      if (prev.size === 0) return prev;
+      const alive = new Set(next.map((i) => i.id));
+      const kept = [...prev].filter((id) => alive.has(id));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  };
+
+  const togglePendingSelection = (id: string) => {
+    setSelectedPendingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllPending = () => {
+    setSelectedPendingIds((prev) => (
+      prev.size === pendingReads.length ? new Set() : new Set(pendingReads.map((p) => p.id))
+    ));
+  };
 
   const queuePendingRead = (dataUrl: string, page: number | undefined, failure: OmrFailure) => {
     if (!activeExam || !dataUrl.startsWith('data:image')) return;
@@ -900,6 +927,13 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
 
   const discardPending = (id: string) => {
     removePendingRead(id);
+    refreshPending();
+  };
+
+  const discardSelectedPending = () => {
+    if (!selectedPendingIds.size) return;
+    removePendingReads([...selectedPendingIds]);
+    setSelectedPendingIds(new Set());
     refreshPending();
   };
 
@@ -1148,6 +1182,18 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const reprocessAllPending = async () => {
     if (!activeExam) return;
     const items = loadPendingReads(userKey).filter((i) => i.examId === activeExam.id);
+    for (const item of items) {
+      const ok = await reprocessPending(item);
+      if (!ok) break;
+    }
+  };
+
+  const reprocessSelectedPending = async () => {
+    if (!activeExam || !selectedPendingIds.size) return;
+    const items = loadPendingReads(userKey)
+      .filter((i) => selectedPendingIds.has(i.id) && i.examId === activeExam.id);
+    if (!items.length) return;
+    setSelectedPendingIds(new Set());
     for (const item of items) {
       const ok = await reprocessPending(item);
       if (!ok) break;
@@ -1939,9 +1985,35 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Capturas que não chegaram ao servidor. Ficam guardadas neste aparelho até serem reprocessadas.
               </p>
+              <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300 min-h-[32px] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={pendingReads.every((p) => selectedPendingIds.has(p.id))}
+                  onChange={toggleSelectAllPending}
+                  className="w-4 h-4 accent-brand-500"
+                  aria-label="Selecionar todas as leituras pendentes"
+                />
+                Selecionar todos
+                {selectedPendingIds.size > 0 && (
+                  <span className="text-gray-400 dark:text-gray-500">({selectedPendingIds.size} selecionada(s))</span>
+                )}
+              </label>
               <ul className="space-y-2">
                 {pendingReads.map((p) => (
                   <li key={p.id} className="flex items-center gap-2 rounded-lg bg-surface dark:bg-gray-800/60 p-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedPendingIds.has(p.id)}
+                      onChange={() => togglePendingSelection(p.id)}
+                      className="w-4 h-4 shrink-0 accent-brand-500"
+                      aria-label={`Selecionar leitura pendente de ${p.examName ?? p.examId}${p.page != null ? `, página ${p.page + 1}` : ''}`}
+                    />
+                    <img
+                      src={p.dataUrl}
+                      alt=""
+                      loading="lazy"
+                      className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                    />
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-ink dark:text-gray-100 truncate">
                         {p.examName ?? 'Prova'} · {p.page != null ? `página ${p.page + 1}` : 'captura'}
@@ -1950,14 +2022,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                         {new Date(p.createdAt).toLocaleString()} · {p.error}
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="secondary"
+                    <button
+                      type="button"
                       onClick={() => void reprocessPending(p)}
                       disabled={reprocessing || !activeExam || p.examId !== activeExam.id}
+                      aria-label="Reprocessar leitura pendente"
+                      title="Reprocessar"
+                      className="inline-flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-50 dark:hover:bg-gray-700"
                     >
-                      Reprocessar
-                    </Button>
+                      <RefreshCw size={15} aria-hidden />
+                    </button>
                     <button
                       type="button"
                       onClick={() => discardPending(p.id)}
@@ -1970,6 +2044,29 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   </li>
                 ))}
               </ul>
+              {selectedPendingIds.size > 0 && (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void reprocessSelectedPending()}
+                    loading={reprocessing}
+                    disabled={!activeExam || !pendingReads.some((p) => selectedPendingIds.has(p.id) && p.examId === activeExam.id)}
+                    className="flex-1"
+                  >
+                    Reprocessar selecionados
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={discardSelectedPending}
+                    disabled={reprocessing}
+                    className="flex-1"
+                  >
+                    Descartar selecionados
+                  </Button>
+                </div>
+              )}
               {activeExam && pendingReads.some((p) => p.examId !== activeExam.id) && (
                 <p className="text-[11px] text-amber-600 dark:text-amber-400">
                   Itens de outra prova só podem ser reprocessados com essa prova aberta.

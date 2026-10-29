@@ -112,6 +112,17 @@ export function removePendingRead(id: string): void {
   }
 }
 
+/** Remove vários itens com uma única gravação no localStorage. */
+export function removePendingReads(ids: string[]): void {
+  if (!ids.length) return;
+  const drop = new Set(ids);
+  try {
+    writeAll(readAll().filter((i) => !drop.has(i.id)));
+  } catch {
+    // ignore
+  }
+}
+
 export function clearPendingReads(userId?: string): void {
   try {
     if (userId == null) {

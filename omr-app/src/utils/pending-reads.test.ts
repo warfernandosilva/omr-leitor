@@ -5,6 +5,7 @@ import {
   clearPendingReads,
   loadPendingReads,
   removePendingRead,
+  removePendingReads,
   updatePendingRead,
 } from './pending-reads';
 
@@ -67,6 +68,26 @@ describe('fila de leituras pendentes', () => {
     expect(loadPendingReads('b')).toHaveLength(1);
     clearPendingReads('b');
     expect(loadPendingReads()).toEqual([]);
+  });
+
+  it('remove vários itens de uma vez', () => {
+    const a = addPendingRead({ ...base, userId: 'a', page: 0 });
+    const b = addPendingRead({ ...base, userId: 'a', page: 1 });
+    const c = addPendingRead({ ...base, userId: 'a', page: 2 });
+    if (!a.ok || !b.ok || !c.ok) throw new Error('esperava sucesso');
+    removePendingReads([a.item.id, c.item.id]);
+    const left = loadPendingReads('a');
+    expect(left).toHaveLength(1);
+    expect(left[0].id).toBe(b.item.id);
+  });
+
+  it('ignora ids inexistentes e lista vazia', () => {
+    const a = addPendingRead(base);
+    if (!a.ok) throw new Error('esperava sucesso');
+    removePendingReads(['nao-existe']);
+    expect(loadPendingReads()).toHaveLength(1);
+    removePendingReads([]);
+    expect(loadPendingReads()).toHaveLength(1);
   });
 
   it('informa cota quando o navegador recusa a gravação', () => {
