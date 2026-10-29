@@ -27,7 +27,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 from collections import deque
@@ -40,6 +40,7 @@ import time as _time
 from database import DB_LABEL, SessionLocal, get_db, init_db
 from models import Aluno, Avaliacao, DeletedExam, GabaritoNomeado, Turma, TurmaAluno, User
 import auth
+import ai_assist
 
 logger = logging.getLogger("omr")
 
@@ -292,6 +293,40 @@ def _next_codigo(db: Session) -> str:
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": "2.0.0", "db": DB_LABEL}
+
+
+# ─── Assistente de correção local (Ollama) ───────────────────────────────
+class AiAssistRequest(BaseModel):
+    image: str                      # recorte da questão em data URL
+    question: int
+    options: list[str] = Field(default_factory=lambda: ["A", "B", "C", "D"])
+    ratios: dict[str, float] | None = None
+    context: dict | None = None     # {duplicate, blank, low_confidence, marks}
+
+
+@app.get("/api/ai/status")
+def ai_status(current_user: User = Depends(auth.get_current_user)):
+    """Detecta o Ollama local e se o modelo configurado está instalado."""
+    return ai_assist.status()
+
+
+@app.post("/api/ai/assist")
+def ai_assist_correction(req: AiAssistRequest,
+                         current_user: User = Depends(auth.get_current_user)):
+    """Sugere a alternativa marcada em uma questão duvidosa (nunca aplica)."""
+    try:
+        return ai_assist.assist(
+            image=req.image,
+            question=req.question,
+            options=req.options,
+            ratios=req.ratios,
+            context=req.context,
+        )
+    except ai_assist.AiAssistError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - a revisão nunca quebra por IA
+        logger.warning("ai assist falhou: %s", exc)
+        return {"ok": False, "error": "Falha inesperada no assistente local."}
 
 
 @app.get("/api/ops/stats")

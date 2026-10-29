@@ -34,12 +34,17 @@ import {
   addPendingRead, loadPendingReads, removePendingRead, removePendingReads, updatePendingRead,
   type PendingRead,
 } from '../utils/pending-reads';
+import {
+  getAiStatus, isAiAssistEnabled, suggestCorrection, type AiStatus, type AiSuggestion,
+} from '../utils/ai-assist';
+import { cropRegions, type NormBox } from '../utils/ai-crop';
+import { questionBubbleBoxes } from '../utils/ai-bubbles';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 import {
-  ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudOff, Eye, Flashlight, FlashlightOff, Focus,
+  ArrowLeft, ArrowRight, Bot, Camera, CheckCircle2, CloudOff, Eye, Flashlight, FlashlightOff, Focus,
   ImagePlus, ImageUp, Info, PenLine, Play, RefreshCw, RotateCcw, Save,
   SlidersHorizontal, Sun, SwitchCamera, Trash2, X, ZoomIn,
 } from 'lucide-react';
@@ -201,6 +206,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [pendingReads, setPendingReads] = useState<PendingRead[]>(() => loadPendingReads(userKey));
   const [selectedPendingIds, setSelectedPendingIds] = useState<Set<string>>(new Set());
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
+  // Assistente IA local (opt-in): sugestões por questão, nunca aplicadas sozinhas.
+  const [aiEnabled] = useState(() => isAiAssistEnabled());
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [aiSuggestions, setAiSuggestions] = useState<Record<number, AiSuggestion>>({});
+  const [aiLoading, setAiLoading] = useState<number | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const reprocessingRef = useRef(false);
   const reprocessPendingIdRef = useRef<string | null>(null);
@@ -297,6 +308,17 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   useEffect(() => { setPendingReads(loadPendingReads(userKey)); }, [userKey]);
   // Trocar de prova invalida a seleção em lote.
   useEffect(() => { setSelectedPendingIds(new Set()); }, [selectedExamId]);
+  // IA local: checa o Ollama ao entrar na revisão (só se o usuário ligou).
+  useEffect(() => {
+    if (!aiEnabled || step !== 'review') return;
+    let alive = true;
+    getAiStatus()
+      .then((s) => { if (alive) setAiStatus(s); })
+      .catch(() => { if (alive) setAiStatus(null); });
+    return () => { alive = false; };
+  }, [aiEnabled, step]);
+  // Nova leitura invalida sugestões da leitura anterior.
+  useEffect(() => { setAiSuggestions({}); setAiError(null); }, [omrResult]);
   // Cleanup: libera a câmera ao desmontar (navegação pela Sidebar/logout)
   useEffect(() => () => {
     try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
@@ -1262,6 +1284,97 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       } else {
         next[question] = answer;
       }
+      return next;
+    });
+  };
+
+  // ─── Assistente IA local (Ollama) ───
+  // Caixas normalizadas das bolhas A–D da questão na imagem retificada.
+  const bubbleBoxesForQuestion = (q: number): NormBox[] => {
+    if (!activeExam) return [];
+    if (overlayCustom) {
+      return questionBubbleBoxes('custom', null, q, overlayPageGeom);
+    }
+    const model = overlaySae ? 'sae'
+      : overlaySaev ? 'saev'
+      : overlayHerby ? 'herby'
+      : overlaySimulado ? 'simulado'
+      : 'padrao';
+    return questionBubbleBoxes(model, activeExam, q);
+  };
+
+  // Questões que merecem ajuda: baixa confiança, duplicadas ou em branco,
+  // ainda sem resposta manual. Depois de aplicar/editar, saem da lista.
+  // No Gabarito Personalizado multi-página só entram as questões da página
+  // exibida: a imagem retificada é a da última página lida.
+  const doubtfulQuestions = useMemo(() => {
+    if (!omrResult) return [] as number[];
+    const set = new Set<number>();
+    for (const q of omrResult.lowConfidence ?? []) set.add(q);
+    for (const q of omrResult.duplicateQuestions ?? []) set.add(q);
+    for (const q of omrResult.blankQuestions ?? []) set.add(q);
+    const pageQuestions = overlayCustom && (customGeom?.nPages ?? 1) > 1 && overlayPageGeom
+      ? new Set(overlayPageGeom.bubbles.map((b) => b.question))
+      : null;
+    return [...set]
+      .filter((q) => !manualAnswers[q])
+      .filter((q) => !pageQuestions || pageQuestions.has(q))
+      .sort((a, b) => a - b);
+  }, [omrResult, manualAnswers, overlayCustom, customGeom, overlayPageGeom]);
+
+  const runAiSuggestion = async (q: number) => {
+    if (!omrResult) return;
+    const image = omrResult.rectifiedImage;
+    if (!image) {
+      setAiError('A imagem retificada não está disponível para esta leitura.');
+      return;
+    }
+    const boxes = bubbleBoxesForQuestion(q);
+    if (!boxes.length) {
+      setAiError(overlayCustom
+        ? 'Esta questão não está na página exibida. Abra a página dela para usar o assistente.'
+        : 'Não foi possível localizar as bolhas desta questão neste modelo.');
+      return;
+    }
+    setAiLoading(q);
+    setAiError(null);
+    try {
+      const crop = await cropRegions(image, boxes);
+      const marks = omrResult.duplicateMarks?.[q];
+      const suggestion = await suggestCorrection({
+        image: crop,
+        question: q,
+        options: ['A', 'B', 'C', 'D'],
+        ratios: omrResult.allRatios?.[q] ?? null,
+        context: {
+          low_confidence: (omrResult.lowConfidence ?? []).includes(q),
+          duplicate: (omrResult.duplicateQuestions ?? []).includes(q),
+          blank: (omrResult.blankQuestions ?? []).includes(q),
+          marks,
+        },
+      });
+      setAiSuggestions((prev) => ({ ...prev, [q]: suggestion }));
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Falha ao consultar o assistente local.');
+    } finally {
+      setAiLoading(null);
+    }
+  };
+
+  const applyAiSuggestion = (q: number, answer: string) => {
+    if (!/^[ABCD]$/.test(answer)) return;
+    setManualAnswers((prev) => ({ ...prev, [q]: answer }));
+    setAiSuggestions((prev) => {
+      const next = { ...prev };
+      delete next[q];
+      return next;
+    });
+  };
+
+  const ignoreAiSuggestion = (q: number) => {
+    setAiSuggestions((prev) => {
+      const next = { ...prev };
+      delete next[q];
       return next;
     });
   };
@@ -3167,6 +3280,91 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 return `Q${q}${marks?.length ? ` (${marks.join(' e ')})` : ''}`;
               }).join(', ')}{' '}
               — contadas como <strong>erro</strong>. Se necessário, corrija manualmente clicando na alternativa correta.
+            </div>
+          )}
+
+          {aiEnabled && !manualEntry && aiStatus && !aiStatus.available && (
+            <div className="callout-warning text-sm" role="status">
+              <strong>Assistente IA ligado, mas o Ollama não está disponível.</strong>{' '}
+              {aiStatus.error || 'Instale/abra o Ollama neste computador para receber sugestões.'}
+            </div>
+          )}
+
+          {aiEnabled && aiStatus?.available && !manualEntry && doubtfulQuestions.length > 0 && (
+            <div className="card space-y-3">
+              <div className="flex items-center gap-2">
+                <Bot size={16} className="text-brand-600 dark:text-brand-200 shrink-0" aria-hidden />
+                <h3 className="text-sm font-semibold text-ink dark:text-white">Assistente IA local</h3>
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Ollama · {aiStatus.model}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Sugestões geradas neste computador a partir do recorte de cada questão.
+                <strong> Revise antes de aplicar</strong> — nada é salvo automaticamente.
+              </p>
+              {aiError && (
+                <p className="callout-info text-xs" role="status">{aiError}</p>
+              )}
+              <ul className="space-y-2">
+                {doubtfulQuestions.map((q) => {
+                  const low = (omrResult.lowConfidence ?? []).includes(q);
+                  const dup = (omrResult.duplicateQuestions ?? []).includes(q);
+                  const blank = (omrResult.blankQuestions ?? []).includes(q);
+                  const marks = omrResult.duplicateMarks?.[q];
+                  const reasons = [
+                    low ? 'baixa confiança' : '',
+                    dup ? 'duplicada' : '',
+                    blank ? 'em branco' : '',
+                  ].filter(Boolean).join(' · ');
+                  const s = aiSuggestions[q];
+                  return (
+                    <li key={q} className="rounded-lg bg-surface dark:bg-gray-800/60 p-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-ink dark:text-gray-100">Q{q}</span>
+                        <span className="text-[11px] text-amber-700 dark:text-amber-300 truncate">
+                          {reasons}
+                          {marks?.length ? ` (${marks.join(' + ')})` : ''}
+                        </span>
+                        <span className="flex-1" />
+                        {!s && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            loading={aiLoading === q}
+                            disabled={aiLoading != null && aiLoading !== q}
+                            onClick={() => void runAiSuggestion(q)}
+                          >
+                            Sugerir
+                          </Button>
+                        )}
+                      </div>
+                      {s && (
+                        <div className="rounded-lg border border-line dark:border-gray-700 bg-white dark:bg-gray-900 p-2 space-y-1.5">
+                          <p className="text-sm text-ink dark:text-gray-100">
+                            Sugestão:{' '}
+                            <strong>{s.suggestion === 'VAZIO' ? 'em branco' : (s.suggestion ?? 'sem sugestão')}</strong>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">
+                              {' '}· confiança {Math.round(s.confidence * 100)}%
+                            </span>
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-400">{s.reason}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {s.suggestion && /^[ABCD]$/.test(s.suggestion) && (
+                              <Button size="sm" onClick={() => applyAiSuggestion(q, s.suggestion as string)}>
+                                Aplicar {s.suggestion}
+                              </Button>
+                            )}
+                            <Button size="sm" variant="secondary" onClick={() => ignoreAiSuggestion(q)}>
+                              Ignorar
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 

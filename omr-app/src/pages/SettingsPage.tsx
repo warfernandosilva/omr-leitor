@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import {
-  Activity, Bell, ChevronRight, Database, Download, FileUp, Info, Printer,
+  Activity, Bell, Bot, ChevronRight, Database, Download, FileUp, Info, Printer,
   ScanLine, Table2, Trash2, TriangleAlert,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -15,6 +15,9 @@ import {
   clearTelemetryLog, isTelemetryEnabled, readTelemetryLog,
   setTelemetryEnabled, telemetryCsv,
 } from '../utils/telemetry';
+import {
+  getAiStatus, isAiAssistEnabled, setAiAssistEnabled, type AiStatus,
+} from '../utils/ai-assist';
 import { getResults } from '../utils/storage';
 import { pendingFromResults } from '../utils/pending';
 import PageHeader from '../components/ui/PageHeader';
@@ -57,6 +60,9 @@ export default function SettingsPage({ onNavigate }: Props) {
   const [telemetry, setTelemetry] = useState(() => isTelemetryEnabled());
   const [telemetryCount, setTelemetryCount] = useState(() => readTelemetryLog().length);
   const [telemetryMsg, setTelemetryMsg] = useState<string | null>(null);
+  const [aiEnabled, setAiEnabled] = useState(() => isAiAssistEnabled());
+  const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
+  const [aiTesting, setAiTesting] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const pending = pendingFromResults(getResults(undefined, user?.id));
 
@@ -85,6 +91,23 @@ export default function SettingsPage({ onNavigate }: Props) {
     clearTelemetryLog();
     setTelemetryCount(0);
     setTelemetryMsg('Registros de telemetria apagados.');
+  };
+
+  const testAi = async () => {
+    setAiTesting(true);
+    try {
+      setAiStatus(await getAiStatus());
+    } catch (err) {
+      setAiStatus({
+        available: false,
+        url: '',
+        model: '',
+        models: [],
+        error: err instanceof Error ? err.message : 'Falha ao falar com o backend.',
+      });
+    } finally {
+      setAiTesting(false);
+    }
   };
 
   const doDownload = async () => {
@@ -211,6 +234,48 @@ export default function SettingsPage({ onNavigate }: Props) {
             Limpar registros
           </Button>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="flex items-center gap-2 mb-1">
+          <Bot size={16} className="text-brand-600 dark:text-brand-200" aria-hidden />
+          <h2 className="text-base font-semibold text-ink dark:text-white">Assistente IA local (opt-in)</h2>
+        </div>
+        <p className="field-helper">
+          Sugere a alternativa marcada em questões duvidosas usando um modelo de visão
+          no <strong>Ollama deste computador</strong>. Nada sai do aparelho. Desligado por padrão.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 min-h-[44px] cursor-pointer mt-2">
+          <input
+            type="checkbox"
+            checked={aiEnabled}
+            onChange={e => { setAiEnabled(e.target.checked); setAiAssistEnabled(e.target.checked); }}
+            className="w-5 h-5 accent-brand-500"
+            aria-label="Ativar assistente de correção com IA local"
+          />
+          Ativar assistente IA na revisão
+        </label>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          {aiStatus
+            ? (aiStatus.available
+              ? `Ollama disponível · modelo ${aiStatus.model}`
+              : `Ollama indisponível${aiStatus.model ? ` · modelo ${aiStatus.model}` : ''}`)
+            : 'Status do Ollama ainda não verificado.'}
+        </p>
+        {aiStatus && !aiStatus.available && (
+          <p className="callout-info mt-3" role="status">
+            {aiStatus.error || 'Ollama não detectado.'}
+          </p>
+        )}
+        <Button
+          variant="secondary"
+          onClick={testAi}
+          loading={aiTesting}
+          icon={<Bot size={15} aria-hidden />}
+          className="mt-3 min-h-[44px]"
+        >
+          Testar Ollama
+        </Button>
       </div>
 
       {isAdmin && (
