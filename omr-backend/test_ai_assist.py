@@ -24,6 +24,53 @@ def test_status_devolve_modelo(authed, monkeypatch):
     assert body["model"] == "moondream"
 
 
+def _fake_tags(monkeypatch, names: list[str]):
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"models": [{"name": n} for n in names]}
+
+    class FakeClient:
+        def __init__(self, *a, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url):
+            return FakeResponse()
+
+    monkeypatch.setattr(ai_assist.httpx, "Client", FakeClient)
+
+
+def test_status_avisa_modelo_de_leitura_faltando(monkeypatch):
+    _fake_tags(monkeypatch, ["qwen2.5vl:7b"])
+    monkeypatch.setattr(ai_assist, "OLLAMA_MODEL", "qwen2.5vl:7b")
+    monkeypatch.setattr(ai_assist, "OLLAMA_READ_MODEL", "moondream")
+
+    body = ai_assist.status()
+    assert body["available"] is True
+    assert body["error"] is None
+    assert body["read_model"] == "moondream"
+    assert body["read_available"] is False
+    assert "ollama pull moondream" in body["read_error"]
+
+
+def test_status_com_os_dois_modelos(monkeypatch):
+    _fake_tags(monkeypatch, ["moondream:latest", "qwen2.5vl:7b"])
+    monkeypatch.setattr(ai_assist, "OLLAMA_MODEL", "moondream")
+    monkeypatch.setattr(ai_assist, "OLLAMA_READ_MODEL", "qwen2.5vl:7b")
+
+    body = ai_assist.status()
+    assert body["available"] is True and body["read_available"] is True
+    assert body["error"] is None and body["read_error"] is None
+
+
 def test_assist_sugere_letra_do_modelo(authed, monkeypatch):
     monkeypatch.setattr(ai_assist, "_call_ollama", lambda image, prompt: "B")
     res = authed.post("/api/ai/assist", json={

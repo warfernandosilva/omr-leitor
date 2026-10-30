@@ -15,6 +15,10 @@ export interface AiStatus {
   model: string;
   models: string[];
   error?: string | null;
+  /** Modelo da leitura da folha inteira (OLLAMA_READ_MODEL). */
+  read_model?: string;
+  read_available?: boolean;
+  read_error?: string | null;
 }
 
 export interface AiSuggestion {

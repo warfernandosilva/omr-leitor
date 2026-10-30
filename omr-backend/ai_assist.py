@@ -63,9 +63,18 @@ def _friendly_http_error(exc: Exception) -> str:
     return f"Falha ao falar com o Ollama: {exc}"
 
 
+def _missing_model(model: str) -> str:
+    return f"Modelo '{model}' não instalado. Rode: ollama pull {model}"
+
+
 def status() -> dict:
-    """Detecta se o Ollama está acessível e se o modelo configurado existe."""
-    base = {"url": OLLAMA_URL, "model": OLLAMA_MODEL}
+    """Detecta se o Ollama está acessível e se os modelos configurados existem.
+
+    Valida os DOIS modelos: o do assistente por questão e o da leitura da folha
+    inteira. Sem isso o usuário só descobriria o modelo de leitura faltando ao
+    clicar em "Corrigir tudo com IA".
+    """
+    base = {"url": OLLAMA_URL, "model": OLLAMA_MODEL, "read_model": OLLAMA_READ_MODEL}
     try:
         with httpx.Client(timeout=3.0) as client:
             res = client.get(f"{OLLAMA_URL}/api/tags")
@@ -76,14 +85,23 @@ def status() -> dict:
                 if m.get("name")
             ]
     except Exception as exc:  # noqa: BLE001 - status nunca deve derrubar a API
-        return {**base, "available": False, "models": [], "error": _friendly_http_error(exc)}
+        return {
+            **base,
+            "available": False,
+            "models": [],
+            "error": _friendly_http_error(exc),
+            "read_available": False,
+            "read_error": None,
+        }
+    model_ok = any(_same_model(m, OLLAMA_MODEL) for m in models)
+    read_ok = any(_same_model(m, OLLAMA_READ_MODEL) for m in models)
     return {
         **base,
-        "available": any(_same_model(m, OLLAMA_MODEL) for m in models),
+        "available": model_ok,
         "models": models,
-        "error": None
-        if any(_same_model(m, OLLAMA_MODEL) for m in models)
-        else f"Modelo '{OLLAMA_MODEL}' não instalado. Rode: ollama pull {OLLAMA_MODEL}",
+        "error": None if model_ok else _missing_model(OLLAMA_MODEL),
+        "read_available": read_ok,
+        "read_error": None if read_ok else _missing_model(OLLAMA_READ_MODEL),
     }
 
 

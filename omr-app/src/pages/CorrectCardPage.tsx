@@ -3371,7 +3371,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   <Button
                     size="sm"
                     loading={aiReading}
-                    disabled={aiReading || pageQuestionList.length === 0}
+                    disabled={aiReading || pageQuestionList.length === 0
+                      || aiStatus.read_available === false}
                     icon={<Bot size={15} aria-hidden />}
                     onClick={() => void runAiReadAll()}
                   >
@@ -3382,6 +3383,11 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                     {aiSheet ? ` · ${aiSheet.model}` : ''}
                   </span>
                 </div>
+                {aiStatus.read_available === false && aiStatus.read_error && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-300" role="status">
+                    Leitura da folha inteira indisponível. {aiStatus.read_error}
+                  </p>
+                )}
                 {aiSheet && (
                   <div className="space-y-2">
                     <p className="text-xs text-ink dark:text-gray-200">
