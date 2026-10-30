@@ -3,6 +3,7 @@ import {
   AI_ENABLED_KEY,
   getAiStatus,
   isAiAssistEnabled,
+  readSheetWithAi,
   setAiAssistEnabled,
   suggestCorrection,
 } from './ai-assist';
@@ -72,5 +73,28 @@ describe('suggestCorrection', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ detail: 'boom' }, 500));
     await expect(suggestCorrection({ image: 'data:image/jpeg;base64,AA', question: 1 }))
       .rejects.toThrow();
+  });
+});
+
+describe('readSheetWithAi', () => {
+  it('envia a folha e devolve as respostas', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      ok: true, answers: { '1': 'A', '2': 'C' }, missing: [3], model: 'qwen2.5vl',
+    }));
+    const r = await readSheetWithAi({
+      image: 'data:image/jpeg;base64,AA', questions: [1, 2, 3],
+    });
+    expect(r.answers).toEqual({ '1': 'A', '2': 'C' });
+    expect(r.missing).toEqual([3]);
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body.questions).toEqual([1, 2, 3]);
+  });
+
+  it('transforma falha do modelo em Error amigável', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({
+      ok: false, error: 'Modelo não instalado.',
+    }));
+    await expect(readSheetWithAi({ image: 'data:image/jpeg;base64,AA', questions: [1] }))
+      .rejects.toThrow('Modelo não instalado.');
   });
 });

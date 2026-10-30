@@ -82,3 +82,46 @@ export function cropRegions(
     img.src = dataUrl;
   });
 }
+
+/** Tamanho da folha depois de limitar o lado maior (nunca amplia). */
+export function scaledSize(width: number, height: number, maxSide: number): { width: number; height: number } {
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+/**
+ * Compacta a folha inteira (data URL) para o modelo ler as respostas.
+ * 1600 px no lado maior mantém a linha da questão legível; JPEG q0.8
+ * fica em ~300 KB, bem abaixo do limite de 4 MB do backend.
+ */
+export function compressSheet(
+  dataUrl: string,
+  maxSide = 1600,
+  quality = 0.8,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const size = scaledSize(img.width, img.height, maxSide);
+        const canvas = document.createElement('canvas');
+        canvas.width = size.width;
+        canvas.height = size.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('Canvas indisponível para compactar a imagem.'));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, size.width, size.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error('Falha ao compactar a imagem.'));
+      }
+    };
+    img.onerror = () => reject(new Error('Falha ao carregar a imagem retificada.'));
+    img.src = dataUrl;
+  });
+}

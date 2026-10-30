@@ -78,3 +78,72 @@ def test_parse_choice():
     assert ai_assist._parse_choice("em branco", ["A", "B", "C", "D"]) == "VAZIO"
     assert ai_assist._parse_choice("E", ["A", "B", "C", "D"]) is None
     assert ai_assist._parse_choice("", ["A", "B", "C", "D"]) is None
+
+
+# ---------------------------------------------------------------------------
+# Leitura da folha inteira (/api/ai/read)
+# ---------------------------------------------------------------------------
+
+def test_read_sheet_devolve_respostas(authed, monkeypatch):
+    calls = {}
+
+    def fake(image, prompt, **kw):
+        calls.update(kw, prompt=prompt)
+        return '```json\n{"1": "A", "2": "C", "3": "VAZIO"}\n```'
+
+    monkeypatch.setattr(ai_assist, "_call_ollama", fake)
+    res = authed.post("/api/ai/read", json={
+        "image": PNG, "questions": [1, 2, 3], "options": ["A", "B", "C", "D"],
+    })
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    assert body["answers"] == {"1": "A", "2": "C", "3": "VAZIO"}
+    assert body["missing"] == []
+    # JSON estrito + folga de tokens proporcional ao nº de questões
+    assert calls["json_mode"] is True
+    assert calls["num_predict"] > 16
+    assert "1, 2, 3" in calls["prompt"]
+    assert body["model"] == ai_assist.OLLAMA_READ_MODEL
+
+
+def test_read_sheet_descarta_invalida_e_marca_faltante(authed, monkeypatch):
+    monkeypatch.setattr(
+        ai_assist, "_call_ollama",
+        lambda image, prompt, **kw: '{"1": "E", "2": "b", "9": "A"}',
+    )
+    body = authed.post("/api/ai/read", json={
+        "image": PNG, "questions": [1, 2, 3],
+    }).json()
+    # "E" não é opção e a Q9 não existe nesta folha
+    assert body["answers"] == {"2": "B"}
+    assert body["missing"] == [1, 3]
+
+
+def test_read_sheet_aceita_answers_aninhado_e_lista(authed, monkeypatch):
+    monkeypatch.setattr(
+        ai_assist, "_call_ollama",
+        lambda image, prompt, **kw: '{"answers": ["A", "D"]}',
+    )
+    body = authed.post("/api/ai/read", json={
+        "image": PNG, "questions": [4, 5],
+    }).json()
+    assert body["answers"] == {"4": "A", "5": "D"}
+
+
+def test_read_sheet_recusa_imagem_invalida_e_lista_vazia(authed):
+    body = authed.post("/api/ai/read", json={
+        "image": "nao-e-imagem", "questions": [1],
+    }).json()
+    assert body["ok"] is False and "Imagem inválida" in body["error"]
+
+    body = authed.post("/api/ai/read", json={
+        "image": PNG, "questions": [],
+    }).json()
+    assert body["ok"] is False and "Nenhuma questão" in body["error"]
+
+
+def test_parse_answers_tolera_lixo():
+    assert ai_assist._parse_answers("não sei", [1, 2], ["A", "B"]) == {}
+    assert ai_assist._parse_answers('{"x": "A"}', [1], ["A", "B"]) == {}
+    assert ai_assist._parse_answers('{"1": "A"}', [1], ["A", "B"]) == {"1": "A"}

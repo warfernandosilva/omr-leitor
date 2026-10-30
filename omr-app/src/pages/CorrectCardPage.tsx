@@ -35,9 +35,10 @@ import {
   type PendingRead,
 } from '../utils/pending-reads';
 import {
-  getAiStatus, isAiAssistEnabled, suggestCorrection, type AiStatus, type AiSuggestion,
+  getAiStatus, isAiAssistEnabled, readSheetWithAi, suggestCorrection,
+  type AiSheetResult, type AiStatus, type AiSuggestion,
 } from '../utils/ai-assist';
-import { cropRegions, type NormBox } from '../utils/ai-crop';
+import { compressSheet, cropRegions, type NormBox } from '../utils/ai-crop';
 import { questionBubbleBoxes } from '../utils/ai-bubbles';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
@@ -211,6 +212,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, AiSuggestion>>({});
   const [aiLoading, setAiLoading] = useState<number | null>(null);
+  const [aiReading, setAiReading] = useState(false);
+  const [aiSheet, setAiSheet] = useState<AiSheetResult | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const reprocessingRef = useRef(false);
@@ -318,7 +321,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     return () => { alive = false; };
   }, [aiEnabled, step]);
   // Nova leitura invalida sugestões da leitura anterior.
-  useEffect(() => { setAiSuggestions({}); setAiError(null); }, [omrResult]);
+  useEffect(() => { setAiSuggestions({}); setAiSheet(null); setAiError(null); }, [omrResult]);
   // Cleanup: libera a câmera ao desmontar (navegação pela Sidebar/logout)
   useEffect(() => () => {
     try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
@@ -1321,6 +1324,62 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       .filter((q) => !pageQuestions || pageQuestions.has(q))
       .sort((a, b) => a - b);
   }, [omrResult, manualAnswers, overlayCustom, customGeom, overlayPageGeom]);
+
+  // Questões que existem na imagem exibida — a leitura por IA vê só esta folha.
+  const pageQuestionList = useMemo(() => {
+    if (!omrResult) return [] as number[];
+    const qs = overlayCustom && (customGeom?.nPages ?? 1) > 1 && overlayPageGeom
+      ? overlayPageGeom.bubbles.map((b) => b.question)
+      : Object.keys(omrResult.allRatios ?? {}).map(Number);
+    return [...new Set(qs)].filter((q) => Number.isFinite(q) && q > 0).sort((a, b) => a - b);
+  }, [omrResult, overlayCustom, customGeom, overlayPageGeom]);
+
+  // Divergências IA × OMR — só informativo; nada é aplicado sozinho.
+  const aiDivergences = useMemo(() => {
+    if (!aiSheet) return [] as { q: number; omr: string; ai: string }[];
+    return Object.entries(aiSheet.answers)
+      .filter(([, a]) => /^[ABCD]$/.test(a))
+      .map(([q, a]) => ({ q: Number(q), omr: omrResult?.answers?.[Number(q)] ?? '', ai: a }))
+      .filter((d) => d.omr !== d.ai)
+      .sort((x, y) => x.q - y.q);
+  }, [aiSheet, omrResult]);
+
+  // Corrige a folha inteira com o modelo local. Só preenche a conferência:
+  // aplicar continua sendo decisão do usuário, e salvar também.
+  const runAiReadAll = async () => {
+    if (!omrResult) return;
+    const image = omrResult.rectifiedImage;
+    if (!image) {
+      setAiError('A imagem retificada não está disponível para esta leitura.');
+      return;
+    }
+    if (!pageQuestionList.length) {
+      setAiError('Não há questões para ler nesta folha.');
+      return;
+    }
+    setAiReading(true);
+    setAiError(null);
+    try {
+      const compressed = await compressSheet(image);
+      setAiSheet(await readSheetWithAi({ image: compressed, questions: pageQuestionList }));
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Falha na leitura por IA.');
+    } finally {
+      setAiReading(false);
+    }
+  };
+
+  const applyAiSheet = () => {
+    if (!aiSheet) return;
+    const letters = Object.entries(aiSheet.answers).filter(([, a]) => /^[ABCD]$/.test(a));
+    if (!letters.length) return;
+    setManualAnswers((prev) => {
+      const next = { ...prev };
+      for (const [q, a] of letters) next[Number(q)] = a;
+      return next;
+    });
+    setAiSheet(null);
+  };
 
   const runAiSuggestion = async (q: number) => {
     if (!omrResult) return;
@@ -3290,7 +3349,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
-          {aiEnabled && aiStatus?.available && !manualEntry && doubtfulQuestions.length > 0 && (
+          {aiEnabled && aiStatus?.available && !manualEntry && (
             <div className="card space-y-3">
               <div className="flex items-center gap-2">
                 <Bot size={16} className="text-brand-600 dark:text-brand-200 shrink-0" aria-hidden />
@@ -3300,12 +3359,60 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 </span>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Sugestões geradas neste computador a partir do recorte de cada questão.
-                <strong> Revise antes de aplicar</strong> — nada é salvo automaticamente.
+                Gerado neste computador. <strong>Revise antes de aplicar</strong> — nada é salvo
+                automaticamente.
               </p>
               {aiError && (
                 <p className="callout-info text-xs" role="status">{aiError}</p>
               )}
+
+              <div className="rounded-lg border border-line dark:border-gray-700 p-2 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    loading={aiReading}
+                    disabled={aiReading || pageQuestionList.length === 0}
+                    icon={<Bot size={15} aria-hidden />}
+                    onClick={() => void runAiReadAll()}
+                  >
+                    {aiReading ? 'Lendo a folha…' : 'Corrigir tudo com IA'}
+                  </Button>
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    {pageQuestionList.length} questão(ões) nesta folha
+                    {aiSheet ? ` · ${aiSheet.model}` : ''}
+                  </span>
+                </div>
+                {aiSheet && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-ink dark:text-gray-200">
+                      IA leu <strong>{Object.keys(aiSheet.answers).length}</strong> de{' '}
+                      {pageQuestionList.length}
+                      {aiSheet.missing.length > 0 && (
+                        <> · sem resposta: {aiSheet.missing.map((q) => `Q${q}`).join(', ')}</>
+                      )}
+                      {aiDivergences.length > 0 && (
+                        <> · <strong>{aiDivergences.length} divergem do OMR</strong></>
+                      )}
+                    </p>
+                    {aiDivergences.length > 0 && (
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        {aiDivergences.slice(0, 8)
+                          .map((d) => `Q${d.q}: OMR ${d.omr || '—'} → IA ${d.ai}`)
+                          .join(' · ')}
+                        {aiDivergences.length > 8 && ' …'}
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={applyAiSheet}>Aplicar respostas da IA</Button>
+                      <Button size="sm" variant="secondary" onClick={() => setAiSheet(null)}>
+                        Descartar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {doubtfulQuestions.length > 0 && (
               <ul className="space-y-2">
                 {doubtfulQuestions.map((q) => {
                   const low = (omrResult.lowConfidence ?? []).includes(q);
@@ -3365,6 +3472,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   );
                 })}
               </ul>
+              )}
             </div>
           )}
 

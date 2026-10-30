@@ -242,8 +242,9 @@ export default function SettingsPage({ onNavigate }: Props) {
           <h2 className="text-base font-semibold text-ink dark:text-white">Assistente IA local (opt-in)</h2>
         </div>
         <p className="field-helper">
-          Sugere a alternativa marcada em questões duvidosas usando um modelo de visão
-          no <strong>Ollama deste computador</strong>. Nada sai do aparelho. Desligado por padrão.
+          Sugere a alternativa marcada em questões duvidosas e pode ler a folha inteira
+          usando um modelo de visão no <strong>Ollama deste computador</strong>. Nada sai
+          do aparelho. Desligado por padrão.
         </p>
         <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 min-h-[44px] cursor-pointer mt-2">
           <input
