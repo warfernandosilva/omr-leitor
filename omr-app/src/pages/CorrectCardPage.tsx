@@ -35,7 +35,7 @@ import {
   type PendingRead,
 } from '../utils/pending-reads';
 import {
-  getAiStatus, isAiAssistEnabled, suggestCorrection, type AiStatus, type AiSuggestion,
+  getAiStatus, hasFaintMark, isAiAssistEnabled, suggestCorrection, type AiStatus, type AiSuggestion,
 } from '../utils/ai-assist';
 import { cropRegions, type NormBox } from '../utils/ai-crop';
 import { questionBubbleBoxes } from '../utils/ai-bubbles';
@@ -1333,11 +1333,12 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     return [...new Set(qs)].filter((q) => Number.isFinite(q) && q > 0).sort((a, b) => a - b);
   }, [omrResult, overlayCustom, customGeom, overlayPageGeom]);
 
-  // Questões que valem consultar: as marcadas. Numa linha sem marca nenhuma o
-  // modelo não responde "VAZIO" — ele inventa uma letra.
+  // Questões que valem consultar: as marcadas e as que o OMR deu como em branco
+  // mas têm tinta (marca fraca). Numa linha realmente vazia o modelo inventa.
   const aiTargets = useMemo(() => {
     const blanks = new Set(omrResult?.blankQuestions ?? []);
-    return pageQuestionList.filter((q) => !blanks.has(q));
+    return pageQuestionList.filter((q) => !blanks.has(q)
+      || hasFaintMark(omrResult?.allRatios?.[q]));
   }, [pageQuestionList, omrResult]);
 
   const aiPending = useMemo(
@@ -1345,13 +1346,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     [aiTargets, aiSuggestions],
   );
 
-  // Questões da lista do card: as duvidosas e as já sugeridas, nunca as em
-  // branco (o modelo inventa letra em linha sem marca).
+  // Questões da lista do card: as duvidosas e as já sugeridas. Linha em branco
+  // sem nenhuma tinta fica de fora — o modelo inventa letra nela.
   const aiList = useMemo(() => {
     const blanks = new Set(omrResult?.blankQuestions ?? []);
     const set = new Set<number>(doubtfulQuestions);
     for (const q of Object.keys(aiSuggestions)) set.add(Number(q));
-    return [...set].filter((q) => !blanks.has(q)).sort((a, b) => a - b);
+    return [...set]
+      .filter((q) => !blanks.has(q) || hasFaintMark(omrResult?.allRatios?.[q]))
+      .sort((a, b) => a - b);
   }, [doubtfulQuestions, aiSuggestions, omrResult]);
 
   // Confere as questões marcadas uma a uma, com o recorte da linha. Aplicar
@@ -3404,8 +3407,9 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Uma questão por vez, com o recorte da linha. Questões em branco não são
-                  enviadas — numa linha sem marca o modelo inventa uma letra.
+                  Uma questão por vez, com o recorte da linha. Marca fraca que o OMR deu como
+                  em branco também é conferida; linha sem nenhuma tinta não é enviada — nela o
+                  modelo inventa uma letra.
                 </p>
                 {Object.keys(aiSuggestions).length > 0 && (
                   <Button size="sm" onClick={applyAllAiSuggestions}>

@@ -206,6 +206,8 @@ def _reason(ratios: dict[str, float] | None, suggestion: str | None,
     marks = ctx.get("marks") or []
     if ctx.get("duplicate") and marks:
         parts.append(f"Marcas detectadas: {' e '.join(map(str, marks))}.")
+    if ctx.get("blank"):
+        parts.append("O OMR considerou a questão em branco; pode ser marca fraca.")
     if suggestion == "VAZIO":
         parts.append("Nenhuma bolha parece preenchida.")
     return " ".join(parts)

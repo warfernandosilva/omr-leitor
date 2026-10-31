@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AI_ENABLED_KEY,
   getAiStatus,
+  hasFaintMark,
   isAiAssistEnabled,
   setAiAssistEnabled,
   suggestCorrection,
@@ -30,6 +31,25 @@ describe('preferência do assistente', () => {
     expect(localStorage.getItem(AI_ENABLED_KEY)).toBe('1');
     setAiAssistEnabled(false);
     expect(isAiAssistEnabled()).toBe(false);
+  });
+});
+
+describe('hasFaintMark', () => {
+  it('ignora linha sem tinta (ruído do branco)', () => {
+    expect(hasFaintMark({ A: 0.011, B: 0.011, C: 0.011, D: 0.011 })).toBe(false);
+    expect(hasFaintMark(null)).toBe(false);
+  });
+
+  it('ignora cartão impresso sem marca (fundo já pontua)', () => {
+    // medido no cartão real: vazio fica 0.011 acima da segunda bolha
+    expect(hasFaintMark({ A: 0.023, B: 0.045, C: 0.092, D: 0.103 })).toBe(false);
+    expect(hasFaintMark({ A: 0.12, B: 0.11, C: 0.12, D: 0.1 })).toBe(false);
+  });
+
+  it('aceita marca fraca que o OMR deu como em branco', () => {
+    expect(hasFaintMark({ A: 0.011, B: 0.011, C: 0.086, D: 0.011 })).toBe(true);
+    // cinza 200 no cartão real: C abre 0.039 sobre a segunda
+    expect(hasFaintMark({ A: 0.023, B: 0.043, C: 0.165, D: 0.103 })).toBe(true);
   });
 });
 
