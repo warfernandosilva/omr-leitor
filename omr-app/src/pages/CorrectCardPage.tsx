@@ -3399,6 +3399,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                   )}
                   <span className="text-[11px] text-gray-500 dark:text-gray-400">
                     {aiTargets.length} questão(ões) marcadas nesta folha
+                    {Object.keys(aiSuggestions).length > 0
+                      && ` · IA respondeu ${Object.keys(aiSuggestions).length}`}
                   </span>
                 </div>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
@@ -3580,6 +3582,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                             <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">C</th>
                             <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">D</th>
                             <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Resposta</th>
+                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">IA</th>
                             <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Gabarito</th>
                             <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Resultado</th>
                           </tr>
@@ -3588,6 +3591,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                           {Array.from({ length: activeExam.questionsPerSubject }, (_, i) => start + i).map((q) => {
                             const selected = manualAnswers[q] || null;
                             const correctAnswer = activeExam.answerKey?.[q];
+                            const aiS = aiSuggestions[q];
+                            const aiLetter = aiS?.suggestion && /^[ABCD]$/.test(aiS.suggestion)
+                              ? aiS.suggestion : null;
+                            const isBlank = (omrResult.blankQuestions ?? []).includes(q);
                             const isCorrect = selected && correctAnswer && selected === correctAnswer;
                             const dupList = omrResult.duplicateQuestions ?? [];
                             const qMarks = omrResult.duplicateMarks?.[q];
@@ -3623,6 +3630,25 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                                     <span className="text-danger-600 dark:text-danger-100">{qMarks.join(' + ')}</span>
                                   ) : selected ? (
                                     selected
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  {aiLetter ? (
+                                    <button
+                                      onClick={() => applyAiSuggestion(q, aiLetter)}
+                                      className={`text-xs font-semibold rounded px-2 py-1 border ${
+                                        aiLetter !== selected
+                                          ? 'border-brand-500 text-brand-700 dark:text-brand-200'
+                                          : 'border-line dark:border-gray-700 text-gray-500 dark:text-gray-400'
+                                      }`}
+                                      title={`IA sugeriu ${aiLetter} (${Math.round((aiS?.confidence ?? 0) * 100)}%) — clique para aplicar`}
+                                    >
+                                      {aiLetter}
+                                    </button>
+                                  ) : isBlank ? (
+                                    <span className="text-xs text-gray-400 dark:text-gray-500">em branco</span>
                                   ) : (
                                     <span className="text-gray-300 dark:text-gray-600">—</span>
                                   )}
