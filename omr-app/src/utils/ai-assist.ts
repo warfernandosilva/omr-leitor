@@ -15,10 +15,6 @@ export interface AiStatus {
   model: string;
   models: string[];
   error?: string | null;
-  /** Modelo da leitura da folha inteira (OLLAMA_READ_MODEL). */
-  read_model?: string;
-  read_available?: boolean;
-  read_error?: string | null;
 }
 
 export interface AiSuggestion {
@@ -76,31 +72,5 @@ export async function suggestCorrection(req: AiAssistRequest): Promise<AiSuggest
     '/api/ai/assist', 'POST', req, 90000,
   );
   if (!res.ok) throw new Error(res.error || 'O assistente local não conseguiu sugerir uma resposta.');
-  return res;
-}
-
-export interface AiSheetResult {
-  ok: true;
-  /** { "1": "A", "7": "VAZIO" } — só questões que o modelo conseguiu ler. */
-  answers: Record<string, string>;
-  /** Questões que o modelo não respondeu (nunca inventadas). */
-  missing: number[];
-  model: string;
-  raw?: string;
-}
-
-/**
- * Lê a folha inteira (já compactada) e devolve as respostas.
- * Usa OLLAMA_READ_MODEL no backend — o moondream não dá conta de 30+ questões.
- */
-export async function readSheetWithAi(req: {
-  image: string;
-  questions: number[];
-  options?: string[];
-}): Promise<AiSheetResult> {
-  const res = await apiJsonBody<AiSheetResult | AiAssistErrorResponse>(
-    '/api/ai/read', 'POST', req, 180000,
-  );
-  if (!res.ok) throw new Error(res.error || 'A leitura por IA não devolveu respostas.');
   return res;
 }

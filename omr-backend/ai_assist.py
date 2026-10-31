@@ -1,16 +1,16 @@
 """Assistente de correção com modelo de visão local (Ollama).
 
-Dois modos, ambos 100% locais:
+Uma questão por vez: o backend envia só o RECORTE das bolhas daquela questão
+(nunca a folha inteira, nem nome/QR) para o Ollama rodando em localhost.
 
-- `assist()`: uma questão duvidosa por vez. Envia só o RECORTE das bolhas.
-- `read_sheet()`: a folha inteira (já retificada e compactada pelo cliente)
-  e devolve o mapa de respostas. Usa OLLAMA_READ_MODEL, que precisa ser um
-  modelo de visão maior que o moondream.
+Ler a folha inteira de uma vez NÃO funciona com modelos locais pequenos: a
+imagem fica densa demais e o modelo inventa um gabarito em ciclo (A, B, C, D...)
+quando não consegue ver a marca. Por isso a conferência é feita questão a
+questão, com o recorte justo da linha.
 
 Configuração (variáveis de ambiente):
-- OLLAMA_URL        (default http://localhost:11434)
-- OLLAMA_MODEL      (default moondream) — assistente por questão
-- OLLAMA_READ_MODEL (default = OLLAMA_MODEL) — leitura da folha inteira
+- OLLAMA_URL     (default http://localhost:11434)
+- OLLAMA_MODEL   (default moondream)
 - OLLAMA_TIMEOUT segundos (default 60)
 
 O assistente NUNCA altera a resposta sozinho: ele devolve uma sugestão e a UI
@@ -20,7 +20,6 @@ decide se aplica.
 from __future__ import annotations
 
 import base64
-import json
 import os
 import re
 
@@ -28,9 +27,6 @@ import httpx
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "moondream")
-# Leitura da folha inteira exige um modelo bem mais forte que o moondream
-# (30+ respostas estruturadas). Sem a variável, usa o mesmo modelo do assistente.
-OLLAMA_READ_MODEL = os.getenv("OLLAMA_READ_MODEL", OLLAMA_MODEL)
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "60"))
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 LETTERS = ("A", "B", "C", "D")
@@ -68,13 +64,8 @@ def _missing_model(model: str) -> str:
 
 
 def status() -> dict:
-    """Detecta se o Ollama está acessível e se os modelos configurados existem.
-
-    Valida os DOIS modelos: o do assistente por questão e o da leitura da folha
-    inteira. Sem isso o usuário só descobriria o modelo de leitura faltando ao
-    clicar em "Corrigir tudo com IA".
-    """
-    base = {"url": OLLAMA_URL, "model": OLLAMA_MODEL, "read_model": OLLAMA_READ_MODEL}
+    """Detecta se o Ollama está acessível e se o modelo configurado existe."""
+    base = {"url": OLLAMA_URL, "model": OLLAMA_MODEL}
     try:
         with httpx.Client(timeout=3.0) as client:
             res = client.get(f"{OLLAMA_URL}/api/tags")
@@ -85,23 +76,13 @@ def status() -> dict:
                 if m.get("name")
             ]
     except Exception as exc:  # noqa: BLE001 - status nunca deve derrubar a API
-        return {
-            **base,
-            "available": False,
-            "models": [],
-            "error": _friendly_http_error(exc),
-            "read_available": False,
-            "read_error": None,
-        }
+        return {**base, "available": False, "models": [], "error": _friendly_http_error(exc)}
     model_ok = any(_same_model(m, OLLAMA_MODEL) for m in models)
-    read_ok = any(_same_model(m, OLLAMA_READ_MODEL) for m in models)
     return {
         **base,
         "available": model_ok,
         "models": models,
         "error": None if model_ok else _missing_model(OLLAMA_MODEL),
-        "read_available": read_ok,
-        "read_error": None if read_ok else _missing_model(OLLAMA_READ_MODEL),
     }
 
 
@@ -155,18 +136,15 @@ def _build_prompt(question: int, options: list[str], ratios: dict[str, float] | 
     return "\n".join(lines)
 
 
-def _call_ollama(image_b64: str, prompt: str, num_predict: int = 16,
-                 json_mode: bool = False, model: str | None = None) -> str:
+def _call_ollama(image_b64: str, prompt: str, num_predict: int = 16) -> str:
     """Chamada isolada (monkeypatchável nos testes)."""
     payload = {
-        "model": model or OLLAMA_MODEL,
+        "model": OLLAMA_MODEL,
         "prompt": prompt,
         "images": [image_b64],
         "stream": False,
         "options": {"temperature": 0, "num_predict": num_predict},
     }
-    if json_mode:
-        payload["format"] = "json"
     try:
         with httpx.Client(timeout=OLLAMA_TIMEOUT) as client:
             res = client.post(f"{OLLAMA_URL}/api/generate", json=payload)
@@ -174,9 +152,8 @@ def _call_ollama(image_b64: str, prompt: str, num_predict: int = 16,
             data = res.json()
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            wanted = model or OLLAMA_MODEL
             raise AiAssistError(
-                f"Modelo '{wanted}' não instalado. Rode: ollama pull {wanted}"
+                f"Modelo '{OLLAMA_MODEL}' não instalado. Rode: ollama pull {OLLAMA_MODEL}"
             ) from exc
         raise AiAssistError(_friendly_http_error(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -269,91 +246,4 @@ def assist(
         "source": source,
         "model": OLLAMA_MODEL,
         "raw": raw.strip()[:200],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Leitura da folha inteira (correção por IA)
-# ---------------------------------------------------------------------------
-
-MAX_QUESTIONS_PER_SHEET = 200
-
-
-def _build_sheet_prompt(questions: list[int], options: list[str]) -> str:
-    opts = ", ".join(options)
-    nums = ", ".join(str(q) for q in questions)
-    return "\n".join([
-        "Você é um corretor de cartão-resposta.",
-        "A imagem é a folha inteira do cartão-resposta, reduzida.",
-        "Cada linha é uma questão; as alternativas aparecem da esquerda para a direita.",
-        "Uma bolha marcada pelo aluno aparece preenchida (preta/escura).",
-        f"Questões desta folha: {nums}.",
-        f"Alternativas possíveis: {opts}.",
-        "Responda SOMENTE um objeto JSON, sem texto em volta, no formato:",
-        '{"1": "A", "2": "VAZIO"}',
-        "Use exatamente os números das questões acima como chaves.",
-        f'Cada valor deve ser UMA letra ({opts}) ou "VAZIO" quando nenhuma bolha estiver marcada.',
-        "Se não conseguir ler uma questão, omita a chave dela. Não invente respostas.",
-    ])
-
-
-def _parse_answers(raw: str, questions: list[int], options: list[str]) -> dict[str, str]:
-    """Lê o JSON do modelo e descarta tudo que não é uma opção válida."""
-    text = (raw or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", text)
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end <= start:
-        return {}
-    try:
-        data = json.loads(text[start:end + 1])
-    except (ValueError, TypeError):
-        return {}
-    if isinstance(data, dict) and isinstance(data.get("answers"), (dict, list)):
-        data = data["answers"]
-
-    if isinstance(data, list):
-        pairs = list(zip(questions, data))
-    elif isinstance(data, dict):
-        pairs = list(data.items())
-    else:
-        return {}
-
-    allowed = {o.upper() for o in options}
-    answers: dict[str, str] = {}
-    for key, value in pairs:
-        try:
-            q = int(key)
-        except (TypeError, ValueError):
-            continue
-        if q not in questions:
-            continue
-        choice = _parse_choice(str(value), options)
-        if choice == "VAZIO" or (choice is not None and choice in allowed):
-            answers[str(q)] = choice
-    return answers
-
-
-def read_sheet(image: str, questions: list[int], options: list[str] | None = None) -> dict:
-    """Lê a folha inteira e devolve {questão: letra}. Nunca aplica nada sozinho."""
-    opts = [str(o).upper() for o in (options or list(LETTERS)) if str(o).strip()]
-    qs = sorted({int(q) for q in questions if int(q) > 0})[:MAX_QUESTIONS_PER_SHEET]
-    if not qs:
-        raise AiAssistError("Nenhuma questão para ler nesta folha.")
-    image_b64 = _decode_data_url(image)
-    prompt = _build_sheet_prompt(qs, opts)
-    raw = _call_ollama(
-        image_b64,
-        prompt,
-        num_predict=min(1024, 24 + 16 * len(qs)),
-        json_mode=True,
-        model=OLLAMA_READ_MODEL,
-    )
-    answers = _parse_answers(raw, qs, opts)
-    return {
-        "ok": True,
-        "answers": answers,
-        "missing": [q for q in qs if str(q) not in answers],
-        "model": OLLAMA_READ_MODEL,
-        "raw": raw.strip()[:400],
     }

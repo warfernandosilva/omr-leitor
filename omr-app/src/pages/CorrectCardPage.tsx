@@ -35,10 +35,9 @@ import {
   type PendingRead,
 } from '../utils/pending-reads';
 import {
-  getAiStatus, isAiAssistEnabled, readSheetWithAi, suggestCorrection,
-  type AiSheetResult, type AiStatus, type AiSuggestion,
+  getAiStatus, isAiAssistEnabled, suggestCorrection, type AiStatus, type AiSuggestion,
 } from '../utils/ai-assist';
-import { compressSheet, cropRegions, type NormBox } from '../utils/ai-crop';
+import { cropRegions, type NormBox } from '../utils/ai-crop';
 import { questionBubbleBoxes } from '../utils/ai-bubbles';
 import { herbyRowsFor } from '../utils/herby-template';
 import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
@@ -212,8 +211,8 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, AiSuggestion>>({});
   const [aiLoading, setAiLoading] = useState<number | null>(null);
-  const [aiReading, setAiReading] = useState(false);
-  const [aiSheet, setAiSheet] = useState<AiSheetResult | null>(null);
+  const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
+  const aiStopRef = useRef(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
   const reprocessingRef = useRef(false);
@@ -321,7 +320,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     return () => { alive = false; };
   }, [aiEnabled, step]);
   // Nova leitura invalida sugestões da leitura anterior.
-  useEffect(() => { setAiSuggestions({}); setAiSheet(null); setAiError(null); }, [omrResult]);
+  useEffect(() => { setAiSuggestions({}); setAiError(null); }, [omrResult]);
   // Cleanup: libera a câmera ao desmontar (navegação pela Sidebar/logout)
   useEffect(() => () => {
     try { streamRef.current?.getTracks().forEach(t => t.stop()); } catch { /* ignore */ }
@@ -1325,7 +1324,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       .sort((a, b) => a - b);
   }, [omrResult, manualAnswers, overlayCustom, customGeom, overlayPageGeom]);
 
-  // Questões que existem na imagem exibida — a leitura por IA vê só esta folha.
+  // Questões que existem na imagem exibida — o assistente vê só esta folha.
   const pageQuestionList = useMemo(() => {
     if (!omrResult) return [] as number[];
     const qs = overlayCustom && (customGeom?.nPages ?? 1) > 1 && overlayPageGeom
@@ -1334,51 +1333,61 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     return [...new Set(qs)].filter((q) => Number.isFinite(q) && q > 0).sort((a, b) => a - b);
   }, [omrResult, overlayCustom, customGeom, overlayPageGeom]);
 
-  // Divergências IA × OMR — só informativo; nada é aplicado sozinho.
-  const aiDivergences = useMemo(() => {
-    if (!aiSheet) return [] as { q: number; omr: string; ai: string }[];
-    return Object.entries(aiSheet.answers)
-      .filter(([, a]) => /^[ABCD]$/.test(a))
-      .map(([q, a]) => ({ q: Number(q), omr: omrResult?.answers?.[Number(q)] ?? '', ai: a }))
-      .filter((d) => d.omr !== d.ai)
-      .sort((x, y) => x.q - y.q);
-  }, [aiSheet, omrResult]);
+  // Questões que valem consultar: as marcadas. Numa linha sem marca nenhuma o
+  // modelo não responde "VAZIO" — ele inventa uma letra.
+  const aiTargets = useMemo(() => {
+    const blanks = new Set(omrResult?.blankQuestions ?? []);
+    return pageQuestionList.filter((q) => !blanks.has(q));
+  }, [pageQuestionList, omrResult]);
 
-  // Corrige a folha inteira com o modelo local. Só preenche a conferência:
-  // aplicar continua sendo decisão do usuário, e salvar também.
+  const aiPending = useMemo(
+    () => aiTargets.filter((q) => !aiSuggestions[q]),
+    [aiTargets, aiSuggestions],
+  );
+
+  // Questões da lista do card: as duvidosas e as já sugeridas, nunca as em
+  // branco (o modelo inventa letra em linha sem marca).
+  const aiList = useMemo(() => {
+    const blanks = new Set(omrResult?.blankQuestions ?? []);
+    const set = new Set<number>(doubtfulQuestions);
+    for (const q of Object.keys(aiSuggestions)) set.add(Number(q));
+    return [...set].filter((q) => !blanks.has(q)).sort((a, b) => a - b);
+  }, [doubtfulQuestions, aiSuggestions, omrResult]);
+
+  // Confere as questões marcadas uma a uma, com o recorte da linha. Aplicar
+  // continua sendo decisão do usuário, e salvar também.
   const runAiReadAll = async () => {
-    if (!omrResult) return;
-    const image = omrResult.rectifiedImage;
-    if (!image) {
+    if (!omrResult || aiProgress) return;
+    if (!omrResult.rectifiedImage) {
       setAiError('A imagem retificada não está disponível para esta leitura.');
       return;
     }
-    if (!pageQuestionList.length) {
-      setAiError('Não há questões para ler nesta folha.');
+    const targets = aiPending;
+    if (!targets.length) {
+      setAiError('Nenhuma questão marcada para conferir nesta folha.');
       return;
     }
-    setAiReading(true);
+    aiStopRef.current = false;
     setAiError(null);
-    try {
-      const compressed = await compressSheet(image);
-      setAiSheet(await readSheetWithAi({ image: compressed, questions: pageQuestionList }));
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Falha na leitura por IA.');
-    } finally {
-      setAiReading(false);
+    setAiProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i += 1) {
+      if (aiStopRef.current) break;
+      await runAiSuggestion(targets[i]);
+      setAiProgress({ done: i + 1, total: targets.length });
     }
+    setAiProgress(null);
   };
 
-  const applyAiSheet = () => {
-    if (!aiSheet) return;
-    const letters = Object.entries(aiSheet.answers).filter(([, a]) => /^[ABCD]$/.test(a));
-    if (!letters.length) return;
+  const applyAllAiSuggestions = () => {
+    const entries = Object.entries(aiSuggestions)
+      .filter(([, s]) => s.suggestion != null && /^[ABCD]$/.test(s.suggestion));
+    if (!entries.length) return;
     setManualAnswers((prev) => {
       const next = { ...prev };
-      for (const [q, a] of letters) next[Number(q)] = a;
+      for (const [q, s] of entries) next[Number(q)] = s.suggestion as string;
       return next;
     });
-    setAiSheet(null);
+    setAiSuggestions({});
   };
 
   const runAiSuggestion = async (q: number) => {
@@ -3370,57 +3379,42 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     size="sm"
-                    loading={aiReading}
-                    disabled={aiReading || pageQuestionList.length === 0
-                      || aiStatus.read_available === false}
+                    loading={aiProgress != null}
+                    disabled={aiProgress != null || aiPending.length === 0}
                     icon={<Bot size={15} aria-hidden />}
                     onClick={() => void runAiReadAll()}
                   >
-                    {aiReading ? 'Lendo a folha…' : 'Corrigir tudo com IA'}
+                    {aiProgress
+                      ? `Conferindo ${aiProgress.done}/${aiProgress.total}…`
+                      : 'Corrigir tudo com IA'}
                   </Button>
+                  {aiProgress && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => { aiStopRef.current = true; }}
+                    >
+                      Parar
+                    </Button>
+                  )}
                   <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                    {pageQuestionList.length} questão(ões) nesta folha
-                    {aiSheet ? ` · ${aiSheet.model}` : ''}
+                    {aiTargets.length} questão(ões) marcadas nesta folha
                   </span>
                 </div>
-                {aiStatus.read_available === false && aiStatus.read_error && (
-                  <p className="text-[11px] text-amber-700 dark:text-amber-300" role="status">
-                    Leitura da folha inteira indisponível. {aiStatus.read_error}
-                  </p>
-                )}
-                {aiSheet && (
-                  <div className="space-y-2">
-                    <p className="text-xs text-ink dark:text-gray-200">
-                      IA leu <strong>{Object.keys(aiSheet.answers).length}</strong> de{' '}
-                      {pageQuestionList.length}
-                      {aiSheet.missing.length > 0 && (
-                        <> · sem resposta: {aiSheet.missing.map((q) => `Q${q}`).join(', ')}</>
-                      )}
-                      {aiDivergences.length > 0 && (
-                        <> · <strong>{aiDivergences.length} divergem do OMR</strong></>
-                      )}
-                    </p>
-                    {aiDivergences.length > 0 && (
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                        {aiDivergences.slice(0, 8)
-                          .map((d) => `Q${d.q}: OMR ${d.omr || '—'} → IA ${d.ai}`)
-                          .join(' · ')}
-                        {aiDivergences.length > 8 && ' …'}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" onClick={applyAiSheet}>Aplicar respostas da IA</Button>
-                      <Button size="sm" variant="secondary" onClick={() => setAiSheet(null)}>
-                        Descartar
-                      </Button>
-                    </div>
-                  </div>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Uma questão por vez, com o recorte da linha. Questões em branco não são
+                  enviadas — numa linha sem marca o modelo inventa uma letra.
+                </p>
+                {Object.keys(aiSuggestions).length > 0 && (
+                  <Button size="sm" onClick={applyAllAiSuggestions}>
+                    Aplicar as {Object.keys(aiSuggestions).length} sugestões
+                  </Button>
                 )}
               </div>
 
-              {doubtfulQuestions.length > 0 && (
+              {aiList.length > 0 && (
               <ul className="space-y-2">
-                {doubtfulQuestions.map((q) => {
+                {aiList.map((q) => {
                   const low = (omrResult.lowConfidence ?? []).includes(q);
                   const dup = (omrResult.duplicateQuestions ?? []).includes(q);
                   const blank = (omrResult.blankQuestions ?? []).includes(q);

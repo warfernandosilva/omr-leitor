@@ -259,20 +259,13 @@ export default function SettingsPage({ onNavigate }: Props) {
         <p className="text-xs text-gray-500 dark:text-gray-400">
           {aiStatus
             ? (aiStatus.available
-              ? `Ollama disponível · assistente ${aiStatus.model}`
-                + (aiStatus.read_model && aiStatus.read_model !== aiStatus.model
-                  ? ` · leitura ${aiStatus.read_model}` : '')
+              ? `Ollama disponível · modelo ${aiStatus.model}`
               : `Ollama indisponível${aiStatus.model ? ` · modelo ${aiStatus.model}` : ''}`)
             : 'Status do Ollama ainda não verificado.'}
         </p>
         {aiStatus && !aiStatus.available && (
           <p className="callout-info mt-3" role="status">
             {aiStatus.error || 'Ollama não detectado.'}
-          </p>
-        )}
-        {aiStatus?.available && aiStatus.read_available === false && (
-          <p className="callout-info mt-3" role="status">
-            "Corrigir tudo com IA" não vai funcionar: {aiStatus.read_error}
           </p>
         )}
         <Button

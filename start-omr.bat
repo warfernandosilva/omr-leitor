@@ -32,11 +32,10 @@ echo     Instalando dependencias...
 call "%~dp0omr-backend\.venv\Scripts\activate.bat"
 pip install -r "%~dp0omr-backend\requirements.txt" || (echo [AVISO] falha parcial no pip - tentando continuar...)
 
-REM Modelos do Ollama (a env e lida no import de ai_assist.py).
-REM qwen2.5vl:7b e o unico instalado nesta maquina: serve os dois papeis.
+REM Modelo do Ollama (a env e lida no import de ai_assist.py).
+REM qwen2.5vl:7b e o unico instalado nesta maquina.
 set "OLLAMA_MODEL=qwen2.5vl:7b"
-set "OLLAMA_READ_MODEL=qwen2.5vl:7b"
-REM 7B na 3070 (8 GB) pode transbordar para CPU na leitura da folha inteira.
+REM Cada questao e uma chamada: 7B na 3070 (8 GB) pode transbordar para CPU.
 set "OLLAMA_TIMEOUT=180"
 
 start "OMR Backend" cmd /k "cd /d "%~dp0omr-backend" && .venv\Scripts\python main.py"

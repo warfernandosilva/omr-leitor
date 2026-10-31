@@ -304,12 +304,6 @@ class AiAssistRequest(BaseModel):
     context: dict | None = None     # {duplicate, blank, low_confidence, marks}
 
 
-class AiReadRequest(BaseModel):
-    image: str                      # folha inteira retificada, compactada, em data URL
-    questions: list[int]            # questões que existem nesta folha
-    options: list[str] = Field(default_factory=lambda: ["A", "B", "C", "D"])
-
-
 @app.get("/api/ai/status")
 def ai_status(current_user: User = Depends(auth.get_current_user)):
     """Detecta o Ollama local e se o modelo configurado está instalado."""
@@ -333,23 +327,6 @@ def ai_assist_correction(req: AiAssistRequest,
     except Exception as exc:  # noqa: BLE001 - a revisão nunca quebra por IA
         logger.warning("ai assist falhou: %s", exc)
         return {"ok": False, "error": "Falha inesperada no assistente local."}
-
-
-@app.post("/api/ai/read")
-def ai_read_sheet(req: AiReadRequest,
-                  current_user: User = Depends(auth.get_current_user)):
-    """Lê a folha inteira e devolve {questão: letra}. Nunca salva nada."""
-    try:
-        return ai_assist.read_sheet(
-            image=req.image,
-            questions=req.questions,
-            options=req.options,
-        )
-    except ai_assist.AiAssistError as exc:
-        return {"ok": False, "error": str(exc)}
-    except Exception as exc:  # noqa: BLE001 - a correção nunca quebra por IA
-        logger.warning("ai read falhou: %s", exc)
-        return {"ok": False, "error": "Falha inesperada na leitura por IA."}
 
 
 @app.get("/api/ops/stats")

@@ -17,8 +17,13 @@ function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-/** Une as caixas e aplica uma margem proporcional (padrão 15%). */
-export function unionBox(boxes: NormBox[], padding = 0.15): NormBox | null {
+/**
+ * Une as caixas e aplica margem proporcional (padrão 15%).
+ * `paddingY` é separado porque o recorte da questão precisa ser justo na
+ * vertical: com margem grande a linha de cima/baixo entra na imagem e o modelo
+ * passa a ler a bolha da linha errada.
+ */
+export function unionBox(boxes: NormBox[], padding = 0.15, paddingY = padding): NormBox | null {
   const valid = boxes.filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y)
     && Number.isFinite(b.w) && Number.isFinite(b.h) && b.w > 0 && b.h > 0);
   if (!valid.length) return null;
@@ -33,7 +38,7 @@ export function unionBox(boxes: NormBox[], padding = 0.15): NormBox | null {
     y1 = Math.max(y1, b.y + b.h);
   }
   const padX = (x1 - x0) * padding + 0.005;
-  const padY = (y1 - y0) * padding + 0.005;
+  const padY = (y1 - y0) * paddingY + 0.005;
   const nx0 = clamp01(x0 - padX);
   const ny0 = clamp01(y0 - padY);
   const nx1 = clamp01(x1 + padX);
@@ -51,7 +56,8 @@ export function cropRegions(
   maxWidth = 640,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const box = unionBox(boxes);
+    // Margem vertical justa (5% da altura das bolhas): a linha vizinha não entra.
+    const box = unionBox(boxes, 0.15, 0.05);
     if (!box) {
       reject(new Error('Não há regiões para recortar.'));
       return;
@@ -76,49 +82,6 @@ export function cropRegions(
         resolve(canvas.toDataURL('image/jpeg', 0.85));
       } catch (err) {
         reject(err instanceof Error ? err : new Error('Falha ao recortar a imagem.'));
-      }
-    };
-    img.onerror = () => reject(new Error('Falha ao carregar a imagem retificada.'));
-    img.src = dataUrl;
-  });
-}
-
-/** Tamanho da folha depois de limitar o lado maior (nunca amplia). */
-export function scaledSize(width: number, height: number, maxSide: number): { width: number; height: number } {
-  const scale = Math.min(1, maxSide / Math.max(width, height));
-  return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
-  };
-}
-
-/**
- * Compacta a folha inteira (data URL) para o modelo ler as respostas.
- * 1600 px no lado maior mantém a linha da questão legível; JPEG q0.8
- * fica em ~300 KB, bem abaixo do limite de 4 MB do backend.
- */
-export function compressSheet(
-  dataUrl: string,
-  maxSide = 1600,
-  quality = 0.8,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      try {
-        const size = scaledSize(img.width, img.height, maxSide);
-        const canvas = document.createElement('canvas');
-        canvas.width = size.width;
-        canvas.height = size.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          reject(new Error('Canvas indisponível para compactar a imagem.'));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, size.width, size.height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      } catch (err) {
-        reject(err instanceof Error ? err : new Error('Falha ao compactar a imagem.'));
       }
     };
     img.onerror = () => reject(new Error('Falha ao carregar a imagem retificada.'));

@@ -1,16 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { scaledSize, unionBox } from './ai-crop';
-
-describe('scaledSize', () => {
-  it('limita o lado maior sem ampliar', () => {
-    expect(scaledSize(2480, 3508, 1600)).toEqual({ width: 1131, height: 1600 });
-    expect(scaledSize(800, 600, 1600)).toEqual({ width: 800, height: 600 });
-  });
-
-  it('nunca devolve zero', () => {
-    expect(scaledSize(10000, 1, 10)).toEqual({ width: 10, height: 1 });
-  });
-});
+import { unionBox } from './ai-crop';
 
 describe('unionBox', () => {
   it('une as caixas com margem proporcional', () => {
