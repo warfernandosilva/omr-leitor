@@ -56,8 +56,10 @@ export function cropRegions(
   maxWidth = 640,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    // Margem vertical justa (5% da altura das bolhas): a linha vizinha não entra.
-    const box = unionBox(boxes, 0.15, 0.05);
+    // Margem justa: na vertical a linha vizinha não pode entrar, e na horizontal
+    // a margem não pode alcançar o número da questão (o modelo lê o dígito como
+    // bolha marcada e desloca a resposta: A vira B).
+    const box = unionBox(boxes, 0.02, 0.05);
     if (!box) {
       reject(new Error('Não há regiões para recortar.'));
       return;
