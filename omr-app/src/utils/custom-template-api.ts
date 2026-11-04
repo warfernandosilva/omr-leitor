@@ -239,6 +239,55 @@ export function createCustomTemplate(file: File, nome: string, avaliacaoExternal
   return apiForm('/api/custom-templates', form);
 }
 
+// ─── Gerador do zero (medidas em mm) ───
+
+export interface CardSpec {
+  page_format?: 'A4' | 'A5' | 'Letter' | 'Oficio' | 'custom';
+  page_w_mm?: number;
+  page_h_mm?: number;
+  orientation?: 'portrait' | 'landscape';
+  dpi?: number;
+  margin_mm?: number;
+  title?: string;
+  subtitle?: string;
+  instructions?: string;
+  fields?: string[];
+  n_questions?: number;
+  n_options?: number;
+  labels?: string[] | null;
+  columns?: number;
+  start_question?: number;
+  bubble_mm?: number;
+  option_gap_mm?: number;
+  row_gap_mm?: number;
+  column_gap_mm?: number;
+  shape?: 'circle' | 'square';
+  anchors?: boolean;
+  anchor_mm?: number;
+  qr?: boolean;
+  qr_mm?: number;
+}
+
+export interface GeneratePreviewResult {
+  ok: boolean;
+  image: string; // data URL
+  warnings: string[];
+  issues: ValidationIssue[];
+  summary: CustomTemplateSummary['config_summary'];
+}
+
+export function previewGeneratedCard(spec: CardSpec): Promise<GeneratePreviewResult> {
+  return apiJsonBody('/api/custom-templates/generate-preview', 'POST', { spec });
+}
+
+export function generateCustomTemplateFromSpec(
+  spec: CardSpec, nome: string, avaliacaoExternalId?: string,
+): Promise<CustomTemplateDetail> {
+  return apiJsonBody('/api/custom-templates/generate', 'POST', {
+    nome, spec, avaliacao_external_id: avaliacaoExternalId ?? null,
+  });
+}
+
 export function updateCustomTemplate(
   id: number,
   patch: { nome?: string; config?: Partial<CustomConfig> },

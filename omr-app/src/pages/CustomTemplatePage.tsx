@@ -4,7 +4,7 @@ import {
   ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
   Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus, Move,
-  History, Wand2,
+  History, Wand2, LayoutTemplate,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -37,6 +37,7 @@ import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 import { pageWarnings } from '../utils/template-warnings';
 import type { TemplatePageWarning } from '../utils/template-warnings';
 import StatusBar from '../components/custom/StatusBar';
+import CardGeneratorForm from '../components/custom/CardGeneratorForm';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble';
@@ -163,6 +164,7 @@ function TemplateList({
   const [examId, setExamId] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     try {
@@ -213,68 +215,82 @@ function TemplateList({
 
   return (
     <>
-      <div className="card max-w-2xl">
-        <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-          Envie uma imagem (PNG/JPG) do seu cartão-resposta. Depois você desenha as
-          âncoras, o QR e as bolhas no editor visual.
-        </p>
-        <div className="grid sm:grid-cols-[1fr_auto] gap-3 items-end">
-          <Field label="Nome do modelo" htmlFor="ct-nome">
-            <Input id="ct-nome" value={nome} placeholder="Ex.: Cartão da escola"
-                   onChange={(e) => setNome(e.target.value)} />
-          </Field>
-          <Button loading={busy} icon={<Upload size={16} aria-hidden />}
-                  onClick={() => fileRef.current?.click()}>
-            Importar imagem
-          </Button>
-        </div>
-        {exams.length > 0 && (
-          <Field label="Vincular à prova (opcional)" htmlFor="ct-exam" className="mt-3"
-                 helper="O gabarito é salvo vinculado à avaliação escolhida.">
-            <Select id="ct-exam" value={examId} onChange={(e) => setExamId(e.target.value)}>
-              <option value="">Nenhuma</option>
-              {exams.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-            </Select>
-          </Field>
-        )}
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp"
-               className="hidden"
-               onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleCreate(f); }} />
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-gray-500">Carregando…</p>
-      ) : templates.length === 0 ? (
-        <EmptyState
-          title="Nenhum gabarito personalizado"
-          description="Importe uma imagem acima para começar."
+      {creating ? (
+        <CardGeneratorForm
+          exams={exams}
+          onCreated={(d) => { setCreating(false); onOpen(d.id); }}
+          onCancel={() => setCreating(false)}
         />
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {templates.map((t) => (
-            <div key={t.id} className="card flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold text-ink dark:text-white truncate">{t.nome}</h3>
-                <span className={`badge ${t.status === 'ativo' ? 'badge-success' : 'badge-info'}`}>
-                  {STATUS_LABEL[t.status] ?? t.status}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                {t.config_summary.n_blocks} bloco(s) · {t.config_summary.n_questions} questão(ões) ·
-                {' '}{t.config_summary.n_anchors} âncora(s){t.config_summary.has_qr ? ' · QR' : ''}
-              </p>
-              <div className="flex gap-2 mt-1">
-                <Button size="sm" onClick={() => onOpen(t.id)} icon={<PenSquare size={15} aria-hidden />}>
-                  Editar
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setConfirmId(t.id)}
-                        icon={<Trash2 size={15} aria-hidden />}>
-                  Excluir
-                </Button>
-              </div>
+        <>
+          <div className="card max-w-2xl">
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+              Envie uma imagem (PNG/JPG) do seu cartão-resposta. Depois você desenha as
+              âncoras, o QR e as bolhas no editor visual.
+            </p>
+            <div className="grid sm:grid-cols-[1fr_auto_auto] gap-3 items-end">
+              <Field label="Nome do modelo" htmlFor="ct-nome">
+                <Input id="ct-nome" value={nome} placeholder="Ex.: Cartão da escola"
+                       onChange={(e) => setNome(e.target.value)} />
+              </Field>
+              <Button loading={busy} icon={<Upload size={16} aria-hidden />}
+                      onClick={() => fileRef.current?.click()}>
+                Importar imagem
+              </Button>
+              <Button variant="secondary" icon={<LayoutTemplate size={16} aria-hidden />}
+                      onClick={() => setCreating(true)}>
+                Criar do zero
+              </Button>
             </div>
-          ))}
-        </div>
+            {exams.length > 0 && (
+              <Field label="Vincular à prova (opcional)" htmlFor="ct-exam" className="mt-3"
+                     helper="O gabarito é salvo vinculado à avaliação escolhida.">
+                <Select id="ct-exam" value={examId} onChange={(e) => setExamId(e.target.value)}>
+                  <option value="">Nenhuma</option>
+                  {exams.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </Select>
+              </Field>
+            )}
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp"
+                   className="hidden"
+                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleCreate(f); }} />
+          </div>
+
+          {loading ? (
+            <p className="text-sm text-gray-500">Carregando…</p>
+          ) : templates.length === 0 ? (
+            <EmptyState
+              title="Nenhum gabarito personalizado"
+              description="Importe uma imagem acima ou crie um cartão do zero."
+            />
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {templates.map((t) => (
+                <div key={t.id} className="card flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold text-ink dark:text-white truncate">{t.nome}</h3>
+                    <span className={`badge ${t.status === 'ativo' ? 'badge-success' : 'badge-info'}`}>
+                      {STATUS_LABEL[t.status] ?? t.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t.config_summary.n_blocks} bloco(s) · {t.config_summary.n_questions} questão(ões) ·
+                    {' '}{t.config_summary.n_anchors} âncora(s){t.config_summary.has_qr ? ' · QR' : ''}
+                  </p>
+                  <div className="flex gap-2 mt-1">
+                    <Button size="sm" onClick={() => onOpen(t.id)} icon={<PenSquare size={15} aria-hidden />}>
+                      Editar
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmId(t.id)}
+                            icon={<Trash2 size={15} aria-hidden />}>
+                      Excluir
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <Modal

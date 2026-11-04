@@ -27,6 +27,7 @@ from database import get_db
 from models import (
     Aluno, Avaliacao, CustomTemplate, CustomTemplateVersion, GabaritoNomeado, User,
 )
+from omr.card_generator import generate_card
 from omr.custom_template import (
     config_for_page,
     config_summary,
@@ -282,6 +283,82 @@ def _detail(tpl: CustomTemplate) -> dict:
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
+
+class GenerateCardRequest(BaseModel):
+    """Cartão desenhado do zero (medidas em mm; ver omr/card_generator.py)."""
+    nome: str = "Cartão-resposta"
+    spec: dict = {}
+    avaliacao_external_id: str | None = None
+
+
+def _generated_or_400(spec: dict):
+    try:
+        return generate_card(spec)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001 — falha de desenho vira erro claro na UI
+        raise HTTPException(status_code=500, detail=f"Falha ao gerar o cartão: {e}")
+
+
+@router.post("/api/custom-templates/generate-preview")
+def generate_preview(req: GenerateCardRequest):
+    """Prévia ao vivo: desenha o cartão e devolve imagem + avisos (não grava)."""
+    card = _generated_or_400(req.spec)
+    return {
+        "ok": True,
+        "image": _data_url_jpeg(card.image, max_side=1400),
+        "warnings": card.warnings,
+        "issues": validate_config(card.config),
+        "summary": config_summary(card.config),
+    }
+
+
+@router.post("/api/custom-templates/generate", status_code=201)
+def generate_template(
+    req: GenerateCardRequest,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Cria um Gabarito Personalizado a partir do desenho do zero.
+
+    A imagem gerada é a folha inteira; a config usa as MESMAS âncoras e
+    coordenadas que o motor de leitura — o cartão já nasce legível.
+    """
+    card = _generated_or_400(req.spec)
+
+    avaliacao = None
+    if req.avaliacao_external_id:
+        avaliacao = db.scalar(
+            select(Avaliacao).where(Avaliacao.external_id == req.avaliacao_external_id)
+        )
+        if avaliacao is None:
+            raise HTTPException(status_code=404, detail="Avaliação não encontrada")
+        auth.require_owner_or_admin(avaliacao, current_user)
+
+    h, w = card.image.shape[:2]
+    issues = validate_config(card.config)
+    tpl = CustomTemplate(
+        nome=(req.nome or "Cartão-resposta").strip()[:200],
+        config=card.config,
+        image_path="",
+        image_w=w,
+        image_h=h,
+        status=(CustomTemplate.STATUS_VALIDADO if not has_errors(issues)
+                else CustomTemplate.STATUS_RASCUNHO),
+        last_issues=issues,
+        owner_id=current_user.id,
+        avaliacao_id=avaliacao.id if avaliacao else None,
+    )
+    db.add(tpl)
+    db.flush()
+
+    img_path = _template_dir(tpl.id) / "original.png"
+    cv2.imwrite(str(img_path), card.image)
+    tpl.image_path = str(img_path)
+    db.commit()
+    db.refresh(tpl)
+    return _detail(tpl)
+
 
 @router.post("/api/custom-templates", status_code=201)
 def create_template(
