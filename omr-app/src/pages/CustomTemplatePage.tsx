@@ -35,6 +35,8 @@ import {
 import type { CustomVersionRow, PrintPreviewResult } from '../utils/custom-template-api';
 import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 import { pageWarnings } from '../utils/template-warnings';
+import type { TemplatePageWarning } from '../utils/template-warnings';
+import StatusBar from '../components/custom/StatusBar';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble';
@@ -1180,7 +1182,7 @@ function TemplateEditor({
             onChange={(id) => setRightTab(id as typeof rightTab)}
             tabs={[
               { id: 'props', label: 'Propriedades' },
-              { id: 'diag', label: 'Diagnóstico', badge: issues.length || undefined },
+              { id: 'diag', label: 'Diagnóstico', badge: issues.length + warnings.length || undefined },
               { id: 'actions', label: 'Ações' },
             ]}
           />
@@ -1188,11 +1190,16 @@ function TemplateEditor({
             {rightTab === 'props' && (
               <PropertiesPanel config={config} selection={selection} updateField={updateField} />
             )}
-            {rightTab === 'diag' && <ValidationPanel issues={issues} onGoTo={setSelection} />}
+            {rightTab === 'diag' && <ValidationPanel issues={issues} warnings={warnings} onGoTo={setSelection} />}
             {rightTab === 'actions' && <ActionsPanel detailId={detail.id} onRestore={apply} />}
           </div>
         </div>
       </div>
+
+      <StatusBar
+        pendings={issues.length + warnings.length} zoom={zoom} pageIdx={currentPage} nPages={nPages}
+        baseW={baseW} baseH={baseH} onDiagnosticoClick={() => setRightTab('diag')}
+      />
     </div>
   );
 }
@@ -1975,8 +1982,12 @@ function PropertiesPanel({
 // Diagnóstico da configuração
 // ───────────────────────────────────────────────────────────────────────────
 
-function ValidationPanel({ issues, onGoTo }: { issues: ValidationIssue[]; onGoTo: (s: Selection) => void }) {
-  if (!issues.length) {
+function ValidationPanel({ issues, warnings, onGoTo }: {
+  issues: ValidationIssue[];
+  warnings: TemplatePageWarning[];
+  onGoTo: (s: Selection) => void;
+}) {
+  if (!issues.length && !warnings.length) {
     return (
       <div className="flex items-center gap-2 text-sm text-green-600">
         <CheckCircle2 size={16} /> Sem problemas detectados.
@@ -1994,6 +2005,13 @@ function ValidationPanel({ issues, onGoTo }: { issues: ValidationIssue[]; onGoTo
   return (
     <div className="space-y-1">
       <p className="label">Diagnóstico</p>
+      {warnings.map((w) => (
+        <div key={`w-${w.page}-${w.code}`}
+             className="w-full text-left text-xs rounded px-2 py-1 flex items-start gap-1.5 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
+          <Info size={13} className="mt-0.5 shrink-0" />
+          <span>{w.message}</span>
+        </div>
+      ))}
       {issues.map((it, k) => {
         const kind = kindOf(it.region_id);
         return (
