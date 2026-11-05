@@ -58,6 +58,9 @@ MAX_CANON_SIDE = 2600
 
 DEFAULT_RADIUS = 0.013
 
+# Teto do texto de um elemento decorativo (o config vem do cliente).
+MAX_ELEMENT_TEXT = 300
+
 # --- Confiança de alinhamento (P0) -----------------------------------------
 # Depois da retificação, confirmamos que a GRADE REALMENTE CAIU SOBRE as
 # bolhas. Sem isso, um alinhamento plausível-mas-errado (âncora trocada,
@@ -133,6 +136,9 @@ def default_config(page_w: int = 0, page_h: int = 0) -> dict:
         "page_corners": None,
         "qr": None,
         "info_regions": [],
+        # Elementos decorativos (texto/linha/imagem) desenhados na impressão.
+        # Não participam da leitura: o motor só olha âncoras, QR e bolhas.
+        "elements": [],
         "questions": [],
         "print_fields": [],
         "omr_params": {},
@@ -189,6 +195,15 @@ def _page_image_id(v: Any) -> str | None:
     return None
 
 
+def _asset_id(v: Any) -> str | None:
+    """Id opaco de imagem de elemento (`ast_` + 12 hex). None = inválido."""
+    s = str(v or "")
+    body = s[4:]
+    if s.startswith("ast_") and len(body) == 12 and all(c in "0123456789abcdef" for c in body):
+        return s
+    return None
+
+
 def page_image_path(config: dict | None, image_path: str | None, page: int = 0) -> str | None:
     """Arquivo de imagem da página pedida (0 = imagem base do modelo).
 
@@ -236,6 +251,7 @@ def normalize_config(config: dict | None) -> dict:
             "size": _clamp01(a.get("size"), 0.05) or 0.05,
             "tolerance": _clamp01(a.get("tolerance"), 0.15) or 0.15,
             "required": bool(a.get("required", True)),
+            "locked": bool(a.get("locked", False)),
         })
     out["anchors"] = anchors
 
@@ -273,6 +289,7 @@ def normalize_config(config: dict | None) -> dict:
             "required": bool(qr.get("required", False)),
             "purpose": str(qr.get("purpose") or "card"),
             "field": str(qr.get("field") or "codigo_unico"),
+            "locked": bool(qr.get("locked", False)),
         }
     else:
         out["qr"] = None
@@ -288,8 +305,30 @@ def normalize_config(config: dict | None) -> dict:
             "y": _clamp01(r.get("y")),
             "w": _clamp01(r.get("w")),
             "h": _clamp01(r.get("h")),
+            "locked": bool(r.get("locked", False)),
         })
     out["info_regions"] = infos
+
+    elements = []
+    for e in cfg.get("elements") or []:
+        if not isinstance(e, dict):
+            continue
+        elements.append({
+            "id": str(e.get("id") or f"el_{len(elements) + 1}"),
+            "kind": e.get("kind") if e.get("kind") in ("text", "line", "image") else "text",
+            "page": _page_index(e.get("page")),
+            "x": _clamp01(e.get("x")),
+            "y": _clamp01(e.get("y")),
+            "w": _clamp01(e.get("w")),
+            "h": _clamp01(e.get("h")),
+            "text": str(e.get("text") or "")[:MAX_ELEMENT_TEXT],
+            "font_size": max(6, min(400, int(e.get("font_size") or 30))),
+            "align": e.get("align") if e.get("align") in ("left", "center", "right") else "left",
+            "bold": bool(e.get("bold", False)),
+            "asset": _asset_id(e.get("asset")),
+            "locked": bool(e.get("locked", False)),
+        })
+    out["elements"] = elements
 
     questions = []
     for b in cfg.get("questions") or []:
@@ -330,6 +369,7 @@ def normalize_config(config: dict | None) -> dict:
             # Estilo de marcação (P2): "filled" (bolha preenchida) | "marks" (check/X)
             "mark_style": b.get("mark_style") if b.get("mark_style") in ("filled", "marks") else "filled",
             "overrides": overrides,
+            "locked": bool(b.get("locked", False)),
         })
     out["questions"] = questions
 
@@ -355,7 +395,9 @@ def normalize_config(config: dict | None) -> dict:
 
     # Multi-página: respeita o nº declarado pelo editor e nunca "corta" uma
     # página que ainda tenha âncora/bloco (evita regiões inalcançáveis).
-    used = [a["page"] for a in out["anchors"]] + [b["page"] for b in out["questions"]]
+    used = ([a["page"] for a in out["anchors"]]
+            + [b["page"] for b in out["questions"]]
+            + [e["page"] for e in out["elements"]])
     out["n_pages"] = max(1, _page_index(cfg.get("n_pages") or 1),
                          (max(used) + 1) if used else 1)
 
@@ -587,6 +629,33 @@ def validate_config(config: dict) -> list[dict]:
             add("error", "info_size", "Região informativa sem largura/altura.", r["id"])
         if r["x"] + r["w"] > 1.0001 or r["y"] + r["h"] > 1.0001:
             add("warning", "info_overflow", "Região informativa ultrapassa a borda da imagem.", r["id"])
+
+    # Elementos decorativos: fora da página é erro; sobre bolha/âncora/QR é
+    # aviso forte — tinta sobre a bolha estraga a leitura.
+    bubbles_all = expand_bubbles(cfg)
+    for e in cfg["elements"]:
+        if e["w"] <= 0 or e["h"] <= 0:
+            add("error", "element_size", "Elemento sem largura/altura.", e["id"])
+        if e["x"] + e["w"] > 1.0001 or e["y"] + e["h"] > 1.0001:
+            add("error", "element_bounds", "Elemento ultrapassa a borda da imagem.", e["id"])
+        if e["kind"] == "text" and not e["text"].strip():
+            add("warning", "element_empty", "Elemento de texto sem conteúdo.", e["id"])
+        if e["kind"] == "image" and e["asset"] is None:
+            add("warning", "element_asset", "Elemento de imagem sem arquivo enviado.", e["id"])
+        ex0, ey0, ex1, ey1 = e["x"], e["y"], e["x"] + e["w"], e["y"] + e["h"]
+        hit = next(
+            (b for b in bubbles_all
+             if ex0 <= b["x"] <= ex1 and ey0 <= b["y"] <= ey1),
+            None,
+        )
+        if hit is not None:
+            add("warning", "element_over_bubble",
+                f"Elemento sobre a bolha da questão {hit['question']} {hit['option']} "
+                "pode impedir a leitura — mova-o para fora da grade.", e["id"])
+        if qr is not None and not (ex1 <= qr["x"] or qr["x"] + qr["w"] <= ex0
+                                   or ey1 <= qr["y"] or qr["y"] + qr["h"] <= ey0):
+            add("warning", "element_over_qr",
+                "Elemento sobre o QR Code — o QR precisa ficar limpo para ser lido.", e["id"])
 
     # Cada página precisa de pelo menos um bloco de questões.
     for p in range(total_pages):
@@ -2270,12 +2339,37 @@ def process_custom_image(
 # Impressão (seção 7) — usa a imagem original como fundo
 # ---------------------------------------------------------------------------
 
+def load_assets(config: dict, image_path: str | None) -> dict[str, Any]:
+    """Imagens dos elementos `kind=image` (arquivos `ast_*.png` na pasta do modelo)."""
+    from PIL import Image
+
+    cfg = normalize_config(config)
+    out: dict[str, Any] = {}
+    if not image_path:
+        return out
+    base = Path(image_path).parent
+    for e in cfg["elements"]:
+        aid = e.get("asset")
+        if e["kind"] != "image" or not aid or aid in out:
+            continue
+        p = base / f"{aid}.png"
+        if not p.exists():
+            continue
+        try:
+            out[aid] = Image.open(p).convert("RGBA")
+        except OSError:
+            continue
+    return out
+
+
 def render_overlay(config: dict, base_bgr: np.ndarray, fields: dict[str, str] | None = None,
-                   qr_payload: str | None = None) -> np.ndarray:
-    """Desenha os campos dinâmicos + QR sobre a imagem original do cartão.
+                   qr_payload: str | None = None, page: int = 0,
+                   assets: dict[str, Any] | None = None) -> np.ndarray:
+    """Desenha os campos dinâmicos + QR + elementos sobre a imagem do cartão.
 
     `fields`: valores por origem (student_name, turma, matricula, exam_title,
-    subject, date, code, ...). Nunca altera a geometria das regiões.
+    subject, date, code, ...). `assets`: imagens dos elementos `kind=image`.
+    Nunca altera a geometria das regiões usadas na leitura.
     """
     from PIL import Image, ImageDraw
 
@@ -2329,6 +2423,45 @@ def render_overlay(config: dict, base_bgr: np.ndarray, fields: dict[str, str] | 
             d.text((tx, ty), text, fill=(0, 0, 0), font=font)
         img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
+    # Elementos decorativos da página. Depois dos campos para que texto/linha
+    # do usuário fiquem por cima; âncoras e bolhas continuam intocadas porque
+    # a validação avisa quando um elemento cai sobre elas.
+    elements = [e for e in cfg["elements"] if int(e.get("page") or 0) == int(page or 0)]
+    if elements:
+        pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        d = ImageDraw.Draw(pil)
+        for e in elements:
+            x0 = int(e["x"] * w)
+            y0 = int(e["y"] * h)
+            bw = max(1, int(e["w"] * w))
+            bh = max(1, int(e["h"] * h))
+            if e["kind"] == "line":
+                d.rectangle((x0, y0, x0 + bw, y0 + bh), fill=(0, 0, 0))
+            elif e["kind"] == "image":
+                asset = (assets or {}).get(e.get("asset") or "")
+                if asset is None:
+                    continue
+                scale = min(bw / asset.width, bh / asset.height)
+                nw = max(1, int(asset.width * scale))
+                nh = max(1, int(asset.height * scale))
+                resized = asset.resize((nw, nh), Image.LANCZOS)
+                pil.paste(resized, (x0 + (bw - nw) // 2, y0 + (bh - nh) // 2), resized)
+            else:
+                text = e["text"].strip()
+                if not text:
+                    continue
+                font = load_font(max(6, int(e["font_size"])))
+                tw = d.textlength(text, font=font)
+                if e["align"] == "center":
+                    tx = x0 + max(0, (bw - tw) / 2)
+                elif e["align"] == "right":
+                    tx = x0 + max(0, bw - tw)
+                else:
+                    tx = x0
+                stroke = max(0, int(e["font_size"] / 22)) if e["bold"] else 0
+                d.text((tx, y0), text, fill=(0, 0, 0), font=font, stroke_width=stroke)
+        img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
+
     return img
 
 
@@ -2370,6 +2503,7 @@ def config_summary(config: dict) -> dict:
         "n_blocks": len(cfg["questions"]),
         "n_questions": total_questions(cfg),
         "n_print_fields": len(cfg["print_fields"]),
+        "n_elements": len(cfg["elements"]),
         "n_pages": max(1, int(cfg.get("n_pages") or 1)),
         "page_w": cfg["page_w"],
         "page_h": cfg["page_h"],

@@ -1705,7 +1705,7 @@ def test_config_for_page_filters_regions():
     assert [b["id"] for b in p0["questions"]] == ["blk1"]
     assert [b["id"] for b in p1["questions"]] == ["blk2"]
     # QR, regiões informativas e campos de impressão são compartilhados
-    assert p1["info_regions"] == cfg["info_regions"]
+    assert p1["info_regions"] == ct.normalize_config(cfg)["info_regions"]
     assert p1["print_fields"] == cfg["print_fields"]
     assert {b["question"] for b in ct.expand_bubbles(p1)} == set(range(6, 11))
     assert {b["question"] for b in ct.expand_bubbles(p0)} == set(range(1, 6))

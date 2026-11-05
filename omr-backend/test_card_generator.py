@@ -35,6 +35,23 @@ def test_generated_card_is_valid_and_complete():
     assert card.image.shape[:2] == (card.config["page_h"], card.config["page_w"])
 
 
+def test_school_teacher_and_multiline_instructions_are_drawn():
+    """Escola/professor são texto fixo; instruções aceitam várias linhas."""
+    plain = generate_card({"n_questions": 10})
+    full = generate_card({
+        "n_questions": 10,
+        "school": "Escola Estadual Central",
+        "teacher": "Prof. Ana",
+        "instructions": "Preencha com caneta preta.\nNão rasure.",
+    })
+    assert not ct.has_errors(ct.validate_config(full.config))
+    assert np.any(plain.image != full.image)
+    marked = _mark(full.image, full.config, {1: "A", 10: "D"})
+    result = ct.process_custom_image(marked, full.config)
+    assert result is not None
+    assert result.answers == {1: "A", 10: "D"}
+
+
 def test_generated_card_reads_answers_and_qr():
     """Compatibilidade real: imprime (overlay), marca e lê com o motor OMR."""
     card = generate_card({

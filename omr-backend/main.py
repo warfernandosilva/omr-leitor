@@ -1670,7 +1670,7 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
     sairia no cartão NATIVO e a leitura/correção por QR não casaria com o modelo.
     """
     from models import CustomTemplate, CustomTemplateVersion
-    from omr.custom_template import n_pages, page_image_path, render_overlay
+    from omr.custom_template import load_assets, n_pages, page_image_path, render_overlay
     from routers.custom_templates import _fit_page_rect
 
     tpl = db.get(CustomTemplate, av.custom_template_id)
@@ -1693,6 +1693,7 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
             raise HTTPException(status_code=404,
                                 detail=f"Imagem da página {i + 1} do gabarito personalizado não encontrada")
         bases.append(img)
+    assets = load_assets(cfg, tpl.image_path)
 
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.utils import ImageReader
@@ -1709,8 +1710,9 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
             "turma": (av.turma or "") or "",
             "exam_title": av.titulo or "",
         }
-        for base in bases:
-            img = render_overlay(cfg, base, fields=fields, qr_payload=g.codigo_unico)
+        for i, base in enumerate(bases):
+            img = render_overlay(cfg, base, fields=fields, qr_payload=g.codigo_unico,
+                                 page=i, assets=assets)
             ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
             if not ok:
                 continue

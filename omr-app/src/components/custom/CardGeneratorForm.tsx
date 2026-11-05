@@ -305,6 +305,16 @@ export default function CardGeneratorForm({
 
         <section className="space-y-3 border-t border-line dark:border-gray-800 pt-3">
           <p className="text-sm font-semibold text-ink dark:text-white">Cabeçalho</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Escola" htmlFor="gen-school" helper="Texto fixo do cartão.">
+              <Input id="gen-school" value={spec.school ?? ''}
+                     onChange={(e) => set('school', e.target.value)} />
+            </Field>
+            <Field label="Professor(a)" htmlFor="gen-teacher">
+              <Input id="gen-teacher" value={spec.teacher ?? ''}
+                     onChange={(e) => set('teacher', e.target.value)} />
+            </Field>
+          </div>
           <Field label="Título" htmlFor="gen-title">
             <Input id="gen-title" value={spec.title ?? ''}
                    onChange={(e) => set('title', e.target.value)} />
@@ -313,9 +323,9 @@ export default function CardGeneratorForm({
             <Input id="gen-sub" value={spec.subtitle ?? ''}
                    onChange={(e) => set('subtitle', e.target.value)} />
           </Field>
-          <Field label="Instruções" htmlFor="gen-instr">
-            <Input id="gen-instr" value={spec.instructions ?? ''}
-                   onChange={(e) => set('instructions', e.target.value)} />
+          <Field label="Instruções" htmlFor="gen-instr" helper="Uma linha por linha do texto.">
+            <textarea id="gen-instr" className="input" rows={2} value={spec.instructions ?? ''}
+                      onChange={(e) => set('instructions', e.target.value)} />
           </Field>
           <div>
             <span className="label">Campos de identificação</span>

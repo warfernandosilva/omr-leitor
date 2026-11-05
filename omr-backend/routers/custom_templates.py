@@ -29,6 +29,7 @@ from models import (
 )
 from omr.card_generator import generate_card
 from omr.custom_template import (
+    _asset_id,
     config_for_page,
     config_summary,
     default_config,
@@ -38,6 +39,7 @@ from omr.custom_template import (
     expand_bubbles,
     has_errors,
     image_size_from_path,
+    load_assets,
     n_pages,
     normalize_config,
     page_image_path,
@@ -528,6 +530,52 @@ def template_image(
     return FileResponse(p, media_type="image/png")
 
 
+@router.post("/api/custom-templates/{tid}/assets", status_code=201)
+def upload_asset(
+    tid: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Envia a imagem de um elemento decorativo (logo). Devolve o id opaco.
+
+    O arquivo é salvo como PNG RGBA na pasta do modelo; a transparência é
+    composta sobre o papel na hora de imprimir.
+    """
+    from PIL import Image as PILImage
+
+    tpl = _get_template(db, tid, current_user)
+    contents = _read_upload(file)
+    try:
+        pil = PILImage.open(io.BytesIO(contents))
+        pil.load()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Não foi possível decodificar a imagem.")
+    if pil.mode not in ("RGBA", "LA"):
+        pil = pil.convert("RGBA")
+    asset_id = f"ast_{uuid.uuid4().hex[:12]}"
+    _template_dir(tpl.id).mkdir(parents=True, exist_ok=True)
+    pil.save(_template_dir(tpl.id) / f"{asset_id}.png", format="PNG")
+    return {"asset": asset_id, "w": pil.width, "h": pil.height}
+
+
+@router.get("/api/custom-templates/{tid}/assets/{asset}")
+def template_asset(
+    tid: int,
+    asset: str,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    tpl = _get_template(db, tid, current_user)
+    aid = _asset_id(asset)
+    if aid is None:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+    p = _template_dir(tpl.id) / f"{aid}.png"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+    return FileResponse(str(p), media_type="image/png")
+
+
 @router.get("/api/custom-templates/{tid}/preview")
 def template_preview(
     tid: int,
@@ -775,6 +823,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
         if img is None:
             raise HTTPException(status_code=404, detail=f"Imagem da página {i + 1} não encontrada")
         bases.append(img)
+    assets = load_assets(cfg, tpl.image_path)
 
     def _sheets(nome: str, codigo: str, fields: dict[str, str] | None
                 ) -> list[tuple[str, str, np.ndarray]]:
@@ -782,7 +831,8 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
         for i, base in enumerate(bases):
             title = nome if npg <= 1 else f"{nome} — Página {i + 1}/{npg}"
             out.append((title, codigo,
-                        render_overlay(cfg, base, fields=fields, qr_payload=codigo)))
+                        render_overlay(cfg, base, fields=fields, qr_payload=codigo,
+                                       page=i, assets=assets)))
         return out
 
     if req.mode == "blank":

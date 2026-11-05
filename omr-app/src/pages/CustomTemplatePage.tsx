@@ -5,6 +5,10 @@ import {
   Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
   Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus, Move,
   History, Wand2, LayoutTemplate,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical,
+  AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
+  AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
+  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -20,18 +24,20 @@ import { syncExam } from '../utils/api';
 import { getExams } from '../utils/storage';
 import type { Exam } from '../types';
 import {
-  CustomAnchor, CustomBlock, CustomConfig, CustomInfoRegion, CustomQr,
+  CustomAnchor, CustomBlock, CustomConfig, CustomElement, CustomInfoRegion, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
-  autoConfigureCustomTemplate, createCustomTemplate, customTemplateImage, deleteCustomTemplate,
-  detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
+  autoConfigureCustomTemplate, createCustomTemplate, customTemplateAsset, customTemplateImage,
+  deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
   getCustomTemplate, getCustomVersion, listCustomTemplates, listCustomVersions,
   moveBlockTo, printCustomTemplate, printPreviewCustomTemplate,
   replaceCustomImage,
   removePageImage,
-  shiftOverrides, testCustomTemplate, updateCustomTemplate, validateCustomTemplate,
+  shiftOverrides, testCustomTemplate, updateCustomTemplate, uploadCustomAsset,
+  validateCustomTemplate,
   withBubbleOverride, withoutBubbleOverride,
 } from '../utils/custom-template-api';
+import { AlignMode, alignRects, clampRect, distributeRects, snapDelta } from '../utils/custom-template-edit';
 import type { CustomVersionRow, PrintPreviewResult } from '../utils/custom-template-api';
 import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 import { pageWarnings } from '../utils/template-warnings';
@@ -39,11 +45,12 @@ import type { TemplatePageWarning } from '../utils/template-warnings';
 import StatusBar from '../components/custom/StatusBar';
 import CardGeneratorForm from '../components/custom/CardGeneratorForm';
 
-type RegionType = 'anchor' | 'qr' | 'info' | 'block';
-type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble';
+type RegionType = 'anchor' | 'qr' | 'info' | 'block' | 'element';
+type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble' | 'text' | 'line';
 type Selection = { kind: RegionType; id: string } | null;
+type Selected = { kind: RegionType; id: string };
 
-const LAYER_LABELS = { anchors: 'Âncoras', qr: 'QR', info: 'Info', bubbles: 'Bolhas' } as const;
+const LAYER_LABELS = { anchors: 'Âncoras', qr: 'QR', info: 'Info', bubbles: 'Bolhas', elements: 'Elementos' } as const;
 
 interface Rect { x: number; y: number; w: number; h: number }
 
@@ -318,11 +325,14 @@ function TemplateList({
 // Editor
 // ───────────────────────────────────────────────────────────────────────────
 
+type MoveItem =
+  | { kind: 'anchor' | 'qr' | 'info' | 'element'; id: string; orig: Rect }
+  | { kind: 'block'; id: string; orig: { x: number; y: number } };
+
 type DragState =
   | { kind: 'pan'; startX: number; startY: number; origX: number; origY: number }
-  | { kind: 'move'; region: Exclude<RegionType, 'block'>; id: string; start: { x: number; y: number }; orig: Rect }
+  | { kind: 'move'; start: { x: number; y: number }; items: MoveItem[]; snap: boolean; others: Rect[] }
   | { kind: 'resize'; region: Exclude<RegionType, 'block'>; id: string; handle: string; orig: Rect }
-  | { kind: 'moveblock'; id: string; start: { x: number; y: number }; orig: { x: number; y: number } }
   | { kind: 'bubble'; blockId: string; question: number; option: string; start: { x: number; y: number }; orig: { x: number; y: number } }
   | { kind: 'pagecorner'; index: number; start: { x: number; y: number }; orig: { x: number; y: number } };
 
@@ -339,10 +349,16 @@ function TemplateEditor({
   const [config, setConfig] = useState<CustomConfig>(() => clone(detail.config));
   const [issues, setIssues] = useState<ValidationIssue[]>(detail.issues ?? []);
   const [status, setStatus] = useState(detail.status);
-  const [selection, setSelection] = useState<Selection>(null);
+  const [selection, setSelectionState] = useState<Selection>(null);
+  // Multi-seleção: `selection` continua sendo o item primário (painel de
+  // propriedades); `selected` é o grupo usado nas ações (mover, alinhar...).
+  const [selected, setSelected] = useState<Selected[]>([]);
   const [tool, setTool] = useState<Tool>('select');
   const [zoom, setZoom] = useState(0.5);
-  const [show, setShow] = useState({ anchors: true, qr: true, info: true, bubbles: true });
+  const [show, setShow] = useState({ anchors: true, qr: true, info: true, bubbles: true, elements: true });
+  const [showGrid, setShowGrid] = useState(false);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [anchorType, setAnchorType] = useState<'aruco' | 'quad'>('quad');
@@ -364,6 +380,46 @@ function TemplateEditor({
   // Painel direito: uma aba por vez evita empilhar propriedades + diagnóstico + ações.
   const [rightTab, setRightTab] = useState<'props' | 'diag' | 'actions'>('props');
   const canvasWrapRef = useRef<HTMLDivElement>(null);
+
+  // Seleção: clique simples substitui; Shift/Ctrl alterna dentro do grupo.
+  const setSelection = (s: Selection, additive = false) => {
+    if (!s) { setSelected([]); setSelectionState(null); return; }
+    if (additive) {
+      const exists = selected.some((x) => x.kind === s.kind && x.id === s.id);
+      const next = exists
+        ? selected.filter((x) => !(x.kind === s.kind && x.id === s.id))
+        : [...selected, s];
+      setSelected(next);
+      setSelectionState(next.length ? next[next.length - 1] : null);
+      return;
+    }
+    setSelected([s]);
+    setSelectionState(s);
+  };
+  const selectMany = (list: Selected[]) => {
+    setSelected(list);
+    setSelectionState(list.length ? list[list.length - 1] : null);
+  };
+
+  // Logos dos elementos: id opaco → object URL local para o canvas.
+  const [assetUrls, setAssetUrls] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const ids = Array.from(new Set(
+      (config.elements ?? []).map((e) => e.asset).filter((a): a is string => !!a),
+    )).filter((a) => !assetUrls[a]);
+    if (!ids.length) return;
+    let cancelled = false;
+    (async () => {
+      const loaded: Record<string, string> = {};
+      for (const id of ids) {
+        try {
+          loaded[id] = URL.createObjectURL(await customTemplateAsset(detail.id, id));
+        } catch { /* logo ausente: a validação avisa ao salvar */ }
+      }
+      if (!cancelled && Object.keys(loaded).length) setAssetUrls((m) => ({ ...m, ...loaded }));
+    })();
+    return () => { cancelled = true; };
+  }, [config.elements, detail.id, assetUrls]);
 
   const configRef = useRef(config);
   useEffect(() => { configRef.current = config; }, [config]);
@@ -479,6 +535,7 @@ function TemplateEditor({
       ...config,
       anchors: config.anchors.filter((a) => (a.page ?? 0) === currentPage),
       questions: config.questions.filter((b) => (b.page ?? 0) === currentPage),
+      elements: (config.elements ?? []).filter((e) => (e.page ?? 0) === currentPage),
     }),
     [config, currentPage],
   );
@@ -487,7 +544,7 @@ function TemplateEditor({
   const dragRef = useRef<DragState | null>(null);
   const snapRef = useRef<CustomConfig | null>(null);
   const creatingRef = useRef<CreateBox | null>(null);
-  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info'; anchorType: 'aruco' | 'quad'; arucoId: number; anchorSize: number; page: number }>(
+  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info' | 'text' | 'line'; anchorType: 'aruco' | 'quad'; arucoId: number; anchorSize: number; page: number }>(
     { tool: 'anchor', anchorType: 'quad', arucoId: 0, anchorSize: 0.05, page: 0 },
   );
   const pendingBlockRef = useRef<CustomBlock | null>(null);
@@ -528,17 +585,34 @@ function TemplateEditor({
       }
       const p = toBase(e.clientX, e.clientY);
       if (d.kind === 'move') {
-        const dx = (p.x - d.start.x) / baseW;
-        const dy = (p.y - d.start.y) / baseH;
-        const nx = clamp(d.orig.x + dx, 0, 1 - d.orig.w);
-        const ny = clamp(d.orig.y + dy, 0, 1 - d.orig.h);
-        setConfig((cfg) => setRect(cfg, d.region, d.id, { x: nx, y: ny, w: d.orig.w, h: d.orig.h }));
+        let dx = (p.x - d.start.x) / baseW;
+        let dy = (p.y - d.start.y) / baseH;
+        const primary = d.items[0];
+        if (d.snap && primary && primary.kind !== 'block') {
+          const moved = { ...primary.orig, x: primary.orig.x + dx, y: primary.orig.y + dy };
+          const s = snapDelta(moved, d.others, 0.005, 0.004);
+          dx += s.dx;
+          dy += s.dy;
+          setGuides({ x: s.guidesX, y: s.guidesY });
+        }
+        setConfig((cfg) => {
+          let next = cfg;
+          for (const it of d.items) {
+            if (it.kind === 'block') {
+              next = setBlockStart(next, it.id, clamp(it.orig.x + dx, 0, 1), clamp(it.orig.y + dy, 0, 1));
+            } else {
+              next = setRect(next, it.kind, it.id, {
+                x: clamp(it.orig.x + dx, 0, 1 - it.orig.w),
+                y: clamp(it.orig.y + dy, 0, 1 - it.orig.h),
+                w: it.orig.w,
+                h: it.orig.h,
+              });
+            }
+          }
+          return next;
+        });
       } else if (d.kind === 'resize') {
         setConfig((cfg) => setRect(cfg, d.region, d.id, resizeRect(d.orig, d.handle, p.x / baseW, p.y / baseH)));
-      } else if (d.kind === 'moveblock') {
-        const dx = (p.x - d.start.x) / baseW;
-        const dy = (p.y - d.start.y) / baseH;
-        setConfig((cfg) => setBlockStart(cfg, d.id, clamp(d.orig.x + dx, 0, 1), clamp(d.orig.y + dy, 0, 1)));
       } else if (d.kind === 'bubble') {
         const dx = (p.x - d.start.x) / baseW;
         const dy = (p.y - d.start.y) / baseH;
@@ -564,9 +638,14 @@ function TemplateEditor({
         setCreating(null);
         const ctx = createCtxRef.current;
         setTool('select');
-        const w = Math.abs(c.x1 - c.x0) / baseW;
-        const h = Math.abs(c.y1 - c.y0) / baseH;
-        if (w < 0.012 || h < 0.012) return; // clique sem arrasto
+        let w = Math.abs(c.x1 - c.x0) / baseW;
+        let h = Math.abs(c.y1 - c.y0) / baseH;
+        if (w < 0.012 || h < 0.012) {
+          // Texto/linha aceitam clique sem arrasto (tamanho padrão).
+          if (ctx.tool !== 'text' && ctx.tool !== 'line') return;
+          w = Math.max(w, ctx.tool === 'line' ? 0.3 : 0.2);
+          h = Math.max(h, ctx.tool === 'line' ? 0.004 : 0.05);
+        }
         const rect: Rect = {
           x: Math.min(c.x0, c.x1) / baseW,
           y: Math.min(c.y0, c.y1) / baseH,
@@ -584,6 +663,7 @@ function TemplateEditor({
       const d = dragRef.current;
       dragRef.current = null;
       setDragKind(null);
+      setGuides({ x: [], y: [] });
       if (!d || d.kind === 'pan') return;
       if (snapRef.current) {
         pushHistory(snapRef.current);
@@ -631,19 +711,39 @@ function TemplateEditor({
   const startDragRegion = (e: ReactPointerEvent<SVGElement>, kind: RegionType, id: string) => {
     if (e.button !== 0 || e.altKey) return;
     e.stopPropagation();
-    setSelection({ kind, id });
-    snapRef.current = clone(configRef.current);
-    const p = toBase(e.clientX, e.clientY);
-    if (kind === 'block') {
-      const b = configRef.current.questions.find((x) => x.id === id);
-      if (!b) return;
-      dragRef.current = { kind: 'moveblock', id, start: p, orig: { x: b.first_x, y: b.first_y } };
-      setDragKind('moveblock');
-      return;
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+    setSelection({ kind, id }, additive);
+    const cfg = configRef.current;
+    const already = selected.some((s) => s.kind === kind && s.id === id);
+    const group: Selected[] = already && !additive ? selected : [{ kind, id }];
+    const items: MoveItem[] = [];
+    for (const s of group) {
+      if (isLocked(cfg, s.kind, s.id)) continue;
+      if (s.kind === 'block') {
+        const b = cfg.questions.find((x) => x.id === s.id);
+        if (b) items.push({ kind: 'block', id: s.id, orig: { x: b.first_x, y: b.first_y } });
+      } else {
+        const orig = rectOf(cfg, s.kind, s.id);
+        if (orig) items.push({ kind: s.kind, id: s.id, orig });
+      }
     }
-    const orig = rectOf(configRef.current, kind, id);
-    if (!orig) return;
-    dragRef.current = { kind: 'move', region: kind, id, start: p, orig };
+    if (!items.length) return;
+    const ids = new Set(items.map((it) => `${it.kind}:${it.id}`));
+    // Guias: bordas/centros das outras regiões desta página.
+    const others: Rect[] = [
+      ...cfg.anchors.filter((a) => (a.page ?? 0) === currentPage && !ids.has(`anchor:${a.id}`))
+        .map((a) => ({ x: a.x - a.size / 2, y: a.y - a.size / 2, w: a.size, h: a.size })),
+      ...(cfg.qr && !ids.has(`qr:${cfg.qr.id}`) ? [{ x: cfg.qr.x, y: cfg.qr.y, w: cfg.qr.w, h: cfg.qr.h }] : []),
+      ...cfg.info_regions.filter((i) => !ids.has(`info:${i.id}`))
+        .map((i) => ({ x: i.x, y: i.y, w: i.w, h: i.h })),
+      ...(cfg.elements ?? []).filter((el) => (el.page ?? 0) === currentPage && !ids.has(`element:${el.id}`))
+        .map((el) => ({ x: el.x, y: el.y, w: el.w, h: el.h })),
+    ];
+    snapRef.current = clone(cfg);
+    dragRef.current = {
+      kind: 'move', start: toBase(e.clientX, e.clientY), items,
+      snap: snapEnabled, others,
+    };
     setDragKind('move');
   };
 
@@ -654,6 +754,7 @@ function TemplateEditor({
     // Alt+arrasto continua sendo pan da página, mesmo sobre uma bolha.
     if (e.button !== 0 || e.altKey) return;
     e.stopPropagation();
+    if (isLocked(configRef.current, 'block', blockId)) return;
     setSelection({ kind: 'block', id: blockId });
     snapRef.current = clone(configRef.current);
     const p = toBase(e.clientX, e.clientY);
@@ -664,6 +765,7 @@ function TemplateEditor({
   const startResize = (e: ReactPointerEvent<SVGElement>, kind: Exclude<RegionType, 'block'>, id: string, handle: string, orig: Rect) => {
     if (e.button !== 0 || e.altKey) return;
     e.stopPropagation();
+    if (isLocked(configRef.current, kind, id)) return;
     snapRef.current = clone(configRef.current);
     dragRef.current = { kind: 'resize', region: kind, id, handle, orig };
     setDragKind('resize');
@@ -827,6 +929,9 @@ function TemplateEditor({
       questions: cfg.questions
         .filter((b) => (b.page ?? 0) !== idx)
         .map((b) => ((b.page ?? 0) > idx ? { ...b, page: (b.page ?? 0) - 1 } : b)),
+      elements: (cfg.elements ?? [])
+        .filter((e) => (e.page ?? 0) !== idx)
+        .map((e) => ((e.page ?? 0) > idx ? { ...e, page: (e.page ?? 0) - 1 } : e)),
     });
     setPageIdx(Math.max(0, idx - 1));
     setSelection(null);
@@ -861,6 +966,7 @@ function TemplateEditor({
         qr: c.qr ? { ...c.qr, id: `qr_${rnd()}` } : null,
         info_regions: infoRegions,
         questions: (c.questions ?? []).map((b) => ({ ...b, id: `blk_${rnd()}` })),
+        elements: (c.elements ?? []).map((e) => ({ ...e, id: `el_${rnd()}` })),
         // Os campos impressos referenciam o id da região informativa: sem o
         // remapeamento eles ficariam órfãos (e deixariam de ser impressos).
         print_fields: (c.print_fields ?? []).map((f) => ({
@@ -877,7 +983,7 @@ function TemplateEditor({
     }
   };
 
-  const save = useCallback(async (): Promise<boolean> => {
+  const save = useCallback(async (silent = false): Promise<boolean> => {
     setSaving(true);
     try {
       const d = await updateCustomTemplate(detail.id, { config });
@@ -886,7 +992,7 @@ function TemplateEditor({
       setIssues(v.issues);
       setStatus(v.status as typeof status);
       setDirty(false);
-      toast.success('Modelo salvo.');
+      if (!silent) toast.success('Modelo salvo.');
       return true;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Falha ao salvar');
@@ -895,6 +1001,15 @@ function TemplateEditor({
       setSaving(false);
     }
   }, [config, detail.id, onSaved, toast]);
+
+  // Autosave: 1,5 s depois da última alteração. Falha mantém "não salvo".
+  const saveRef = useRef(save);
+  useEffect(() => { saveRef.current = save; }, [save]);
+  useEffect(() => {
+    if (!dirty) return;
+    const t = window.setTimeout(() => { void saveRef.current(true); }, 1500);
+    return () => window.clearTimeout(t);
+  }, [config, dirty]);
 
   const runValidate = async () => {
     try {
@@ -951,11 +1066,168 @@ function TemplateEditor({
     apply({ ...configRef.current, ...patch });
   }, [apply]);
 
+  // ── Paleta: imagem/logo ───────────────────────────────────────────────────
+  const assetInputRef = useRef<HTMLInputElement>(null);
+  const assetTargetRef = useRef<string | null>(null);
+  const [uploadingAsset, setUploadingAsset] = useState(false);
+  const pickAsset = (elementId: string | null) => {
+    assetTargetRef.current = elementId;
+    assetInputRef.current?.click();
+  };
+  const handleAssetFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingAsset(true);
+    try {
+      const { asset, w, h } = await uploadCustomAsset(detail.id, file);
+      const target = assetTargetRef.current;
+      assetTargetRef.current = null;
+      if (target) {
+        updateField({
+          elements: (configRef.current.elements ?? []).map((el) => (el.id === target ? { ...el, asset } : el)),
+        });
+      } else {
+        // Mantém a proporção da imagem no papel (w/h normalizados).
+        const ew = 0.2;
+        const eh = clamp(ew * (baseW / baseH) * (w && h ? h / w : 1), 0.01, 1);
+        const el: CustomElement = {
+          id: `el_${rnd()}`, kind: 'image', page: currentPage, x: 0.1, y: 0.1, w: ew, h: eh,
+          text: '', font_size: 40, align: 'left', bold: false, asset,
+        };
+        apply({ ...configRef.current, elements: [...(configRef.current.elements ?? []), el] });
+        setSelection({ kind: 'element', id: el.id });
+      }
+      toast.success('Imagem adicionada ao cartão.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Falha ao enviar a imagem');
+    } finally {
+      setUploadingAsset(false);
+    }
+  };
+
+  // ── Ações sobre a seleção ─────────────────────────────────────────────────
+  const duplicateSelected = () => {
+    const cfg = configRef.current;
+    const d = 0.02;
+    let next = cfg;
+    const created: Selected[] = [];
+    for (const s of selected) {
+      if (s.kind === 'qr') continue; // só existe um QR por cartão
+      if (s.kind === 'anchor') {
+        const a = cfg.anchors.find((x) => x.id === s.id);
+        if (!a) continue;
+        const c = { ...a, id: `anc_${rnd()}`, x: clamp(a.x + d, 0, 1), y: clamp(a.y + d, 0, 1) };
+        next = { ...next, anchors: [...next.anchors, c] };
+        created.push({ kind: 'anchor', id: c.id });
+      } else if (s.kind === 'info') {
+        const i = cfg.info_regions.find((x) => x.id === s.id);
+        if (!i) continue;
+        const c = { ...i, id: `info_${rnd()}`, x: clamp(i.x + d, 0, 1 - i.w), y: clamp(i.y + d, 0, 1 - i.h) };
+        next = { ...next, info_regions: [...next.info_regions, c] };
+        created.push({ kind: 'info', id: c.id });
+      } else if (s.kind === 'element') {
+        const el = (cfg.elements ?? []).find((x) => x.id === s.id);
+        if (!el) continue;
+        const c = { ...el, id: `el_${rnd()}`, x: clamp(el.x + d, 0, 1 - el.w), y: clamp(el.y + d, 0, 1 - el.h) };
+        next = { ...next, elements: [...(next.elements ?? []), c] };
+        created.push({ kind: 'element', id: c.id });
+      } else {
+        const b = cfg.questions.find((x) => x.id === s.id);
+        if (!b) continue;
+        const c = moveBlockTo({ ...b, id: `blk_${rnd()}` }, clamp(b.first_x + d, 0, 1), clamp(b.first_y + d, 0, 1));
+        next = { ...next, questions: [...next.questions, c] };
+        created.push({ kind: 'block', id: c.id });
+      }
+    }
+    if (!created.length) return;
+    apply(next);
+    selectMany(created);
+  };
+
+  const deleteSelected = () => {
+    if (!selected.length) return;
+    let next = configRef.current;
+    for (const s of selected) next = removeRegion(next, s.kind, s.id);
+    apply(next);
+    setSelection(null);
+  };
+
+  const toggleLock = () => {
+    if (!selected.length) return;
+    const ids = new Set(selected.map((s) => `${s.kind}:${s.id}`));
+    const flip = <T extends { id: string; locked?: boolean }>(kind: RegionType, item: T): T =>
+      (ids.has(`${kind}:${item.id}`) ? { ...item, locked: !item.locked } : item) as T;
+    const cfg = configRef.current;
+    apply({
+      ...cfg,
+      anchors: cfg.anchors.map((a) => flip('anchor', a)),
+      qr: cfg.qr ? flip('qr', cfg.qr) : null,
+      info_regions: cfg.info_regions.map((i) => flip('info', i)),
+      questions: cfg.questions.map((b) => flip('block', b)),
+      elements: (cfg.elements ?? []).map((e) => flip('element', e)),
+    });
+  };
+
+  const movableSelected = () => {
+    const cfg = configRef.current;
+    return selected
+      .filter((s) => s.kind !== 'block' && !isLocked(cfg, s.kind, s.id))
+      .map((s) => ({ s, r: rectOf(cfg, s.kind, s.id) }))
+      .filter((x): x is { s: Selected; r: Rect } => !!x.r);
+  };
+
+  const alignSelected = (mode: AlignMode) => {
+    const items = movableSelected();
+    if (items.length < 2) return;
+    const out = alignRects(items.map((x) => x.r), mode);
+    let next = configRef.current;
+    items.forEach((x, i) => {
+      next = setRect(next, x.s.kind as Exclude<RegionType, 'block'>, x.s.id, clampRect(out[i]));
+    });
+    apply(next);
+  };
+
+  const distributeSelected = (axis: 'x' | 'y') => {
+    const items = movableSelected();
+    if (items.length < 3) return;
+    const out = distributeRects(items.map((x) => x.r), axis);
+    let next = configRef.current;
+    items.forEach((x, i) => {
+      next = setRect(next, x.s.kind as Exclude<RegionType, 'block'>, x.s.id, clampRect(out[i]));
+    });
+    apply(next);
+  };
+
+  // Atalhos do editor (ignora campos de texto).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selected.length) { e.preventDefault(); deleteSelected(); }
+        return;
+      }
+      if (e.key === 'Escape') { setSelection(null); setTool('select'); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   return (
     <div className="space-y-3 animate-fade-in">
       <PageHeader
         title={detail.nome}
-        subtitle={`Gabarito personalizado · ${STATUS_LABEL[status] ?? status}${dirty ? ' · alterações não salvas' : ''}`}
+        subtitle={`Gabarito personalizado · ${STATUS_LABEL[status] ?? status}${
+          saving ? ' · salvando…' : dirty ? ' · alterações não salvas' : ' · salvo'}`}
         actions={
           <>
             <Button variant="ghost" size="sm" onClick={onClose}
@@ -1023,6 +1295,8 @@ function TemplateEditor({
             )}
             <input ref={pageImageInputRef} type="file" accept="image/*" hidden
                    onChange={(e) => void handlePageImage(e)} />
+            <input ref={assetInputRef} type="file" accept="image/*" hidden
+                   onChange={(e) => void handleAssetFile(e)} />
             <Button variant="secondary" size="sm" loading={uploadingPageImage}
                     icon={<ImageIcon size={14} aria-hidden />}
                     onClick={() => pageImageInputRef.current?.click()}>
@@ -1038,12 +1312,15 @@ function TemplateEditor({
                      setTool(t);
                      // A ferramenta de bolhas só faz sentido com a camada visível.
                      if (t === 'bubble') setShow((s) => ({ ...s, bubbles: true }));
+                     if (t === 'text' || t === 'line') setShow((s) => ({ ...s, elements: true }));
                    }}
                    anchorType={anchorType} setAnchorType={setAnchorType}
                    anchorArucoId={anchorArucoId} setAnchorArucoId={setAnchorArucoId}
                    onAddBlock={addBlock}
                    anchorCount={pageConfig.anchors.length}
                    onAddAnchor={addAnchor}
+                   onAddImage={() => pickAsset(null)}
+                   uploadingAsset={uploadingAsset}
                    anchorSize={anchorSize} setAnchorSize={setAnchorSize}
                    onDetectGrid={() => void detectGrid()} detecting={detecting}
                     onAutoConfigure={() => void autoConfigure()} autoBusy={autoBusy}
@@ -1119,6 +1396,11 @@ function TemplateEditor({
             <Button size="icon" variant="ghost" title="Ajustar à tela"
                     onClick={fitToScreen}><Maximize size={16} /></Button>
             <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
+            <Button size="icon" variant={showGrid ? 'secondary' : 'ghost'} title="Grade (1%)"
+                    aria-pressed={showGrid} onClick={() => setShowGrid((v) => !v)}><Grid3x3 size={16} /></Button>
+            <Button size="icon" variant={snapEnabled ? 'secondary' : 'ghost'} title="Encaixar na grade e nas guias"
+                    aria-pressed={snapEnabled} onClick={() => setSnapEnabled((v) => !v)}><Magnet size={16} /></Button>
+            <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
             <Button size="icon" variant="ghost" title="Desfazer" disabled={!past.length} onClick={undo}><Undo2 size={16} /></Button>
             <Button size="icon" variant="ghost" title="Refazer" disabled={!future.length} onClick={redo}><Redo2 size={16} /></Button>
             {tool !== 'select' && (
@@ -1128,10 +1410,45 @@ function TemplateEditor({
                   ? 'Arraste uma bolha para ajustar o alinhamento'
                   : tool === 'place-block'
                     ? 'Clique para posicionar o bloco'
-                    : 'Arraste para criar a região'}
+                    : tool === 'text'
+                      ? 'Arraste para criar a caixa de texto'
+                      : tool === 'line'
+                        ? 'Arraste para desenhar a linha'
+                        : 'Arraste para criar a região'}
               </span>
             )}
           </div>
+
+          {selected.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 rounded-md border border-gray-200 dark:border-gray-700 px-2 py-1">
+              <span className="mr-1 text-[11px] text-gray-500 dark:text-gray-400">
+                {selected.length} selecionado{selected.length > 1 ? 's' : ''}
+              </span>
+              <Button size="icon" variant="ghost" title="Duplicar (Ctrl+D)" onClick={duplicateSelected}><Copy size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Excluir (Del)" onClick={deleteSelected}><Trash2 size={15} /></Button>
+              <Button size="icon" variant={selected.every((s) => isLocked(config, s.kind, s.id)) ? 'secondary' : 'ghost'}
+                      title={selected.every((s) => isLocked(config, s.kind, s.id)) ? 'Desbloquear' : 'Travar posição'}
+                      onClick={toggleLock}><Lock size={15} /></Button>
+              <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
+              <Button size="icon" variant="ghost" title="Alinhar à esquerda" disabled={selected.length < 2}
+                      onClick={() => alignSelected('left')}><AlignStartVertical size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Centralizar horizontalmente" disabled={selected.length < 2}
+                      onClick={() => alignSelected('hcenter')}><AlignCenterVertical size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Alinhar à direita" disabled={selected.length < 2}
+                      onClick={() => alignSelected('right')}><AlignEndVertical size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Alinhar ao topo" disabled={selected.length < 2}
+                      onClick={() => alignSelected('top')}><AlignStartHorizontal size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Centralizar verticalmente" disabled={selected.length < 2}
+                      onClick={() => alignSelected('vcenter')}><AlignCenterHorizontal size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Alinhar embaixo" disabled={selected.length < 2}
+                      onClick={() => alignSelected('bottom')}><AlignEndHorizontal size={15} /></Button>
+              <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
+              <Button size="icon" variant="ghost" title="Distribuir horizontalmente" disabled={selected.length < 3}
+                      onClick={() => distributeSelected('x')}><AlignHorizontalDistributeCenter size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Distribuir verticalmente" disabled={selected.length < 3}
+                      onClick={() => distributeSelected('y')}><AlignVerticalDistributeCenter size={15} /></Button>
+            </div>
+          )}
 
           <div ref={canvasWrapRef}
                className="relative min-h-0 flex-1 overflow-auto rounded-lg bg-gray-200 dark:bg-gray-800"
@@ -1163,7 +1480,8 @@ function TemplateEditor({
                      className="absolute inset-0" style={{ touchAction: 'none' }}
                      onPointerDown={onSvgPointerDown} onClick={onSvgClick}>
                   <OverlayRegions
-                    config={pageConfig} show={show} selection={selection} zoom={zoom} tool={tool}
+                    config={pageConfig} show={show} selection={selection} selected={selected}
+                    zoom={zoom} tool={tool} grid={showGrid} guides={guides} assetUrls={assetUrls}
                     onSelect={setSelection} onStartDrag={startDragRegion} onStartResize={startResize}
                     onStartBubbleDrag={startBubbleDrag}
                     onStartPageCorner={startPageCornerDrag}
@@ -1204,7 +1522,8 @@ function TemplateEditor({
           />
           <div className="min-h-0 flex-1 overflow-y-auto pt-3">
             {rightTab === 'props' && (
-              <PropertiesPanel config={config} selection={selection} updateField={updateField} />
+              <PropertiesPanel config={config} selection={selection} updateField={updateField}
+                               onPickAsset={(id) => pickAsset(id)} />
             )}
             {rightTab === 'diag' && <ValidationPanel issues={issues} warnings={warnings} onGoTo={setSelection} />}
             {rightTab === 'actions' && <ActionsPanel detailId={detail.id} onRestore={apply} />}
@@ -1225,7 +1544,7 @@ function TemplateEditor({
 // ───────────────────────────────────────────────────────────────────────────
 
 function buildCreate(
-  cfg: CustomConfig, region: 'anchor' | 'qr' | 'info', rect: Rect,
+  cfg: CustomConfig, region: 'anchor' | 'qr' | 'info' | 'text' | 'line', rect: Rect,
   anchorType: 'aruco' | 'quad', arucoId: number,
   anchorSize: number = 0.05,
   page: number = 0,
@@ -1241,7 +1560,18 @@ function buildCreate(
     const info: CustomInfoRegion = { id: `info_${rnd()}`, kind: 'info', ...rect };
     return { config: { ...cfg, info_regions: [...cfg.info_regions, info] }, selection: { kind: 'info', id: info.id } };
   }
-const size = anchorSize;
+  if (region === 'text' || region === 'line') {
+    const el: CustomElement = {
+      id: `el_${rnd()}`, kind: region, page, ...rect,
+      text: region === 'text' ? 'Texto' : '',
+      font_size: 40, align: 'left', bold: false, asset: null,
+    };
+    return {
+      config: { ...cfg, elements: [...(cfg.elements ?? []), el] },
+      selection: { kind: 'element', id: el.id },
+    };
+  }
+  const size = anchorSize;
   const anchor: CustomAnchor = {
     id: `anc_${rnd()}`, type: anchorType, corner: null,
     aruco_id: anchorType === 'aruco' ? arucoId : null,
@@ -1252,10 +1582,19 @@ const size = anchorSize;
   return { config: { ...cfg, anchors: [...cfg.anchors, anchor] }, selection: { kind: 'anchor', id: anchor.id } };
 }
 
+function isLocked(cfg: CustomConfig, kind: RegionType, id: string): boolean {
+  if (kind === 'anchor') return !!cfg.anchors.find((a) => a.id === id)?.locked;
+  if (kind === 'qr') return !!cfg.qr?.locked;
+  if (kind === 'info') return !!cfg.info_regions.find((r) => r.id === id)?.locked;
+  if (kind === 'block') return !!cfg.questions.find((b) => b.id === id)?.locked;
+  return !!(cfg.elements ?? []).find((e) => e.id === id)?.locked;
+}
+
 function removeRegion(cfg: CustomConfig, kind: RegionType, id: string): CustomConfig {
   if (kind === 'anchor') return { ...cfg, anchors: cfg.anchors.filter((a) => a.id !== id) };
   if (kind === 'qr') return { ...cfg, qr: null };
   if (kind === 'info') return { ...cfg, info_regions: cfg.info_regions.filter((r) => r.id !== id) };
+  if (kind === 'element') return { ...cfg, elements: (cfg.elements ?? []).filter((e) => e.id !== id) };
   return { ...cfg, questions: cfg.questions.filter((b) => b.id !== id) };
 }
 
@@ -1264,6 +1603,10 @@ function rectOf(cfg: CustomConfig, kind: RegionType, id: string): Rect | null {
   if (kind === 'info') {
     const r = cfg.info_regions.find((x) => x.id === id);
     return r ? { x: r.x, y: r.y, w: r.w, h: r.h } : null;
+  }
+  if (kind === 'element') {
+    const e = (cfg.elements ?? []).find((x) => x.id === id);
+    return e ? { x: e.x, y: e.y, w: e.w, h: e.h } : null;
   }
   if (kind === 'anchor') {
     const a = cfg.anchors.find((x) => x.id === id);
@@ -1276,6 +1619,9 @@ function setRect(cfg: CustomConfig, kind: Exclude<RegionType, 'block'>, id: stri
   if (kind === 'qr' && cfg.qr) return { ...cfg, qr: { ...cfg.qr, ...rect } };
   if (kind === 'info') {
     return { ...cfg, info_regions: cfg.info_regions.map((i) => (i.id === id ? { ...i, ...rect } : i)) };
+  }
+  if (kind === 'element') {
+    return { ...cfg, elements: (cfg.elements ?? []).map((e) => (e.id === id ? { ...e, ...rect } : e)) };
   }
   return {
     ...cfg,
@@ -1317,7 +1663,7 @@ function resizeRect(orig: Rect, handle: string, nx: number, ny: number): Rect {
 
 function Toolbar({
   tool, setTool, anchorType, setAnchorType, anchorArucoId, setAnchorArucoId, anchorSize, setAnchorSize,
-  anchorCount, onAddAnchor,
+  anchorCount, onAddAnchor, onAddImage, uploadingAsset,
   onAddBlock, onDetectGrid, onAutoConfigure, autoBusy,
   onDetectAnchors, onDetectPageCorners, onManualPageCorners, onRemovePageCorners,
   detecting, detectingAnchors, detectingPageCorners, hasPageCorners,
@@ -1328,6 +1674,8 @@ function Toolbar({
   anchorSize: number; setAnchorSize: (n: number) => void;
   anchorCount: number;
   onAddAnchor: () => void;
+  onAddImage: () => void;
+  uploadingAsset: boolean;
   onAddBlock: () => void;
   onDetectGrid: () => void;
   onAutoConfigure: () => void;
@@ -1346,6 +1694,8 @@ function Toolbar({
     { id: 'anchor', label: 'Âncora', icon: Square },
     { id: 'qr', label: 'QR Code', icon: QrCode },
     { id: 'info', label: 'Info', icon: Info },
+    { id: 'text', label: 'Texto', icon: Type },
+    { id: 'line', label: 'Linha', icon: Minus },
     { id: 'bubble', label: 'Ajustar bolhas', icon: Move },
   ];
   return (
@@ -1365,6 +1715,11 @@ function Toolbar({
                   aria-pressed={tool === 'place-block'}
                   className={`btn btn-sm min-h-[40px] justify-start col-span-2 ${tool === 'place-block' ? 'btn-primary' : 'btn-secondary'}`}>
             <Boxes size={15} aria-hidden /> Bloco de questões
+          </button>
+          <button type="button" onClick={onAddImage} disabled={uploadingAsset}
+                  title="Envia uma logo/imagem e adiciona ao cartão (só na impressão)"
+                  className="btn btn-secondary btn-sm min-h-[40px] justify-start col-span-2">
+            <ImagePlus size={15} aria-hidden /> {uploadingAsset ? 'Enviando…' : 'Imagem / logo'}
           </button>
         </div>
       </div>
@@ -1461,15 +1816,19 @@ function Toolbar({
 // ───────────────────────────────────────────────────────────────────────────
 
 function OverlayRegions({
-  config, show, selection, zoom, tool, onSelect, onStartDrag, onStartResize,
-  onStartBubbleDrag, onStartPageCorner,
+  config, show, selection, selected, zoom, tool, grid, guides, assetUrls,
+  onSelect, onStartDrag, onStartResize, onStartBubbleDrag, onStartPageCorner,
 }: {
   config: CustomConfig;
-  show: { anchors: boolean; qr: boolean; info: boolean; bubbles: boolean };
+  show: { anchors: boolean; qr: boolean; info: boolean; bubbles: boolean; elements: boolean };
   selection: Selection;
+  selected: Selected[];
   zoom: number;
   tool: Tool;
-  onSelect: (s: Selection) => void;
+  grid: boolean;
+  guides: { x: number[]; y: number[] };
+  assetUrls: Record<string, string>;
+  onSelect: (s: Selection, additive?: boolean) => void;
   onStartDrag: (e: ReactPointerEvent<SVGElement>, kind: RegionType, id: string) => void;
   onStartResize: (e: ReactPointerEvent<SVGElement>, kind: Exclude<RegionType, 'block'>, id: string, handle: string, orig: Rect) => void;
   onStartBubbleDrag: (e: ReactPointerEvent<SVGElement>, blockId: string, question: number, option: string, x: number, y: number) => void;
@@ -1477,7 +1836,10 @@ function OverlayRegions({
 }) {
   const pw = config.page_w || 1;
   const ph = config.page_h || 1;
-  const sel = (kind: RegionType, id: string) => selection?.kind === kind && selection?.id === id;
+  const isSel = (kind: RegionType, id: string) =>
+    selected.some((s) => s.kind === kind && s.id === id);
+  const isPrimary = (kind: RegionType, id: string) =>
+    selection?.kind === kind && selection?.id === id;
   const stroke = 2 / zoom;
 
   const pageCorners = config.page_corners && config.page_corners.length === 4
@@ -1501,16 +1863,25 @@ function OverlayRegions({
 
   return (
     <g>
+      <defs>
+        <pattern id="editor-grid" width={pw / 100} height={ph / 100} patternUnits="userSpaceOnUse">
+          <path d={`M ${pw / 100} 0 L 0 0 0 ${ph / 100}`} fill="none"
+                stroke="rgba(99,102,241,0.28)" strokeWidth={1 / zoom} />
+        </pattern>
+      </defs>
+      {grid && (
+        <rect x={0} y={0} width={pw} height={ph} fill="url(#editor-grid)" pointerEvents="none" />
+      )}
       {show.anchors && config.anchors.map((a) => {
         const r: Rect = { x: a.x - a.size / 2, y: a.y - a.size / 2, w: a.size, h: a.size };
         return (
           <g key={a.id} onPointerDown={(e) => onStartDrag(e, 'anchor', a.id)} style={{ cursor: 'move' }}>
             <rect x={r.x * pw} y={r.y * ph} width={r.w * pw} height={r.h * ph}
-                  fill="rgba(245,158,11,0.12)" stroke="#f59e0b" strokeWidth={sel('anchor', a.id) ? stroke * 1.6 : stroke} />
+                  fill="rgba(245,158,11,0.12)" stroke="#f59e0b" strokeWidth={isSel('anchor', a.id) ? stroke * 1.6 : stroke} />
             <text x={r.x * pw} y={r.y * ph - 3 / zoom} fontSize={11 / zoom} fill="#b45309">
               {a.type}{a.type === 'aruco' ? ` #${a.aruco_id ?? '?'}` : ''}{a.corner ? ` ${a.corner}` : ''}
             </text>
-            {sel('anchor', a.id) && handlesFor('anchor', a.id, r)}
+            {isPrimary('anchor', a.id) && handlesFor('anchor', a.id, r)}
           </g>
         );
       })}
@@ -1521,9 +1892,9 @@ function OverlayRegions({
         return (
           <g onPointerDown={(e) => onStartDrag(e, 'qr', q.id)} style={{ cursor: 'move' }}>
             <rect x={r.x * pw} y={r.y * ph} width={r.w * pw} height={r.h * ph}
-                  fill="rgba(37,99,235,0.12)" stroke="#2563eb" strokeWidth={sel('qr', q.id) ? stroke * 1.6 : stroke} />
+                  fill="rgba(37,99,235,0.12)" stroke="#2563eb" strokeWidth={isSel('qr', q.id) ? stroke * 1.6 : stroke} />
             <text x={r.x * pw} y={r.y * ph - 3 / zoom} fontSize={11 / zoom} fill="#1d4ed8">QR</text>
-            {sel('qr', q.id) && handlesFor('qr', q.id, r)}
+            {isPrimary('qr', q.id) && handlesFor('qr', q.id, r)}
           </g>
         );
       })()}
@@ -1533,9 +1904,42 @@ function OverlayRegions({
         return (
           <g key={i.id} onPointerDown={(e) => onStartDrag(e, 'info', i.id)} style={{ cursor: 'move' }}>
             <rect x={r.x * pw} y={r.y * ph} width={r.w * pw} height={r.h * ph}
-                  fill="rgba(16,185,129,0.12)" stroke="#10b981" strokeWidth={sel('info', i.id) ? stroke * 1.6 : stroke} />
+                  fill="rgba(16,185,129,0.12)" stroke="#10b981" strokeWidth={isSel('info', i.id) ? stroke * 1.6 : stroke} />
             <text x={r.x * pw} y={r.y * ph - 3 / zoom} fontSize={11 / zoom} fill="#047857">{i.kind}</text>
-            {sel('info', i.id) && handlesFor('info', i.id, r)}
+            {isPrimary('info', i.id) && handlesFor('info', i.id, r)}
+          </g>
+        );
+      })}
+
+      {show.elements && (config.elements ?? []).map((el) => {
+        const r: Rect = { x: el.x, y: el.y, w: el.w, h: el.h };
+        const tx = el.align === 'center' ? (r.x + r.w / 2) * pw
+          : el.align === 'right' ? (r.x + r.w) * pw : r.x * pw;
+        const url = el.asset ? assetUrls[el.asset] : undefined;
+        return (
+          <g key={el.id} onPointerDown={(e) => onStartDrag(e, 'element', el.id)}
+             style={{ cursor: el.locked ? 'not-allowed' : 'move' }}>
+            <rect x={r.x * pw} y={r.y * ph} width={r.w * pw} height={r.h * ph}
+                  fill={el.kind === 'line' ? 'rgba(17,24,39,0.85)' : 'rgba(14,165,233,0.08)'}
+                  stroke={isSel('element', el.id) ? '#0284c7' : '#0ea5e9'}
+                  strokeWidth={isSel('element', el.id) ? stroke * 1.6 : stroke}
+                  strokeDasharray={el.kind === 'line' ? undefined : '4 2'} />
+            {el.kind === 'text' && (
+              <text x={tx} y={r.y * ph + el.font_size} fontSize={el.font_size}
+                    fontWeight={el.bold ? 700 : 400} fill="#000" pointerEvents="none"
+                    textAnchor={el.align === 'center' ? 'middle' : el.align === 'right' ? 'end' : 'start'}>
+                {el.text}
+              </text>
+            )}
+            {el.kind === 'image' && url && (
+              <image href={url} x={r.x * pw} y={r.y * ph} width={r.w * pw} height={r.h * ph}
+                     preserveAspectRatio="xMidYMid meet" pointerEvents="none" />
+            )}
+            {el.kind === 'image' && !url && (
+              <text x={(r.x + r.w / 2) * pw} y={(r.y + r.h / 2) * ph} fontSize={11 / zoom}
+                    fill="#0284c7" textAnchor="middle" pointerEvents="none">imagem</text>
+            )}
+            {isPrimary('element', el.id) && handlesFor('element', el.id, r)}
           </g>
         );
       })}
@@ -1559,8 +1963,8 @@ function OverlayRegions({
           <g key={b.id}>
             <rect x={bx * pw} y={by * ph} width={bw * pw} height={bh * ph}
                   fill="rgba(239,68,68,0.06)"
-                  stroke={sel('block', b.id) ? '#dc2626' : '#ef4444'}
-                  strokeWidth={sel('block', b.id) ? stroke * 1.6 : stroke}
+                  stroke={isSel('block', b.id) ? '#dc2626' : '#ef4444'}
+                  strokeWidth={isSel('block', b.id) ? stroke * 1.6 : stroke}
                   strokeDasharray="5 3"
                   style={{ cursor: tool === 'bubble' ? 'default' : 'move', pointerEvents: tool === 'bubble' ? 'none' : 'all' }}
                   onPointerDown={tool === 'bubble' ? undefined : (e) => {
@@ -1586,7 +1990,7 @@ function OverlayRegions({
                 </g>
               );
             })}
-            {sel('block', b.id) && (
+            {isSel('block', b.id) && (
               <text x={bx * pw} y={by * ph - 4 / zoom} fontSize={12 / zoom} fill="#b91c1c"
                     pointerEvents="none">
                 Q{b.start_question}–Q{b.start_question + b.n_questions - 1}
@@ -1596,6 +2000,15 @@ function OverlayRegions({
           </g>
         );
       })}
+
+      {guides.x.map((x, i) => (
+        <line key={`gx${i}`} x1={x * pw} y1={0} x2={x * pw} y2={ph} stroke="#ec4899"
+              strokeWidth={1 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} pointerEvents="none" />
+      ))}
+      {guides.y.map((y, i) => (
+        <line key={`gy${i}`} x1={0} y1={y * ph} x2={pw} y2={y * ph} stroke="#ec4899"
+              strokeWidth={1 / zoom} strokeDasharray={`${4 / zoom} ${3 / zoom}`} pointerEvents="none" />
+      ))}
 
       {/* Cantos da folha por ÚLTIMO: os handles precisam ficar acima das
           âncoras/blocos, senão ficam inalcançáveis onde as regiões se
@@ -1648,7 +2061,8 @@ function RegionalList({
               onClick={() => onDelete(kind, id)}><Trash2 size={14} /></button>
     </div>
   );
-  const empty = !config.anchors.length && !config.qr && !config.info_regions.length && !config.questions.length;
+  const empty = !config.anchors.length && !config.qr && !config.info_regions.length
+    && !config.questions.length && !(config.elements ?? []).length;
   const Group = ({ title, children }: { title: string; children: ReactNode }) => (
     <section className="space-y-0.5">
       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{title}</p>
@@ -1687,6 +2101,14 @@ function RegionalList({
           ))}
         </Group>
       )}
+      {(config.elements ?? []).length > 0 && (
+        <Group title={`Elementos (${(config.elements ?? []).length})`}>
+          {(config.elements ?? []).map((e) => (
+            <Item key={e.id} kind="element" id={e.id} color="#0ea5e9"
+                  label={e.kind === 'text' ? (e.text.trim() || 'Texto') : e.kind === 'line' ? 'Linha' : 'Imagem'} />
+          ))}
+        </Group>
+      )}
     </div>
   );
 }
@@ -1705,11 +2127,12 @@ function PctInput({ label, value, onChange, id }: { label: string; value: number
 }
 
 function PropertiesPanel({
-  config, selection, updateField,
+  config, selection, updateField, onPickAsset,
 }: {
   config: CustomConfig;
   selection: Selection;
   updateField: (patch: Partial<CustomConfig>) => void;
+  onPickAsset: (id: string) => void;
 }) {
   if (!selection) {
     return <p className="text-sm text-gray-500 dark:text-gray-400">Selecione uma região no cartão para editar as propriedades.</p>;
@@ -1813,6 +2236,60 @@ function PropertiesPanel({
             {PRINT_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </Select>
         </Field>
+      </div>
+    );
+  }
+
+  if (kind === 'element') {
+    const el = (config.elements ?? []).find((x) => x.id === id);
+    if (!el) return null;
+    const upd = (patch: Partial<CustomElement>) =>
+      updateField({ elements: (config.elements ?? []).map((x) => (x.id === id ? { ...x, ...patch } : x)) });
+    return (
+      <div className="space-y-2">
+        <p className="font-semibold text-sm">
+          Elemento · {el.kind === 'text' ? 'texto' : el.kind === 'line' ? 'linha' : 'imagem'}
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <PctInput id="p-el-x" label="X (%)" value={el.x} onChange={(v) => upd({ x: v })} />
+          <PctInput id="p-el-y" label="Y (%)" value={el.y} onChange={(v) => upd({ y: v })} />
+          <PctInput id="p-el-w" label="Largura (%)" value={el.w} onChange={(v) => upd({ w: v })} />
+          <PctInput id="p-el-h" label="Altura (%)" value={el.h} onChange={(v) => upd({ h: v })} />
+        </div>
+        {el.kind === 'text' && (
+          <>
+            <Field label="Texto" htmlFor="p-el-text" helper="Sai na impressão; a leitura OMR ignora.">
+              <textarea id="p-el-text" className="input" rows={2} maxLength={300}
+                        value={el.text} onChange={(e) => upd({ text: e.target.value })} />
+            </Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Fonte (px)" htmlFor="p-el-fs">
+                <Input id="p-el-fs" type="number" min={6} max={400} value={el.font_size}
+                       onChange={(e) => upd({ font_size: clamp(Number(e.target.value) || 6, 6, 400) })} />
+              </Field>
+              <Field label="Alinhamento" htmlFor="p-el-align">
+                <Select id="p-el-align" value={el.align}
+                        onChange={(e) => upd({ align: e.target.value as CustomElement['align'] })}>
+                  <option value="left">Esquerda</option>
+                  <option value="center">Centro</option>
+                  <option value="right">Direita</option>
+                </Select>
+              </Field>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant={el.bold ? 'primary' : 'secondary'} onClick={() => upd({ bold: !el.bold })}
+                      icon={<Bold size={14} aria-hidden />}>Negrito</Button>
+            </div>
+          </>
+        )}
+        {el.kind === 'image' && (
+          <Button size="sm" variant="secondary" icon={<ImagePlus size={14} aria-hidden />}
+                  onClick={() => onPickAsset(el.id)}>Trocar imagem</Button>
+        )}
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={!!el.locked} onChange={(e) => upd({ locked: e.target.checked })} />
+          Travar posição
+        </label>
       </div>
     );
   }

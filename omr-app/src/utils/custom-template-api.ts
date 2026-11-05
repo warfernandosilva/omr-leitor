@@ -22,6 +22,8 @@ export interface CustomAnchor {
   size: number;
   tolerance: number;
   required: boolean;
+  // Trava o elemento no editor (não impede nada na leitura).
+  locked?: boolean;
 }
 
 export interface CustomQr {
@@ -33,6 +35,7 @@ export interface CustomQr {
   required: boolean;
   purpose: string;
   field: string;
+  locked?: boolean;
 }
 
 export interface CustomInfoRegion {
@@ -42,6 +45,26 @@ export interface CustomInfoRegion {
   y: number;
   w: number;
   h: number;
+  locked?: boolean;
+}
+
+/** Elemento decorativo: desenhado na impressão, ignorado pela leitura OMR. */
+export interface CustomElement {
+  id: string;
+  kind: 'text' | 'line' | 'image';
+  page?: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  text: string;
+  /** Altura da fonte em px da imagem do modelo (mesma unidade de print_fields). */
+  font_size: number;
+  align: 'left' | 'center' | 'right';
+  bold: boolean;
+  /** Id opaco do arquivo de imagem (`ast_<12 hex>`), só para kind='image'. */
+  asset: string | null;
+  locked?: boolean;
 }
 
 export interface CustomBlock {
@@ -72,6 +95,7 @@ export interface CustomBlock {
   fallback_floor: number | null;
   mark_style: 'filled' | 'marks';
   overrides: Record<string, Record<string, { x?: number; y?: number }>>;
+  locked?: boolean;
 }
 
 export interface CustomPrintField {
@@ -96,6 +120,7 @@ export interface CustomConfig {
   page_corners?: { x: number; y: number }[] | null;
   qr: CustomQr | null;
   info_regions: CustomInfoRegion[];
+  elements?: CustomElement[];
   questions: CustomBlock[];
   print_fields: CustomPrintField[];
   omr_params: {
@@ -121,6 +146,7 @@ export interface CustomTemplateSummary {
     n_blocks: number;
     n_questions: number;
     n_print_fields: number;
+    n_elements?: number;
     n_pages: number;
     page_w: number;
     page_h: number;
@@ -250,6 +276,9 @@ export interface CardSpec {
   margin_mm?: number;
   title?: string;
   subtitle?: string;
+  /** Texto fixo do cartão (não vem do banco de dados). */
+  school?: string;
+  teacher?: string;
   instructions?: string;
   fields?: string[];
   n_questions?: number;
@@ -347,6 +376,18 @@ export function getCustomVersion(id: number, version: number): Promise<{
 export function customTemplateImage(id: number, page = 0): Promise<Blob> {
   const q = page > 0 ? `?page=${page}` : '';
   return apiBlob(`/api/custom-templates/${id}/image${q}`);
+}
+
+export function uploadCustomAsset(
+  id: number, file: File,
+): Promise<{ asset: string; w: number; h: number }> {
+  const form = new FormData();
+  form.append('file', file);
+  return apiForm(`/api/custom-templates/${id}/assets`, form);
+}
+
+export function customTemplateAsset(id: number, asset: string): Promise<Blob> {
+  return apiBlob(`/api/custom-templates/${id}/assets/${asset}`);
 }
 
 export async function customBubbles(id: number, page?: number): Promise<{ bubbles: ExpandedBubble[]; n_pages?: number }> {

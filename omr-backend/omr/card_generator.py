@@ -51,6 +51,9 @@ DEFAULTS: dict[str, Any] = {
     "margin_mm": 10.0,
     "title": "Cartão-resposta",
     "subtitle": "",
+    # Texto fixo do cartão (não existe campo de escola/professor no banco).
+    "school": "",
+    "teacher": "",
     "instructions": "",
     "fields": ["student_name", "matricula", "turma"],
     "n_questions": 20,
@@ -118,6 +121,15 @@ def _center_text(draw, center: tuple[float, float], text: str, font, fill=(0, 0,
     draw.text((center[0] - w / 2, center[1] - h / 2 - box[1]), text, font=font, fill=fill)
 
 
+def _fit_text(draw, text: str, font, max_w: float) -> str:
+    """Corta o texto com reticências para caber na largura disponível."""
+    if draw.textlength(text, font=font) <= max_w:
+        return text
+    while text and draw.textlength(text, font=font) > max_w:
+        text = text[:-1]
+    return f"{text}…" if text else ""
+
+
 def generate_card(spec: dict | None = None) -> GeneratedCard:
     """Desenha o cartão e devolve (imagem BGR, config, avisos).
 
@@ -181,6 +193,13 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     y = cy0
 
     title = str(s.get("title") or "").strip()
+    school = str(s.get("school") or "").strip()[:120]
+    teacher = str(s.get("teacher") or "").strip()[:120]
+
+    if school:
+        draw.text((cx0, y), _fit_text(draw, school, sub_font, header_w), font=sub_font, fill=(0, 0, 0))
+        y += sub_px * 1.6
+
     if title:
         draw.text((cx0, y), title, font=title_font, fill=(0, 0, 0))
         y += title_px * 1.35
@@ -189,6 +208,10 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     if subtitle:
         draw.text((cx0, y), subtitle, font=sub_font, fill=(60, 60, 60))
         y += sub_px * 1.6
+
+    if teacher:
+        draw.text((cx0, y), _fit_text(draw, teacher, small_font, header_w), font=small_font, fill=(60, 60, 60))
+        y += small_px * 1.6
 
     fields = [f for f in (s.get("fields") or []) if f in FIELD_LABELS]
     info_regions: list[dict] = []
@@ -230,13 +253,13 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     instructions = str(s.get("instructions") or "").strip()
     if instructions:
         max_w = header_w
-        text = instructions
-        while text and draw.textlength(text, font=small_font) > max_w:
-            text = text[:-1]
-        if text != instructions:
-            text = text[:-1] + "…"
-        draw.text((cx0, y), text, font=small_font, fill=(90, 90, 90))
-        y += small_px * 1.6
+        for raw in instructions.splitlines()[:6]:
+            text = raw.strip()
+            if not text:
+                continue
+            draw.text((cx0, y), _fit_text(draw, text, small_font, max_w),
+                      font=small_font, fill=(90, 90, 90))
+            y += small_px * 1.6
 
     header_bottom = y + mm2px(2.5)
 
