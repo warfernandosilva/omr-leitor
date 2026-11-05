@@ -661,10 +661,15 @@ function TemplateEditor({
         return;
       }
       const d = dragRef.current;
+      /* Nada estava sendo arrastado: sai sem mexer em estado. Um setGuides()
+         aqui criava um objeto novo a cada pointerup e re-renderizava a página
+         inteira — inclusive o Modal aberto, cujo efeito refocava o botão de
+         fechar e derrubava a lista do <select> no meio da escolha. */
+      if (!d) return;
       dragRef.current = null;
       setDragKind(null);
       setGuides({ x: [], y: [] });
-      if (!d || d.kind === 'pan') return;
+      if (d.kind === 'pan') return;
       if (snapRef.current) {
         pushHistory(snapRef.current);
         snapRef.current = null;
@@ -677,6 +682,10 @@ function TemplateEditor({
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };
+    // `setSelection` é recriado a cada render (depende da seleção atual). Aqui
+    // ele só é usado no fim de uma criação; reinstalar os listeners a cada
+    // seleção não muda nada e atrapalha o arrasto em andamento.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseW, baseH, toBase, pushHistory, currentPage]);
 
   const onSvgPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -2807,9 +2816,7 @@ function PrintModal({ open, onClose, detailId }: { open: boolean; onClose: () =>
         </Field>
         {mode !== 'avaliacao' && (
           <Field label="Formato" htmlFor="pr-fmt">
-            <Select id="pr-fmt" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onMouseUp={(e) => e.stopPropagation()}>
+            <Select id="pr-fmt" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>
               <option value="PDF">PDF</option>
               <option value="PNG">PNG</option>
             </Select>

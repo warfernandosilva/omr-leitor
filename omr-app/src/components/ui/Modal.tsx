@@ -17,20 +17,32 @@ interface Props {
 export default function Modal({ open, onClose, title, children, footer, wide = false }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
 
+  /* Escape não depende de `onClose` ser estável: guarda a versão atual numa
+     ref para o listener não ser recriado a cada render do pai. */
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  /* Foco e trava de scroll rodam só ao ABRIR. Se dependessem de `onClose`
+     (função inline no pai), qualquer re-render do pai refocava o botão de
+     fechar — e isso fechava a lista de um <select> aberto no modal. */
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     closeRef.current?.focus();
     return () => {
-      document.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, onClose]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCloseRef.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   if (!open) return null;
   return createPortal(
