@@ -49,6 +49,9 @@ class BubbleMetrics:
     dark_ratio: float
     contrast: float
     otsu_threshold: float
+    # Contraste normalizado (paper - média) / (0.75 * paper): 0 = papel,
+    # ~1 = tinta cheia. Usado por faint_mark/cancel_replace e pela segunda opinião.
+    darkness: float = 0.0
 
     @classmethod
     def zeros(cls) -> "BubbleMetrics":
@@ -64,11 +67,19 @@ class BubbleMetrics:
             self.dark_ratio,
             self.contrast,
             self.otsu_threshold,
+            self.darkness,
         )
 
 
-from .config import DARKEST_MARK_GAP_FACTOR, FLOOR, LOW_CONF_THRESHOLD, MARGIN
+from .config import (
+    CANCEL_REPLACE_GAP,
+    DARKEST_MARK_GAP_FACTOR,
+    FLOOR,
+    LOW_CONF_THRESHOLD,
+    MARGIN,
+)
 from .params import OmrParams
+from .preprocess import InvalidImage, prepare_image
 from .tuning import compute_floor_for
 
 
@@ -98,6 +109,11 @@ class OMRResult:
     fallback_marks: list[int] | None = None  # vazia recuperada pelo método alternativo
     # Gabarito Personalizado (múltipla resposta): questão -> letras marcadas (ordenadas)
     multi_marks: dict[int, list[str]] | None = None
+    # Melhorias opt-in (amazingOMR): estilo da marca e segunda opinião na faixa cinzenta
+    mark_styles: dict[int, dict[str, str]] | None = None
+    second_opinion: dict[int, dict] | None = None
+    # Deslocamento médio aplicado pelo offset field (dx, dy) em px, se ligado
+    offset_applied: tuple[float, float] | None = None
 
 
 def classify_question(
@@ -107,6 +123,9 @@ def classify_question(
     low_thr: float | None = None,
     pick_darkest: bool = False,
     darkest_gap: float | None = None,
+    cancel_replace: bool = False,
+    faint_darkness: float | None = None,
+    darkness: dict[str, float] | None = None,
 ) -> tuple[str, str | None, list[str]]:
     """Classifica uma questão a partir dos scores A–D.
 
@@ -127,6 +146,12 @@ def classify_question(
     `pick_darkest`/`darkest_gap` só são usados pelo Gabarito Personalizado;
     os modelos nativos chamam sem esses argumentos e o comportamento é
     idêntico ao anterior.
+
+    `cancel_replace` (opt-in) resolve "apagou uma e marcou outra": quando a
+    dupla tem gap >= CANCEL_REPLACE_GAP o vencedor é aceito (status
+    `darkest`, igual ao pick_darkest). `faint_darkness` (opt-in) impede que
+    uma bolha com tinta fraca visível vire `blank`: ela passa a `low`
+    (conferência manual), nunca a resposta confiante.
     """
     if low_thr is None:
         low_thr = floor + (LOW_CONF_THRESHOLD - FLOOR)
@@ -134,11 +159,17 @@ def classify_question(
     best_letter, best_score = ordered[0]
     second_score = ordered[1][1] if len(ordered) > 1 else 0.0
     if best_score < floor:
+        if (faint_darkness is not None and darkness
+                and darkness.get(best_letter, 0.0) >= faint_darkness):
+            return "low", best_letter, []
         return "blank", None, []
     if second_score >= floor and best_score - second_score < margin:
         marks = sorted(letter for letter, s in ratios.items() if s >= floor)
+        gap = best_score - second_score
         gap_thr = (margin * DARKEST_MARK_GAP_FACTOR) if darkest_gap is None else darkest_gap
-        if pick_darkest and (best_score - second_score) >= gap_thr:
+        if pick_darkest and gap >= gap_thr:
+            return "darkest", best_letter, [best_letter]
+        if cancel_replace and gap >= CANCEL_REPLACE_GAP:
             return "darkest", best_letter, [best_letter]
         return "duplicate", None, marks
     if best_score < low_thr or best_score - second_score < margin:
@@ -202,6 +233,10 @@ def _estimate_paper_brightness(gray: np.ndarray, x: int, y: int, radius: int) ->
 
 DEFAULT_WEIGHTS: tuple[float, float, float] = (0.4, 0.4, 0.2)
 
+# Denominador do "darkness": papel - 25% do papel. Dá uma escala estável
+# (0 ≈ papel limpo, ~1 ≈ tinta cheia) independente do contraste da foto.
+_DARKNESS_SPAN_FRAC = 0.75
+
 
 def _bubble_metrics(
     gray: np.ndarray,
@@ -209,32 +244,62 @@ def _bubble_metrics(
     y: int,
     radius: int = int(BUBBLE_RADIUS),
     weights: tuple[float, float, float] = DEFAULT_WEIGHTS,
+    snap: int = 0,
 ) -> BubbleMetrics:
     """Componentes de score da bolha circular (média + razão escura + contraste).
 
     Mesma fórmula do formato original (0.4/0.4/0.2 por padrão), agora com
     componentes expostos p/ calibração e pesos configuráveis por override.
+
+    `snap` (opt-in): desloca o centro em até ±snap px até a região mais
+    escura, corrigindo o resíduo de alinhamento local. `darkness` é sempre
+    calculado (contraste normalizado), mas não entra no score.
     """
     brightness = _estimate_paper_brightness(gray, x, y, radius)
+    snap = max(0, min(6, int(snap or 0)))
 
     h, w = gray.shape[:2]
-    x0 = max(0, x - radius)
-    y0 = max(0, y - radius)
-    x1 = min(w, x + radius + 1)
-    y1 = min(h, y + radius + 1)
+    x0 = max(0, x - radius - snap)
+    y0 = max(0, y - radius - snap)
+    x1 = min(w, x + radius + snap + 1)
+    y1 = min(h, y + radius + snap + 1)
     roi = gray[y0:y1, x0:x1]
     if roi.size == 0:
         return BubbleMetrics.zeros()
 
     thr_otsu, binary = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     yy, xx = np.ogrid[:roi.shape[0], :roi.shape[1]]
-    mask = ((xx - (x - x0)) ** 2 + (yy - (y - y0)) ** 2) <= radius ** 2
+    cx_local, cy_local = x - x0, y - y0
+
+    if snap:
+        base = (cx_local, cy_local)
+        best: tuple[float, int, int] | None = None
+        for dy in range(-snap, snap + 1):
+            for dx in range(-snap, snap + 1):
+                m = ((xx - (base[0] + dx)) ** 2
+                     + (yy - (base[1] + dy)) ** 2) <= radius ** 2
+                n = int(m.sum())
+                if n == 0:
+                    continue
+                mean = float(np.mean(roi[m]))
+                if best is None or mean < best[0]:
+                    best = (mean, dx, dy)
+        if best is not None:
+            nx, ny = base[0] + best[1], base[1] + best[2]
+            moved = ((xx - nx) ** 2 + (yy - ny) ** 2) <= radius ** 2
+            if moved.any():
+                cx_local, cy_local = nx, ny
+
+    mask = ((xx - cx_local) ** 2 + (yy - cy_local) ** 2) <= radius ** 2
     if mask.sum() == 0:
         return BubbleMetrics.zeros()
 
-    mean_intensity = 1.0 - (float(np.mean(roi[mask])) / 255.0)
+    mean_value = float(np.mean(roi[mask]))
+    mean_intensity = 1.0 - (mean_value / 255.0)
     dark_ratio = float((binary[mask] > 0).sum()) / float(mask.sum())
-    contrast = max(0, (brightness - float(np.mean(roi[mask]))) / 255.0)
+    contrast = max(0.0, (brightness - mean_value) / 255.0)
+    span = max(brightness * _DARKNESS_SPAN_FRAC, 1.0)
+    darkness = float(np.clip((brightness - mean_value) / span, 0.0, 1.0))
 
     return BubbleMetrics(
         score=weights[0] * mean_intensity + weights[1] * dark_ratio + weights[2] * contrast,
@@ -242,6 +307,7 @@ def _bubble_metrics(
         dark_ratio=dark_ratio,
         contrast=contrast,
         otsu_threshold=float(thr_otsu),
+        darkness=darkness,
     )
 
 
@@ -353,6 +419,11 @@ def process_image(
     `overrides` (OmrParams) é só para Laboratório/Calibração: nenhum campo
     altera produção por padrão (None cai nas constantes/tuning atuais).
     """
+    try:
+        image = prepare_image(image)
+    except InvalidImage:
+        return None
+
     p = overrides or OmrParams()
     single = layout_mode == LAYOUT_SINGLE
     qps = questions_per_subject or 22
@@ -408,12 +479,40 @@ def process_image(
     )
     gray = clahe.apply(gray)
 
+    # Offset field (opt-in): o warp corrige a perspectiva da FOLHA, mas não o
+    # relevo (curl/amassado). Estimamos um campo suave (dx, dy) pelo contorno
+    # das bolhas e aplicamos antes de medir cada ROI.
+    offset_field = None
+    if p.offset_field:
+        from .offset_field import estimate_offset_field
+        cells = [(float(x), float(y), float(radius))
+                 for y in question_y for x in xs]
+        if not single:
+            cells += [(float(x), float(y), float(radius))
+                      for y in question_y for x in MAT_X]
+        offset_field = estimate_offset_field(gray, cells)
+
+    def _shift(x: float, y: float) -> tuple[int, int]:
+        if offset_field is None:
+            # Sem offset, preserva EXATAMENTE o arredondamento histórico
+            # (truncamento de x) para paridade byte-a-byte com o laboratório.
+            return int(x), int(y)
+        dx, dy = offset_field(float(x), float(y))
+        return int(round(x + dx)), int(round(y + dy))
+
+    offset_applied = None
+    if offset_field is not None:
+        offset_applied = offset_field(PAGE_W / 2.0, PAGE_H / 2.0)
+    snap = max(0, min(6, int(p.local_snap or 0)))
+
     _t2 = _time.perf_counter()
     qr_id = _decode_card_qr(gray, image, M)
     t_qr = _time.perf_counter() - _t2
     _t3 = _time.perf_counter()
 
     all_ratios: dict[int, dict[str, float]] = {}
+    all_darkness: dict[int, dict[str, float]] = {}
+    all_pos: dict[int, dict[str, tuple[int, int]]] = {}
     geom: dict[int, list] = {}
     letters = ["A", "B", "C", "D"]
     # Máscara um pouco menor que a bolha: ignora o contorno impresso e mede
@@ -425,15 +524,23 @@ def process_image(
         q_num = q + 1
         y = int(y)
         q_ratios: dict[str, float] = {}
+        q_darkness: dict[str, float] = {}
+        q_pos: dict[str, tuple[int, int]] = {}
         q_geom: list = []
 
         for i, x in enumerate(xs):
-            score = _bubble_score(gray, int(x), y, radius=inner_radius, weights=weights)
-            q_ratios[letters[i]] = score
+            sx, sy = _shift(float(x), y)
+            m = _bubble_metrics(gray, sx, sy, radius=inner_radius,
+                                weights=weights, snap=snap)
+            q_ratios[letters[i]] = m.score
+            q_darkness[letters[i]] = m.darkness
+            q_pos[letters[i]] = (sx, sy)
             if debug:
-                q_geom.append((int(x), y, radius, letters[i]))
+                q_geom.append((sx, sy, radius, letters[i]))
 
         all_ratios[q_num] = q_ratios
+        all_darkness[q_num] = q_darkness
+        all_pos[q_num] = q_pos
         if debug:
             geom[q_num] = q_geom
 
@@ -442,15 +549,23 @@ def process_image(
             q_num = q + qps + 1
             y = int(y)
             q_ratios: dict[str, float] = {}
+            q_darkness: dict[str, float] = {}
+            q_pos: dict[str, tuple[int, int]] = {}
             q_geom = []
 
             for i, x in enumerate(MAT_X):
-                score = _bubble_score(gray, int(x), y, radius=inner_radius, weights=weights)
-                q_ratios[letters[i]] = score
+                sx, sy = _shift(float(x), y)
+                m = _bubble_metrics(gray, sx, sy, radius=inner_radius,
+                                    weights=weights, snap=snap)
+                q_ratios[letters[i]] = m.score
+                q_darkness[letters[i]] = m.darkness
+                q_pos[letters[i]] = (sx, sy)
                 if debug:
-                    q_geom.append((int(x), y, radius, letters[i]))
+                    q_geom.append((sx, sy, radius, letters[i]))
 
             all_ratios[q_num] = q_ratios
+            all_darkness[q_num] = q_darkness
+            all_pos[q_num] = q_pos
             if debug:
                 geom[q_num] = q_geom
 
@@ -459,6 +574,7 @@ def process_image(
     duplicates: list[int] = []
     dup_marks: dict[int, list[str]] = {}
     low_conf: list[int] = []
+    status_of: dict[int, str] = {}
 
     # Limiar adaptativo: divisor calculado dos scores desta foto
     # (desligado por padrão — comportamento idêntico ao fixo).
@@ -470,8 +586,12 @@ def process_image(
 
     for q_num, ratios in all_ratios.items():
         status, best_letter, marks = classify_question(
-            ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold
+            ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold,
+            cancel_replace=bool(p.cancel_replace),
+            faint_darkness=p.faint_darkness,
+            darkness=all_darkness.get(q_num),
         )
+        status_of[q_num] = status
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":
@@ -482,6 +602,54 @@ def process_image(
             answers[q_num] = best_letter  # type: ignore[assignment]
         else:
             answers[q_num] = best_letter  # type: ignore[assignment]
+
+    # Segunda opinião (opt-in): MLP só para marcas na faixa cinzenta. O voto
+    # NUNCA vira resposta confiante — no máximo move uma questão para a
+    # conferência manual (low_confidence), mantendo a letra sugerida.
+    second_opinion_map: dict[int, dict] | None = None
+    if p.second_opinion:
+        from .second_opinion import bubble_second_opinion, is_available
+        if is_available():
+            second_opinion_map = {}
+            for q_num, status in status_of.items():
+                if status not in ("blank", "low"):
+                    continue
+                ordered = sorted(all_ratios[q_num].items(),
+                                 key=lambda kv: kv[1], reverse=True)
+                letter, score = ordered[0]
+                if not (0.10 <= score <= floor + 0.10):
+                    continue
+                sx, sy = all_pos[q_num][letter]
+                paper = _estimate_paper_brightness(gray, sx, sy, inner_radius)
+                ink = paper * 0.25
+                verdict = bubble_second_opinion(
+                    gray, sx, sy, inner_radius, paper, ink, fill=score)
+                if not verdict.get("available"):
+                    break
+                second_opinion_map[q_num] = {"letter": letter, **verdict}
+                if (status == "blank" and verdict["prob"] >= 0.80
+                        and verdict["label"] == "marked"):
+                    if q_num in blank:
+                        blank.remove(q_num)
+                    if q_num not in low_conf:
+                        low_conf.append(q_num)
+                    answers[q_num] = letter
+
+    # Estilo da marca (opt-in): explica à revisão COMO a bolha foi marcada.
+    mark_styles_map: dict[int, dict[str, str]] | None = None
+    if p.mark_styles:
+        from .mark_style import classify_bubble
+        mark_styles_map = {}
+        for q_num, status in status_of.items():
+            if status not in ("blank", "low", "duplicate"):
+                continue
+            styles: dict[str, str] = {}
+            for letter, (sx, sy) in all_pos[q_num].items():
+                paper = _estimate_paper_brightness(gray, sx, sy, int(round(radius)))
+                ink = paper * 0.25
+                styles[letter] = classify_bubble(
+                    gray, sx, sy, float(radius), paper, ink)
+            mark_styles_map[q_num] = styles
 
     t_score = _time.perf_counter() - _t3
 
@@ -506,4 +674,7 @@ def process_image(
         t_qr=t_qr,
         t_score=t_score,
         debug_points=debug_points,
+        mark_styles=mark_styles_map,
+        second_opinion=second_opinion_map,
+        offset_applied=offset_applied,
     )

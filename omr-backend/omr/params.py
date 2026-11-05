@@ -47,12 +47,22 @@ class OmrParams:
     clahe_clip: float | None = None     # clipLimit do CLAHE
     clahe_tiles: tuple[int, int] | None = None  # tileGridSize do CLAHE
 
+    # ── Melhorias de visão (portadas do amazingOMR) — todas opt-in ──
+    offset_field: bool | None = None    # corrige curl/amassado após o warp plano
+    local_snap: int | None = None       # raio (px) p/ deslizar a ROI até a tinta
+    cancel_replace: bool | None = None  # resolve "apagou e marcou outra"
+    faint_darkness: float | None = None  # marca fraca visível nunca vira "branco"
+    second_opinion: bool | None = None  # MLP na faixa cinzenta (se modelo existir)
+    mark_styles: bool | None = None     # estilo da marca p/ tela de revisão
+
     def is_empty(self) -> bool:
         return all(
             v is None
             for v in (
                 self.floor, self.margin, self.low_conf_threshold, self.weights,
                 self.inner_radius, self.square_inset, self.clahe_clip, self.clahe_tiles,
+                self.offset_field, self.local_snap, self.cancel_replace,
+                self.faint_darkness, self.second_opinion, self.mark_styles,
             )
         )
 
@@ -101,6 +111,12 @@ def get_params_override() -> OmrParams:
         square_inset=cfg.get("square_inset"),
         clahe_clip=cfg.get("clahe_clip"),
         clahe_tiles=tuple(cfg["clahe_tiles"]) if isinstance(cfg.get("clahe_tiles"), list) else None,
+        offset_field=cfg.get("offset_field"),
+        local_snap=cfg.get("local_snap"),
+        cancel_replace=cfg.get("cancel_replace"),
+        faint_darkness=cfg.get("faint_darkness"),
+        second_opinion=cfg.get("second_opinion"),
+        mark_styles=cfg.get("mark_styles"),
     )
 
 
@@ -222,4 +238,10 @@ def get_params_override() -> OmrParams:
         square_inset=cfg.get("square_inset"),
         clahe_clip=cfg.get("clahe_clip"),
         clahe_tiles=tuple(cfg["clahe_tiles"]) if isinstance(cfg.get("clahe_tiles"), list) else None,
+        offset_field=cfg.get("offset_field"),
+        local_snap=cfg.get("local_snap"),
+        cancel_replace=cfg.get("cancel_replace"),
+        faint_darkness=cfg.get("faint_darkness"),
+        second_opinion=cfg.get("second_opinion"),
+        mark_styles=cfg.get("mark_styles"),
     )

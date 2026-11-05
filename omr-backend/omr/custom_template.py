@@ -39,6 +39,7 @@ from .config import BLUR_BLOCK, MARGIN
 from .detector import detect_markers
 from .detector_sae import _square_candidates
 from .params import OmrParams
+from .preprocess import InvalidImage, prepare_image
 from .reader import (
     DEFAULT_WEIGHTS,
     OMRResult,
@@ -2155,6 +2156,14 @@ def process_custom_image(
             diagnostics["detail"] = detail
             diagnostics["alignment"] = alignment
 
+    # Normaliza a entrada ANTES de usar image.shape: uma foto gigante é
+    # reduzida (a cascata de âncoras amplia a imagem em até ×3).
+    try:
+        image = prepare_image(image)
+    except InvalidImage:
+        _fail("image", "imagem ausente ou em formato não suportado")
+        return None
+
     cfg = config_for_page(config, page)
     p_base, cfg_adaptive = omr_params_from_config(cfg)
     p = overrides if overrides is not None else p_base
@@ -2196,6 +2205,28 @@ def process_custom_image(
     )
     gray = clahe.apply(gray)
 
+    bubbles = expand_bubbles(cfg)
+
+    # Offset field (opt-in): o warp corrige a perspectiva, mas não o relevo
+    # (curl/amassado). Campo suave (dx, dy) estimado pelo contorno das bolhas.
+    offset_field = None
+    if p.offset_field:
+        from .offset_field import estimate_offset_field
+        cells = [(b["x"] * cw, b["y"] * ch,
+                  max(3.0, b["r"] * max(cw, ch))) for b in bubbles]
+        offset_field = estimate_offset_field(gray, cells)
+
+    def _shift(x: float, y: float) -> tuple[float, float]:
+        if offset_field is None:
+            return x, y
+        dx, dy = offset_field(float(x), float(y))
+        return x + dx, y + dy
+
+    offset_applied = None
+    if offset_field is not None:
+        offset_applied = offset_field(cw / 2.0, ch / 2.0)
+    snap = max(0, min(6, int(p.local_snap or 0)))
+
     # Confiança de alinhamento: a grade realmente caiu sobre as bolhas?
     # (P0) Rejeita alinhamento plausível-mas-errado antes de produzir respostas.
     alignment = check_alignment(gray, cfg, inferred=anchor_meta.get("inferred"))
@@ -2212,26 +2243,37 @@ def process_custom_image(
 
     weights = p.weights if p.weights is not None else DEFAULT_WEIGHTS
     all_ratios: dict[int, dict[str, float]] = {}
+    all_darkness: dict[int, dict[str, float]] = {}
+    all_pos: dict[int, dict[str, tuple[float, float]]] = {}
+    all_rpx: dict[int, dict[str, float]] = {}
     geom: dict[int, list] = {}
 
     blk_of = question_block_map(cfg)
 
-    for b in expand_bubbles(cfg):
+    for b in bubbles:
         q = b["question"]
-        cx = b["x"] * cw
-        cy = b["y"] * ch
+        cx, cy = _shift(b["x"] * cw, b["y"] * ch)
         r_px = max(3.0, b["r"] * max(cw, ch))
         style = (blk_of.get(q) or {}).get("mark_style", "filled")
+        darkness = 0.0
         if style == "marks":
             # Marca esparsa (check/X): tinta no interior, limiar absoluto.
             score = marks_score(gray, cx, cy, r_px, square=(b["shape"] == "square"))
+            darkness = score  # cobertura de tinta serve de "darkness" aqui
         elif b["shape"] == "square":
             inset = p.square_inset if p.square_inset is not None else 6
-            score = _square_metrics(gray, cx, cy, side=r_px * 2.0, inset=inset, weights=weights).score
+            m = _square_metrics(gray, cx, cy, side=r_px * 2.0, inset=inset, weights=weights)
+            score = m.score
         else:
             inner = p.inner_radius if p.inner_radius is not None else max(3, int(round(r_px)) - 2)
-            score = _bubble_metrics(gray, int(round(cx)), int(round(cy)), radius=inner, weights=weights).score
+            m = _bubble_metrics(gray, int(round(cx)), int(round(cy)), radius=inner,
+                                weights=weights, snap=snap)
+            score = m.score
+            darkness = m.darkness
         all_ratios.setdefault(q, {})[b["option"]] = score
+        all_darkness.setdefault(q, {})[b["option"]] = darkness
+        all_pos.setdefault(q, {})[b["option"]] = (cx, cy)
+        all_rpx.setdefault(q, {})[b["option"]] = r_px
         if debug:
             geom.setdefault(q, []).append((cx, cy, r_px, b["option"]))
 
@@ -2248,6 +2290,7 @@ def process_custom_image(
     darkest: list[int] = []
     fallback_resolved: list[int] = []
     multi_marks: dict[int, list[str]] = {}
+    status_of: dict[int, str] = {}
 
     qmap = blk_of
 
@@ -2255,20 +2298,25 @@ def process_custom_image(
         blk = qmap.get(q_num) or {}
         # Marca mais escura só resolve dupla quando o bloco NÃO aceita
         # múltiplas respostas (senão múltiplas é o esperado).
-        pick_darkest = bool(blk.get("pick_darkest_mark")) and not bool(blk.get("multi_answer"))
+        multi = bool(blk.get("multi_answer"))
+        pick_darkest = bool(blk.get("pick_darkest_mark")) and not multi
         status, best_letter, marks = classify_question(
             ratios, floor=floor, margin=margin, low_thr=p.low_conf_threshold,
             pick_darkest=pick_darkest,
             darkest_gap=blk.get("darkest_mark_threshold"),
+            cancel_replace=bool(p.cancel_replace) and not multi,
+            faint_darkness=p.faint_darkness,
+            darkness=all_darkness.get(q_num),
         )
         # Múltipla resposta (P2): bloco que aceita mais de uma marca resolve a
         # questão como CONJUNTO (letras ordenadas) quando o nº de marcas está
         # dentro dos limites; fora dos limites continua sendo dupla.
-        if status == "duplicate" and blk.get("multi_answer"):
+        if status == "duplicate" and multi:
             lo, hi = multi_bounds(blk)
             if lo <= len(marks) <= hi:
                 multi_marks[q_num] = list(marks)
                 answers[q_num] = "".join(marks)
+                status_of[q_num] = "multi"
                 continue
         # Fallback de questão vazia: relê com limiar mais permissivo, exigindo
         # vencedor claro (gap próprio) para não inventar resposta.
@@ -2283,6 +2331,7 @@ def process_custom_image(
                 if fb_best >= fb_floor and (fb_best - fb_second) >= FALLBACK_MIN_GAP:
                     status, best_letter = "fallback", fb_letter
 
+        status_of[q_num] = status
         if status == "blank":
             blank.append(q_num)
         elif status == "duplicate":
@@ -2303,6 +2352,53 @@ def process_custom_image(
         else:
             if best_letter:
                 answers[q_num] = best_letter
+
+    # Segunda opinião (opt-in): MLP só para marcas na faixa cinzenta. O voto
+    # NUNCA vira resposta confiante — no máximo move para conferência manual.
+    second_opinion_map: dict[int, dict] | None = None
+    if p.second_opinion:
+        from .second_opinion import bubble_second_opinion, is_available
+        if is_available():
+            second_opinion_map = {}
+            for q_num, status in status_of.items():
+                if status not in ("blank", "low"):
+                    continue
+                ordered = sorted(all_ratios[q_num].items(),
+                                 key=lambda kv: kv[1], reverse=True)
+                letter, score = ordered[0]
+                if not (0.10 <= score <= floor + 0.10):
+                    continue
+                sx, sy = all_pos[q_num][letter]
+                r = all_rpx[q_num][letter]
+                paper = _local_paper(gray, sx, sy, r)
+                verdict = bubble_second_opinion(
+                    gray, sx, sy, r, paper, paper * 0.25, fill=score)
+                if not verdict.get("available"):
+                    break
+                second_opinion_map[q_num] = {"letter": letter, **verdict}
+                if (status == "blank" and verdict["prob"] >= 0.80
+                        and verdict["label"] == "marked"):
+                    if q_num in blank:
+                        blank.remove(q_num)
+                    if q_num not in low_conf:
+                        low_conf.append(q_num)
+                    answers[q_num] = letter
+
+    # Estilo da marca (opt-in): explica à revisão COMO a bolha foi marcada.
+    mark_styles_map: dict[int, dict[str, str]] | None = None
+    if p.mark_styles:
+        from .mark_style import classify_bubble
+        mark_styles_map = {}
+        for q_num, status in status_of.items():
+            if status not in ("blank", "low", "duplicate"):
+                continue
+            styles: dict[str, str] = {}
+            for letter, (sx, sy) in all_pos[q_num].items():
+                r = all_rpx[q_num][letter]
+                paper = _local_paper(gray, sx, sy, r)
+                styles[letter] = classify_bubble(
+                    gray, sx, sy, r, paper, paper * 0.25)
+            mark_styles_map[q_num] = styles
 
     t_score = _time.perf_counter() - _t3
 
@@ -2332,6 +2428,9 @@ def process_custom_image(
         darkest_marks=sorted(darkest),
         fallback_marks=sorted(fallback_resolved),
         multi_marks=multi_marks,
+        mark_styles=mark_styles_map,
+        second_opinion=second_opinion_map,
+        offset_applied=offset_applied,
     )
 
 

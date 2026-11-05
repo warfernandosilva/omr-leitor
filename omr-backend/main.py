@@ -733,6 +733,12 @@ def process_omr(
                         square_inset=_g("square_inset") if _g("square_inset") is not None else base_params.square_inset,
                         clahe_clip=_g("clahe_clip") if _g("clahe_clip") is not None else base_params.clahe_clip,
                         clahe_tiles=tuple(_g("clahe_tiles")) if _g("clahe_tiles") is not None else base_params.clahe_tiles,
+                        offset_field=_g("offset_field") if _g("offset_field") is not None else base_params.offset_field,
+                        local_snap=_g("local_snap") if _g("local_snap") is not None else base_params.local_snap,
+                        cancel_replace=_g("cancel_replace") if _g("cancel_replace") is not None else base_params.cancel_replace,
+                        faint_darkness=_g("faint_darkness") if _g("faint_darkness") is not None else base_params.faint_darkness,
+                        second_opinion=_g("second_opinion") if _g("second_opinion") is not None else base_params.second_opinion,
+                        mark_styles=_g("mark_styles") if _g("mark_styles") is not None else base_params.mark_styles,
                     )
             except (ValueError, TypeError):
                 merged_params = base_params

@@ -15,7 +15,14 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
-from .config import DETECT_SCALES, GEO_ASPECT_MAX, GEO_ASPECT_MIN, GEO_MIN_DIM, REPROJ_MAX
+from .config import (
+    DETECT_SCALES,
+    GEO_ASPECT_MAX,
+    GEO_ASPECT_MIN,
+    GEO_MIN_DIM,
+    REPROJ_MAX,
+    UPSCALE_PIXEL_BUDGET,
+)
 from .template import ARUCO_CENTERS, ARUCO_DICT, ARUCO_IDS, PAGE_W, PAGE_H
 
 
@@ -51,6 +58,9 @@ def _make_detector() -> cv2.aruco.ArucoDetector:
 
 
 def _collect(gray: np.ndarray, scale: float, detector: cv2.aruco.ArucoDetector) -> tuple[list, object]:
+    # Orçamento de pixels: não amplia uma foto já gigante (evita ~100 MP).
+    if scale > 1.0 and gray.size * scale * scale > UPSCALE_PIXEL_BUDGET:
+        return [], None
     if scale == 1.0:
         img = gray
     else:
