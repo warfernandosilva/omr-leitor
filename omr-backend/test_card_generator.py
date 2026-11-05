@@ -91,6 +91,65 @@ def test_custom_numbering_and_labels():
     assert card.config["questions"][0]["labels"] == ["A", "B", "C"]
 
 
+def test_multiple_blocks_are_readable():
+    """Vários blocos na mesma folha: cada um tem numeração e alternativas próprias."""
+    card = generate_card({
+        "blocks": [
+            {"title": "Parte 1", "n_questions": 8, "labels": ["A", "B", "C", "D"], "columns": 2},
+            {"title": "Parte 2", "n_questions": 8, "n_options": 5, "columns": 2,
+             "start_question": 9},
+        ],
+        "fields": ["student_name"],
+    })
+    cfg = card.config
+    assert not ct.has_errors(ct.validate_config(cfg))
+    assert len(cfg["questions"]) == 2
+    assert ct.total_questions(cfg) == 16
+    marks = {1: "A", 8: "D", 9: "C", 16: "E"}
+    result = ct.process_custom_image(_mark(card.image, cfg, marks), cfg)
+    assert result is not None
+    assert result.answers == marks
+
+
+def test_decorative_elements_are_kept_in_config():
+    """Texto/linha decorativos são desenhados e preservados na config."""
+    card = generate_card({
+        "n_questions": 5,
+        "elements": [
+            {"kind": "text", "text": "Leia com atenção", "x": 0.1, "y": 0.9,
+             "w": 0.6, "h": 0.04, "font_mm": 4},
+            {"kind": "line", "x": 0.1, "y": 0.95, "w": 0.8, "h": 0.004},
+        ],
+    })
+    assert not ct.has_errors(ct.validate_config(card.config))
+    assert [e["kind"] for e in card.config["elements"]] == ["text", "line"]
+    assert ct.config_summary(card.config)["n_elements"] == 2
+
+
+def test_block_orientation_horizontal_and_vertical():
+    """Orientação do bloco: horizontal (lado a lado) ou vertical (empilhada)."""
+    horiz = generate_card({
+        "blocks": [{"title": "T", "n_questions": 6, "labels": ["A", "B", "C", "D"],
+                    "columns": 2, "distribution": "horizontal", "show_title": True}],
+    })
+    assert horiz.config["questions"][0]["distribution"] == "row"
+    assert horiz.config["questions"][0]["columns"] == 2
+    assert not ct.has_errors(ct.validate_config(horiz.config))
+
+    vert = generate_card({
+        "blocks": [{"title": "T", "n_questions": 6, "labels": ["A", "B", "C", "D"],
+                    "columns": 1, "distribution": "vertical", "show_title": True}],
+    })
+    assert vert.config["questions"][0]["distribution"] == "column"
+    assert vert.config["questions"][0]["columns"] == 1
+    assert not ct.has_errors(ct.validate_config(vert.config))
+
+    # Bloco vertical continua legível (bolhas em fileira única).
+    marks = {1: "A", 4: "B"}
+    result = ct.process_custom_image(_mark(vert.image, vert.config, marks), vert.config)
+    assert result is not None and result.answers == marks
+
+
 def test_spec_that_does_not_fit_raises():
     with pytest.raises(ValueError):
         generate_card({

@@ -267,6 +267,34 @@ export function createCustomTemplate(file: File, nome: string, avaliacaoExternal
 
 // ─── Gerador do zero (medidas em mm) ───
 
+export interface CardBlockSpec {
+  /** Título opcional exibido acima do bloco. */
+  title?: string;
+  n_questions?: number;
+  n_options?: number;
+  labels?: string[] | null;
+  columns?: number;
+  start_question?: number;
+  /** Orientação da grade: horizontal (questões lado a lado) ou vertical. */
+  distribution?: 'horizontal' | 'vertical';
+  /** Exibe o título do bloco na folha. */
+  show_title?: boolean;
+}
+
+/** Elemento decorativo do gerador (texto ou linha). Coordenadas 0..1. */
+export interface CardElementSpec {
+  kind: 'text' | 'line';
+  text?: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Altura da fonte em milímetros. */
+  font_mm?: number;
+  align?: 'left' | 'center' | 'right';
+  bold?: boolean;
+}
+
 export interface CardSpec {
   page_format?: 'A4' | 'A5' | 'Letter' | 'Oficio' | 'custom';
   page_w_mm?: number;
@@ -295,6 +323,10 @@ export interface CardSpec {
   anchor_mm?: number;
   qr?: boolean;
   qr_mm?: number;
+  /** Vários blocos de questões (substitui os campos planos de questões). */
+  blocks?: CardBlockSpec[] | null;
+  /** Elementos decorativos desenhados na folha. */
+  elements?: CardElementSpec[] | null;
 }
 
 export interface GeneratePreviewResult {

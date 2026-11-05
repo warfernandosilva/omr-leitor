@@ -371,6 +371,9 @@ def normalize_config(config: dict | None) -> dict:
             "mark_style": b.get("mark_style") if b.get("mark_style") in ("filled", "marks") else "filled",
             "overrides": overrides,
             "locked": bool(b.get("locked", False)),
+            # Orientação (horizontal: questões lado a lado; vertical: uma por linha).
+            "distribution": b.get("distribution") if b.get("distribution") in ("column", "row") else "column",
+            "show_title": bool(b.get("show_title", True)),
         })
     out["questions"] = questions
 

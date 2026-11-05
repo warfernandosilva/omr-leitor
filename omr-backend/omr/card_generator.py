@@ -114,6 +114,70 @@ def _labels(spec: dict) -> list[str]:
     return list(LABELS[:n])
 
 
+def _block_labels(raw: dict, spec: dict) -> list[str]:
+    """Rótulos de um bloco: lista própria > n_options próprio > padrão global."""
+    own = raw.get("labels")
+    if isinstance(own, list) and own:
+        labels = [str(x).strip().upper()[:2] for x in own if str(x).strip()]
+        if labels:
+            return labels[:len(LABELS)]
+    n = raw.get("n_options")
+    if n is None:
+        return _labels(spec)
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = len(_labels(spec))
+    return list(LABELS[:max(2, min(len(LABELS), n))])
+
+
+def _blocks_from_spec(spec: dict) -> list[dict]:
+    """Lê `spec['blocks']` (múltiplos blocos) com valores seguros."""
+    raw = spec.get("blocks")
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    for b in raw:
+        if not isinstance(b, dict):
+            continue
+        try:
+            n_q = int(float(b.get("n_questions") or 0))
+        except (TypeError, ValueError):
+            n_q = 0
+        if n_q <= 0:
+            continue
+        try:
+            start = int(float(b.get("start_question") or 1))
+        except (TypeError, ValueError):
+            start = 1
+        try:
+            cols = int(float(b.get("columns") or 1))
+        except (TypeError, ValueError):
+            cols = 1
+        dist_raw = str(b.get("distribution") or "column").strip().lower()
+        if dist_raw in ("horizontal", "row"):
+            # Questões lado a lado: `columns` = nº de questões por linha.
+            distribution = "row"
+            block_cols = max(1, min(MAX_COLUMNS, cols))
+        elif dist_raw == "vertical":
+            # Empilhadas (uma questão por linha).
+            distribution = "column"
+            block_cols = 1
+        else:
+            distribution = "column"
+            block_cols = max(1, min(MAX_COLUMNS, cols))
+        out.append({
+            "title": str(b.get("title") or "").strip()[:80],
+            "n_questions": max(1, min(MAX_QUESTIONS, n_q)),
+            "labels": _block_labels(b, spec),
+            "columns": block_cols,
+            "start_question": max(1, min(10000, start)),
+            "distribution": distribution,
+            "show_title": bool(b.get("show_title", True)),
+        })
+    return out
+
+
 def _center_text(draw, center: tuple[float, float], text: str, font, fill=(0, 0, 0)) -> None:
     w = draw.textlength(text, font=font)
     box = draw.textbbox((0, 0), text, font=font)
@@ -293,70 +357,302 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     # Faixa com as letras das alternativas (como nos cartões oficiais: letras
     # no cabeçalho da grade, bolhas vazias — o leitor depende do contorno).
     label_row_h = d_req * 1.15
-    grid_h_avail = grid_h - label_row_h
-    if grid_h_avail < mm2px(15):
-        raise ValueError("Sobra pouco espaço para as questões: reduza o cabeçalho ou as margens.")
-
     gap_x = mm2px(_num(s, "option_gap_mm", 1.0, 20.0))
     gap_y = mm2px(_num(s, "row_gap_mm", 0.5, 20.0))
 
-    chosen = None
-    for cols in range(requested_cols, MAX_COLUMNS + 1):
-        col_w = (grid_w - (cols - 1) * col_gap) / cols
-        if col_w <= num_w + d_req * 1.2:
+    block_specs = _blocks_from_spec(s)
+    blocks_config: list[dict] = []
+
+    if block_specs:
+        # ── Múltiplos blocos: divide a altura disponível entre os blocos ──
+        total_q = sum(b["n_questions"] for b in block_specs)
+        block_gap = mm2px(4.0)
+        title_h = small_px * 2.0
+        layout: list[dict] = []
+
+        # Aumenta as colunas de todos os blocos juntos até caber. Como cada
+        # bloco usa a largura inteira, o número de colunas é o que controla a
+        # altura necessária.
+        for extra in range(0, MAX_COLUMNS):
+            trials: list[dict] = []
+            ok = True
+            for b in block_specs:
+                labels_b = b["labels"]
+                n_opts_b = len(labels_b)
+                cols = min(MAX_COLUMNS, b["columns"] + extra)
+                col_w = (grid_w - (cols - 1) * col_gap) / cols
+                if col_w <= num_w + d_req * 1.2:
+                    ok = False
+                    break
+                step_x = (col_w - num_w) / n_opts_b
+                if step_x - gap_x < min_d:
+                    ok = False
+                    break
+                rows_b = math.ceil(b["n_questions"] / cols)
+                th = title_h if b["title"] else 0.0
+                natural = th + label_row_h + rows_b * (d_req + gap_y)
+                trials.append({
+                    "spec": b, "labels": labels_b, "cols": cols,
+                    "col_w": col_w, "step_x": step_x, "rows": rows_b,
+                    "natural": natural, "title_h": th,
+                })
+            if not ok or not trials:
+                continue
+            total_h = sum(t["natural"] for t in trials) + block_gap * (len(trials) - 1)
+            if total_h > grid_h:
+                continue
+            slack = grid_h - total_h
+            layout = []
+            for t in trials:
+                band_h = t["natural"] + slack * (t["natural"] / total_h)
+                content_h = band_h - t["title_h"] - label_row_h
+                step_y = content_h / t["rows"]
+                d = min(d_req, t["step_x"] - gap_x, step_y - gap_y)
+                if d < min_d:
+                    ok = False
+                    break
+                t["step_y"] = step_y
+                t["d"] = d
+                layout.append(t)
+            if ok and layout:
+                break
+            layout = []
+
+        if not layout:
+            raise ValueError(
+                f"Não cabe: {total_q} questões distribuídas em {len(block_specs)} bloco(s) "
+                "nesta página. Reduza as questões, use outro formato ou menos margem."
+            )
+
+        y_cursor = header_bottom
+        for t in layout:
+            b = t["spec"]
+            labels_b = t["labels"]
+            cols = t["cols"]
+            col_w = t["col_w"]
+            step_x = t["step_x"]
+            rows_b = t["rows"]
+            step_y = t["step_y"]
+            d = t["d"]
+            if cols > b["columns"]:
+                warnings.append(
+                    f"O bloco {b['start_question']}–"
+                    f"{b['start_question'] + b['n_questions'] - 1} usa {cols} colunas "
+                    "para caber com bolhas legíveis."
+                )
+            if d < d_req - 0.5:
+                warnings.append(f"Bolhas reduzidas para {d / mm2px(1):.1f} mm para caber no espaço.")
+            if b["title"] and b["show_title"]:
+                draw.text((cx0, y_cursor), _fit_text(draw, b["title"], small_font, grid_w),
+                          font=small_font, fill=(60, 60, 60))
+                y_cursor += t["title_h"]
+            label_cy = y_cursor + label_row_h / 2
+            y_cursor += label_row_h
+            first_cy = y_cursor + step_y / 2
+            x_start = cx0
+            first_cx = x_start + num_w + step_x / 2
+            col_pitch = col_w + col_gap
+            r = d / 2
+            outline_b = max(3, int(round(d * 0.09)))
+            label_font = load_font(max(9, int(d * 0.55)))
+            number_font = load_font(max(8, int(d * 0.55)))
+
+            for col in range(cols):
+                for i, label in enumerate(labels_b):
+                    bx = first_cx + col * col_pitch + i * step_x
+                    _center_text(draw, (bx, label_cy), label, label_font, (0, 0, 0))
+
+            for idx in range(b["n_questions"]):
+                if b["distribution"] == "row":
+                    # Horizontal: questões lado a lado (row-major; colunas = q/linha).
+                    row = idx // t["cols"]
+                    col = idx % t["cols"]
+                else:
+                    # Vertical (column-major): uma questão por linha quando 1 coluna.
+                    row = idx % rows_b
+                    col = idx // rows_b
+                cy = first_cy + row * step_y
+                num_x = x_start + col * col_pitch + num_w - mm2px(2.0)
+                draw.text((num_x, cy), str(b["start_question"] + idx), font=number_font,
+                          fill=(0, 0, 0), anchor="rm")
+                for i in range(len(labels_b)):
+                    bx = first_cx + col * col_pitch + i * step_x
+                    if shape == "square":
+                        draw.rectangle((bx - r, cy - r, bx + r, cy + r),
+                                       outline=(0, 0, 0), width=outline_b)
+                    else:
+                        draw.ellipse((bx - r, cy - r, bx + r, cy + r),
+                                     outline=(0, 0, 0), width=outline_b)
+
+            y_cursor += rows_b * step_y + block_gap
+            blocks_config.append({
+                "id": f"blk_{len(blocks_config) + 1}",
+                "type": "bubble_block",
+                "page": 0,
+                "first_x": first_cx / pw,
+                "first_y": first_cy / ph,
+                "option_step_x": step_x / pw,
+                "question_step_y": step_y / ph,
+                "column_step_x": col_pitch / pw,
+                "columns": t["cols"],
+                "n_questions": b["n_questions"],
+                "labels": labels_b,
+                "radius": r / max(pw, ph),
+                "shape": shape,
+                "start_question": b["start_question"],
+                "distribution": b["distribution"],
+                "show_title": bool(b["show_title"]),
+            })
+    else:
+        # ── Bloco único (comportamento clássico do spec plano) ──
+        grid_h_avail = grid_h - label_row_h
+        if grid_h_avail < mm2px(15):
+            raise ValueError("Sobra pouco espaço para as questões: reduza o cabeçalho ou as margens.")
+
+        chosen = None
+        for cols in range(requested_cols, MAX_COLUMNS + 1):
+            col_w = (grid_w - (cols - 1) * col_gap) / cols
+            if col_w <= num_w + d_req * 1.2:
+                continue
+            step_x = (col_w - num_w) / n_opts
+            rows = math.ceil(n_q / cols)
+            step_y = grid_h_avail / rows
+            # O diâmetro respeita o tamanho pedido E os espaçamentos mínimos.
+            d = min(d_req, step_x - gap_x, step_y - gap_y)
+            if d >= min_d:
+                chosen = (cols, col_w, step_x, rows, step_y, d)
+                break
+        if chosen is None:
+            raise ValueError(
+                f"Não cabe: {n_q} questões × {n_opts} alternativas nesta página. "
+                "Reduza as questões, use outro formato ou menos margem."
+            )
+
+        cols, col_w, step_x, rows, step_y, d = chosen
+        if cols > requested_cols:
+            warnings.append(f"Foram usadas {cols} colunas para as questões caberem com bolhas legíveis.")
+        if d < d_req - 0.5:
+            warnings.append(f"Bolhas reduzidas para {d / mm2px(1):.1f} mm para caber no espaço.")
+
+        used_w = cols * col_w + (cols - 1) * col_gap
+        x_start = cx0 + (grid_w - used_w) / 2
+        y_start = header_bottom + label_row_h + (grid_h_avail - rows * step_y) / 2
+        first_cx = x_start + num_w + step_x / 2
+        first_cy = y_start + step_y / 2
+
+        r = d / 2
+        outline = max(3, int(round(d * 0.09)))
+        label_font = load_font(max(9, int(d * 0.55)))
+        number_font = load_font(max(8, int(d * 0.55)))
+        col_pitch = col_w + col_gap
+
+        # Letras das alternativas no topo de cada coluna.
+        label_cy = header_bottom + label_row_h / 2
+        for col in range(cols):
+            for i, label in enumerate(labels):
+                bx = first_cx + col * col_pitch + i * step_x
+                _center_text(draw, (bx, label_cy), label, label_font, (0, 0, 0))
+
+        for idx in range(n_q):
+            row = idx % rows
+            col = idx // rows
+            cy = first_cy + row * step_y
+            num_x = x_start + col * col_pitch + num_w - mm2px(2.0)
+            draw.text((num_x, cy), str(start_q + idx), font=number_font,
+                      fill=(0, 0, 0), anchor="rm")
+            for i in range(n_opts):
+                bx = first_cx + col * col_pitch + i * step_x
+                if shape == "square":
+                    draw.rectangle((bx - r, cy - r, bx + r, cy + r), outline=(0, 0, 0), width=outline)
+                else:
+                    draw.ellipse((bx - r, cy - r, bx + r, cy + r), outline=(0, 0, 0), width=outline)
+
+        blocks_config.append({
+            "id": "blk_1",
+            "type": "bubble_block",
+            "page": 0,
+            "first_x": first_cx / pw,
+            "first_y": first_cy / ph,
+            "option_step_x": step_x / pw,
+            "question_step_y": step_y / ph,
+            "column_step_x": col_pitch / pw,
+            "columns": cols,
+            "n_questions": n_q,
+            "labels": labels,
+            "radius": r / max(pw, ph),
+            "shape": shape,
+            "start_question": start_q,
+            "distribution": "column",
+        })
+
+    # ── Elementos decorativos (texto/linha) ─────────────────────────────────
+    elements_config: list[dict] = []
+    for e in s.get("elements") or []:
+        if not isinstance(e, dict):
             continue
-        step_x = (col_w - num_w) / n_opts
-        rows = math.ceil(n_q / cols)
-        step_y = grid_h_avail / rows
-        # O diâmetro respeita o tamanho pedido E os espaçamentos mínimos.
-        d = min(d_req, step_x - gap_x, step_y - gap_y)
-        if d >= min_d:
-            chosen = (cols, col_w, step_x, rows, step_y, d)
-            break
-    if chosen is None:
-        raise ValueError(
-            f"Não cabe: {n_q} questões × {n_opts} alternativas nesta página. "
-            "Reduza as questões, use outro formato ou menos margem."
-        )
+        kind = e.get("kind") if e.get("kind") in ("text", "line") else "text"
+        if e.get("kind") == "image":
+            warnings.append("Imagens decorativas não são suportadas no gerador do zero.")
+            continue
+        try:
+            ex = max(0.0, min(1.0, float(e.get("x") or 0.0)))
+            ey = max(0.0, min(1.0, float(e.get("y") or 0.0)))
+            ew = max(0.0, min(1.0 - ex, float(e.get("w") or 0.0)))
+            eh = max(0.0, min(1.0 - ey, float(e.get("h") or 0.0)))
+        except (TypeError, ValueError):
+            continue
+        if ew <= 0 or eh <= 0:
+            continue
+        text = str(e.get("text") or "")[:200]
+        align = e.get("align") if e.get("align") in ("left", "center", "right") else "left"
+        try:
+            font_mm = max(1.5, min(30.0, float(e.get("font_mm") or 4.0)))
+        except (TypeError, ValueError):
+            font_mm = 4.0
+        font_px = max(6, int(round(mm2px(font_mm))))
+        x_px, y_px = ex * pw, ey * ph
+        w_px, h_px = ew * pw, eh * ph
+        fill = (40, 40, 40)
 
-    cols, col_w, step_x, rows, step_y, d = chosen
-    if cols > requested_cols:
-        warnings.append(f"Foram usadas {cols} colunas para as questões caberem com bolhas legíveis.")
-    if d < d_req - 0.5:
-        warnings.append(f"Bolhas reduzidas para {d / mm2px(1):.1f} mm para caber no espaço.")
+        if kind == "text":
+            font = load_font(font_px)
+            line_h = font_px * 1.25
+            lines = text.splitlines() or [""]
+            for li, line in enumerate(lines):
+                if line_h * (li + 1) > h_px + 1:
+                    break
+                fitted = _fit_text(draw, line, font, w_px)
+                tw = draw.textlength(fitted, font=font)
+                tx = x_px
+                if align == "center":
+                    tx = x_px + (w_px - tw) / 2
+                elif align == "right":
+                    tx = x_px + w_px - tw
+                ty = y_px + li * line_h
+                if bool(e.get("bold", False)):
+                    draw.text((tx, ty), fitted, font=font, fill=fill,
+                              stroke_width=1, stroke_fill=fill)
+                else:
+                    draw.text((tx, ty), fitted, font=font, fill=fill)
+        else:  # linha horizontal
+            ly = y_px + h_px / 2
+            draw.line((x_px, ly, x_px + w_px, ly), fill=(90, 90, 90),
+                      width=max(1, int(round(mm2px(0.25)))))
 
-    used_w = cols * col_w + (cols - 1) * col_gap
-    x_start = cx0 + (grid_w - used_w) / 2
-    y_start = header_bottom + label_row_h + (grid_h_avail - rows * step_y) / 2
-    first_cx = x_start + num_w + step_x / 2
-    first_cy = y_start + step_y / 2
-
-    r = d / 2
-    outline = max(3, int(round(d * 0.09)))
-    label_font = load_font(max(9, int(d * 0.55)))
-    number_font = load_font(max(8, int(d * 0.55)))
-    col_pitch = col_w + col_gap
-
-    # Letras das alternativas no topo de cada coluna.
-    label_cy = header_bottom + label_row_h / 2
-    for col in range(cols):
-        for i, label in enumerate(labels):
-            bx = first_cx + col * col_pitch + i * step_x
-            _center_text(draw, (bx, label_cy), label, label_font, (0, 0, 0))
-
-    for idx in range(n_q):
-        row = idx % rows
-        col = idx // rows
-        cy = first_cy + row * step_y
-        num_x = x_start + col * col_pitch + num_w - mm2px(2.0)
-        draw.text((num_x, cy), str(start_q + idx), font=number_font,
-                  fill=(0, 0, 0), anchor="rm")
-        for i in range(n_opts):
-            bx = first_cx + col * col_pitch + i * step_x
-            if shape == "square":
-                draw.rectangle((bx - r, cy - r, bx + r, cy + r), outline=(0, 0, 0), width=outline)
-            else:
-                draw.ellipse((bx - r, cy - r, bx + r, cy + r), outline=(0, 0, 0), width=outline)
+        elements_config.append({
+            "id": f"el_{len(elements_config) + 1}",
+            "kind": kind,
+            "page": 0,
+            "x": ex,
+            "y": ey,
+            "w": ew,
+            "h": eh,
+            "text": text,
+            "font_size": font_px,
+            "align": align,
+            "bold": bool(e.get("bold", False)),
+            "asset": None,
+        })
 
     img = _BGR(pil)
 
@@ -396,23 +692,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         "page_corners": None,
         "qr": qr_region,
         "info_regions": info_regions,
-        "questions": [{
-            "id": "blk_1",
-            "type": "bubble_block",
-            "page": 0,
-            "first_x": first_cx / pw,
-            "first_y": first_cy / ph,
-            "option_step_x": step_x / pw,
-            "question_step_y": step_y / ph,
-            "column_step_x": col_pitch / pw,
-            "columns": cols,
-            "n_questions": n_q,
-            "labels": labels,
-            "radius": r / max(pw, ph),
-            "shape": shape,
-            "start_question": start_q,
-            "distribution": "column",
-        }],
+        "elements": elements_config,
+        "questions": blocks_config,
         "print_fields": print_fields,
         "omr_params": {},
     }
