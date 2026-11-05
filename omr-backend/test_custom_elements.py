@@ -71,6 +71,23 @@ def test_render_overlay_draws_text_and_line():
     assert (out[800:, :] == 255).all()
 
 
+def test_render_overlay_draws_image_and_respects_page():
+    from PIL import Image
+
+    img = np.ones((400, 300, 3), dtype=np.uint8) * 255
+    logo = Image.new("RGBA", (20, 10), (255, 0, 0, 255))
+    cfg = ct.normalize_config({
+        "page_w": 300, "page_h": 400, "n_pages": 2,
+        "elements": [
+            _element(id="el_img", kind="image", text="", asset="ast_0123456789ab"),
+            _element(id="el_p2", page=1, y=0.6, h=0.05),
+        ],
+    })
+    out = ct.render_overlay(cfg, img, page=0, assets={"ast_0123456789ab": logo})
+    assert (out[16:32, 90:210] < 128).any(), "logo não foi desenhado"
+    assert (out[240:260, 90:210] == 255).all(), "elemento da página 2 vazou"
+
+
 def test_validate_warns_when_element_covers_a_bubble():
     card = generate_card({"n_questions": 10, "n_options": 4})
     bubble = ct.expand_bubbles(card.config)[0]
