@@ -2807,7 +2807,9 @@ function PrintModal({ open, onClose, detailId }: { open: boolean; onClose: () =>
         </Field>
         {mode !== 'avaliacao' && (
           <Field label="Formato" htmlFor="pr-fmt">
-            <Select id="pr-fmt" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>
+            <Select id="pr-fmt" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onMouseUp={(e) => e.stopPropagation()}>
               <option value="PDF">PDF</option>
               <option value="PNG">PNG</option>
             </Select>
