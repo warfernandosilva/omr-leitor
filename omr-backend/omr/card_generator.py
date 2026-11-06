@@ -95,6 +95,21 @@ def _num(spec: dict, key: str, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+def _px_font(spec: dict, key: str, fallback_px: float, lo: int = 6, hi: int = 400) -> int:
+    """Tamanho da fonte em px da imagem.
+
+    A chave `*_font_px` (escolhida no editor) tem prioridade; sem ela usa o
+    default histórico derivado de milímetros, para modelos antigos não mudarem.
+    """
+    raw = spec.get(key)
+    if raw is not None and not (isinstance(raw, str) and not raw.strip()):
+        try:
+            return max(lo, min(hi, int(round(float(raw)))))
+        except (TypeError, ValueError):
+            pass
+    return max(lo, min(hi, int(round(fallback_px))))
+
+
 def _resolve_page(spec: dict) -> tuple[float, float]:
     fmt = str(spec.get("page_format") or "A4")
     if fmt in PAGE_FORMATS:
@@ -266,14 +281,20 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     pil = _PIL(img)
     draw = _draw(pil)
 
-    title_px = int(mm2px(6.0))
-    sub_px = int(mm2px(3.6))
-    field_px = int(mm2px(3.2))
-    small_px = int(mm2px(2.6))
+    title_px = _px_font(s, "title_font_px", mm2px(6.0))
+    sub_px = _px_font(s, "subtitle_font_px", mm2px(3.6))
+    school_px = _px_font(s, "school_font_px", mm2px(3.6))
+    teacher_px = _px_font(s, "teacher_font_px", mm2px(2.6))
+    field_px = _px_font(s, "field_font_px", mm2px(3.2))
+    instr_px = _px_font(s, "instructions_font_px", mm2px(2.6))
+    block_title_px = _px_font(s, "block_title_font_px", mm2px(2.6))
     title_font = load_font(title_px)
     sub_font = load_font(sub_px)
+    school_font = load_font(school_px)
+    teacher_font = load_font(teacher_px)
     field_font = load_font(field_px)
-    small_font = load_font(small_px)
+    small_font = load_font(instr_px)
+    block_title_font = load_font(block_title_px)
 
     header_w = cx1 - cx0 - (qr_px + mm2px(4.0) if qr_px else 0.0)
     y = cy0
@@ -283,8 +304,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     teacher = str(s.get("teacher") or "").strip()[:120]
 
     if school:
-        draw.text((cx0, y), _fit_text(draw, school, sub_font, header_w), font=sub_font, fill=(0, 0, 0))
-        y += sub_px * 1.6
+        draw.text((cx0, y), _fit_text(draw, school, school_font, header_w), font=school_font, fill=(0, 0, 0))
+        y += school_px * 1.6
 
     if title:
         draw.text((cx0, y), title, font=title_font, fill=(0, 0, 0))
@@ -296,8 +317,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         y += sub_px * 1.6
 
     if teacher:
-        draw.text((cx0, y), _fit_text(draw, teacher, small_font, header_w), font=small_font, fill=(60, 60, 60))
-        y += small_px * 1.6
+        draw.text((cx0, y), _fit_text(draw, teacher, teacher_font, header_w), font=teacher_font, fill=(60, 60, 60))
+        y += teacher_px * 1.6
 
     fields = [f for f in (s.get("fields") or []) if f in FIELD_LABELS]
     info_regions: list[dict] = []
@@ -345,7 +366,7 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
                 continue
             draw.text((cx0, y), _fit_text(draw, text, small_font, max_w),
                       font=small_font, fill=(90, 90, 90))
-            y += small_px * 1.6
+            y += instr_px * 1.6
 
     header_bottom = y + mm2px(2.5)
 
@@ -386,7 +407,7 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     blocks_config: list[dict] = []
     block_layout: list[dict] = []
     block_gap = mm2px(4.0)
-    title_h = small_px * 2.0
+    title_h = block_title_px * 2.0
 
     def px_to_mm(v: float) -> float:
         return v / mm2px(1.0)
@@ -448,16 +469,16 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
                 bh = th + label_row_h + rows_b * step_y
 
             if b["title"] and b["show_title"]:
-                draw.text((bx0, by0), _fit_text(draw, b["title"], small_font, bw),
-                          font=small_font, fill=(60, 60, 60))
+                draw.text((bx0, by0), _fit_text(draw, b["title"], block_title_font, bw),
+                          font=block_title_font, fill=(60, 60, 60))
             label_cy = by0 + th + label_row_h / 2
             first_cy = by0 + th + label_row_h + step_y / 2
             first_cx = bx0 + num_w + step_x / 2
             col_pitch = col_w + col_gap
             r = d / 2
             outline_b = max(3, int(round(d * 0.09)))
-            label_font = load_font(max(9, int(d * 0.55)))
-            number_font = load_font(max(8, int(d * 0.55)))
+            label_font = load_font(_px_font(s, "label_font_px", max(9, int(d * 0.55))))
+            number_font = load_font(_px_font(s, "question_font_px", max(8, int(d * 0.55))))
 
             for col in range(cols):
                 for i, label in enumerate(labels_b):
@@ -610,8 +631,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             if d < d_req - 0.5:
                 warnings.append(f"Bolhas reduzidas para {d / mm2px(1):.1f} mm para caber no espaço.")
             if b["title"] and b["show_title"]:
-                draw.text((cx0, y_cursor), _fit_text(draw, b["title"], small_font, grid_w),
-                          font=small_font, fill=(60, 60, 60))
+                draw.text((cx0, y_cursor), _fit_text(draw, b["title"], block_title_font, grid_w),
+                          font=block_title_font, fill=(60, 60, 60))
                 y_cursor += t["title_h"]
             label_cy = y_cursor + label_row_h / 2
             y_cursor += label_row_h
@@ -621,8 +642,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             col_pitch = col_w + col_gap
             r = d / 2
             outline_b = max(3, int(round(d * 0.09)))
-            label_font = load_font(max(9, int(d * 0.55)))
-            number_font = load_font(max(8, int(d * 0.55)))
+            label_font = load_font(_px_font(s, "label_font_px", max(9, int(d * 0.55))))
+            number_font = load_font(_px_font(s, "question_font_px", max(8, int(d * 0.55))))
 
             for col in range(cols):
                 for i, label in enumerate(labels_b):
@@ -709,8 +730,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
 
         r = d / 2
         outline = max(3, int(round(d * 0.09)))
-        label_font = load_font(max(9, int(d * 0.55)))
-        number_font = load_font(max(8, int(d * 0.55)))
+        label_font = load_font(_px_font(s, "label_font_px", max(9, int(d * 0.55))))
+        number_font = load_font(_px_font(s, "question_font_px", max(8, int(d * 0.55))))
         col_pitch = col_w + col_gap
 
         # Letras das alternativas no topo de cada coluna.
@@ -789,7 +810,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             font_mm = max(1.5, min(30.0, float(e.get("font_mm") or 4.0)))
         except (TypeError, ValueError):
             font_mm = 4.0
-        font_px = max(6, int(round(mm2px(font_mm))))
+        # `font_px` (editado no painel) tem prioridade sobre `font_mm`.
+        font_px = _px_font(e, "font_px", mm2px(font_mm))
         x_px, y_px = ex * pw, ey * ph
         w_px, h_px = ew * pw, eh * ph
         fill = (40, 40, 40)

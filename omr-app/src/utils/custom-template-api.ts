@@ -298,7 +298,9 @@ export interface CardElementSpec {
   y: number;
   w: number;
   h: number;
-  /** Altura da fonte em milímetros. */
+  /** Altura da fonte em px da imagem (preferencial). */
+  font_px?: number;
+  /** Altura da fonte em milímetros (compatibilidade com modelos antigos). */
   font_mm?: number;
   align?: 'left' | 'center' | 'right';
   bold?: boolean;
@@ -338,6 +340,16 @@ export interface CardSpec {
   blocks?: CardBlockSpec[] | null;
   /** Elementos decorativos desenhados na folha. */
   elements?: CardElementSpec[] | null;
+  // ── Tamanhos de fonte, em px da imagem do cartão ──
+  title_font_px?: number;
+  subtitle_font_px?: number;
+  school_font_px?: number;
+  teacher_font_px?: number;
+  instructions_font_px?: number;
+  field_font_px?: number;
+  block_title_font_px?: number;
+  question_font_px?: number;
+  label_font_px?: number;
 }
 
 export interface PreviewBlockLayout {

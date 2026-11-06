@@ -247,6 +247,35 @@ function numOrUndefined(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+/** Converte `font_mm` de modelos antigos no equivalente em px (dpi padrão do gerador). */
+function fontMmToPx(fontMm: number | undefined): number {
+  return Math.max(6, Math.round(((fontMm ?? 4) / 25.4) * 200));
+}
+
+/**
+ * Tamanho de fonte em px. Vazio = `auto`, que mantém o tamanho padrão do
+ * gerador (derivado de mm), então modelos antigos continuam iguais.
+ */
+function FontPxField({ label, value, onChange }: {
+  label: string;
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <div>
+      <span className="mb-0.5 block text-[10px] text-gray-400">{label}</span>
+      <Input
+        type="number" min={6} max={400} step={1}
+        className={COMPACT}
+        value={value ?? ''}
+        placeholder="auto"
+        aria-label={`Tamanho da fonte de ${label} em pixels`}
+        onChange={(e) => onChange(numOrUndefined(e.target.value))}
+      />
+    </div>
+  );
+}
+
 function labelsFor(n: number): string[] {
   return LETTERS.slice(0, clamp(Math.round(n), 2, LETTERS.length)).split('');
 }
@@ -499,12 +528,12 @@ function ElementCard({
           />
           <div className="mb-2 grid grid-cols-2 gap-2">
             <div>
-              <span className="mb-0.5 block text-[10px] text-gray-400">Fonte (mm)</span>
+              <span className="mb-0.5 block text-[10px] text-gray-400">Fonte (px)</span>
               <Input
-                type="number" min={1.5} max={30} step={0.5}
-                value={element.font_mm ?? 4}
+                type="number" min={6} max={400} step={1}
+                value={element.font_px ?? fontMmToPx(element.font_mm)}
                 className={COMPACT}
-                onChange={(e) => onChange({ font_mm: numOrUndefined(e.target.value) }, `el-${index}-font`)}
+                onChange={(e) => onChange({ font_px: numOrUndefined(e.target.value), font_mm: undefined }, `el-${index}-font`)}
               />
             </div>
             <div>
@@ -670,6 +699,46 @@ function BlockCard({
         {block.labels?.join(' · ') || 'A · B · C · D'}
       </p>
     </div>
+  );
+}
+
+/**
+ * Tamanhos de fonte do cartão, em pixels da imagem. Não são por bloco porque
+ * valem para a folha inteira; ficam num painel dedicado no fim das propriedades.
+ */
+function CardFontsPanel({
+  spec, mutate,
+}: {
+  spec: CardSpec;
+  mutate: (patch: Partial<CardSpec>, coalesce: string) => void;
+}) {
+  return (
+    <Section title="Tamanho das fontes" hint="Em pixels da imagem do cartão; use auto para o padrão.">
+      <div className="grid grid-cols-2 gap-2">
+        <FontPxField label="Título" value={spec.title_font_px}
+                     onChange={(v) => mutate({ title_font_px: v }, 'font-title')} />
+        <FontPxField label="Subtítulo" value={spec.subtitle_font_px}
+                     onChange={(v) => mutate({ subtitle_font_px: v }, 'font-subtitle')} />
+        <FontPxField label="Escola" value={spec.school_font_px}
+                     onChange={(v) => mutate({ school_font_px: v }, 'font-school')} />
+        <FontPxField label="Professor(a)" value={spec.teacher_font_px}
+                     onChange={(v) => mutate({ teacher_font_px: v }, 'font-teacher')} />
+        <FontPxField label="Instruções" value={spec.instructions_font_px}
+                     onChange={(v) => mutate({ instructions_font_px: v }, 'font-instr')} />
+        <FontPxField label="Rótulos dos campos" value={spec.field_font_px}
+                     onChange={(v) => mutate({ field_font_px: v }, 'font-field')} />
+        <FontPxField label="Título dos blocos" value={spec.block_title_font_px}
+                     onChange={(v) => mutate({ block_title_font_px: v }, 'font-block-title')} />
+        <FontPxField label="Número das questões" value={spec.question_font_px}
+                     onChange={(v) => mutate({ question_font_px: v }, 'font-question')} />
+        <FontPxField label="Letras das alternativas" value={spec.label_font_px}
+                     onChange={(v) => mutate({ label_font_px: v }, 'font-label')} />
+      </div>
+      <p className="text-[10px] text-gray-400">
+        O valor <strong>auto</strong> mantém o tamanho padrão do gerador, calculado a
+        partir das bolhas — bom ponto de partida antes de ajustar no olho.
+      </p>
+    </Section>
   );
 }
 
@@ -1740,6 +1809,8 @@ export default function CardGeneratorForm({
                        onChange={(e) => mutate({ margin_mm: numOrUndefined(e.target.value) }, 'margin')} />
               </Field>
             </Section>
+
+            <CardFontsPanel spec={spec} mutate={mutate} />
 
             <Section title="Exibição">
               <label className="flex items-center justify-between gap-2 text-xs text-gray-600 dark:text-gray-300">

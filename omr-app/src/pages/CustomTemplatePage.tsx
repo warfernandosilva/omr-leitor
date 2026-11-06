@@ -24,7 +24,7 @@ import { syncExam } from '../utils/api';
 import { getExams } from '../utils/storage';
 import type { Exam } from '../types';
 import {
-  CustomAnchor, CustomBlock, CustomConfig, CustomElement, CustomInfoRegion, CustomQr,
+  CustomAnchor, CustomBlock, CustomConfig, CustomElement, CustomInfoRegion, CustomPrintField, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
   autoConfigureCustomTemplate, createCustomTemplate, customTemplateAsset, customTemplateImage,
@@ -2301,11 +2301,16 @@ function PropertiesPanel({
     const upd = (patch: Partial<CustomInfoRegion>) =>
       updateField({ info_regions: config.info_regions.map((x) => (x.id === id ? { ...x, ...patch } : x)) });
     const pf = config.print_fields.find((f) => f.region_id === id);
-    const setPrintField = (source: string) => {
+    const setPrintField = (source: string, align?: CustomPrintField['align'], fontSize?: number) => {
       const others = config.print_fields.filter((f) => f.region_id !== id);
       updateField({
         print_fields: source
-          ? [...others, { region_id: id, source, font_size: pf?.font_size ?? 30, align: pf?.align ?? 'left' }]
+          ? [{
+              region_id: id,
+              source,
+              font_size: fontSize ?? pf?.font_size ?? 30,
+              align: align ?? pf?.align ?? 'left',
+            }, ...others]
           : others,
       });
     };
@@ -2324,6 +2329,22 @@ function PropertiesPanel({
             {PRINT_SOURCES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
           </Select>
         </Field>
+        {pf && (
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Fonte (px)" htmlFor="p-info-fs" helper="Altura da letra na imagem do modelo.">
+              <Input id="p-info-fs" type="number" min={6} max={400} value={pf.font_size}
+                     onChange={(e) => setPrintField(pf.source, undefined, clamp(Number(e.target.value) || 6, 6, 400))} />
+            </Field>
+            <Field label="Alinhamento" htmlFor="p-info-align">
+              <Select id="p-info-align" value={pf.align}
+                      onChange={(e) => setPrintField(pf.source, e.target.value as CustomPrintField['align'])}>
+                <option value="left">Esquerda</option>
+                <option value="center">Centro</option>
+                <option value="right">Direita</option>
+              </Select>
+            </Field>
+          </div>
+        )}
       </div>
     );
   }
