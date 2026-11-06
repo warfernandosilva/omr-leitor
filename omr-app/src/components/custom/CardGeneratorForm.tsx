@@ -1291,6 +1291,21 @@ export default function CardGeneratorForm({
     };
   }, [step, pageH, pageW]);
 
+  // Ctrl + roda do mouse aproxima/afasta a folha. O wheel é não-passivo para
+  // poder cancelar o zoom do navegador, que encolheria a página inteira.
+  useEffect(() => {
+    const el = canvasScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      zoomManualRef.current = true;
+      setZoom((z) => clamp(Math.round((z - e.deltaY * 0.001) * 100) / 100, 0.3, 2));
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [step]);
+
   // ─── Rótulos de seleção ────────────────────────────────────────────────────
 
   const selectedLabel = selectedBlockIndex != null
@@ -2032,11 +2047,11 @@ export default function CardGeneratorForm({
               <Layers size={12} aria-hidden /> 1 / 1
             </span>
             <span className="mx-1 h-5 w-px bg-line dark:bg-gray-700" aria-hidden />
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Diminuir zoom" title="Diminuir zoom">
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Diminuir zoom" title="Diminuir zoom (ou Ctrl + roda do mouse)">
               <ZoomOut size={15} aria-hidden />
             </button>
             <span className="w-10 text-center text-[11px] font-semibold text-gray-500">{Math.round(zoom * 100)}%</span>
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z + 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Aumentar zoom" title="Aumentar zoom">
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z + 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Aumentar zoom" title="Aumentar zoom (ou Ctrl + roda do mouse)">
               <ZoomIn size={15} aria-hidden />
             </button>
             <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={fitToScreen} aria-label="Ajustar à tela" title="Ajustar à tela">

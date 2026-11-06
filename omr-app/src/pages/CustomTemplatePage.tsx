@@ -584,6 +584,24 @@ function TemplateEditor({
     };
   }, [baseW, baseH]);
 
+  // Ctrl + roda do mouse aproxima/afasta o cartão. O wheel é não-passivo para
+  // poder cancelar o zoom do navegador, que encolheria a página inteira.
+  useEffect(() => {
+    const el = canvasWrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      zoomManualRef.current = true;
+      setZoom((z) => {
+        const next = z - e.deltaY * 0.0005;
+        return Math.min(4, Math.max(0.1, Math.round(next * 1000) / 1000));
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
   // Config recortada à página atual: o canvas/overlay/lista mostram só as
   // regiões dessa página. QR, info e print_fields são compartilhados.
   const pageConfig = useMemo<CustomConfig>(
@@ -1452,7 +1470,7 @@ function TemplateEditor({
         {/* Área central */}
         <div className="card p-2 flex flex-col gap-2 h-[78vh] lg:h-full lg:min-h-0">
           <div className="flex items-center flex-wrap gap-2">
-            <Button size="icon" variant="ghost" title="Reduzir" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.max(0.1, z - 0.05)); }}><ZoomOut size={16} /></Button>
+            <Button size="icon" variant="ghost" title="Reduzir zoom (ou Ctrl + roda do mouse)" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.max(0.1, z - 0.05)); }}><ZoomOut size={16} /></Button>
             <input type="number" min={10} max={400} step={1} value={Math.round(zoom * 100)}
                    onChange={(e) => {
                      const v = Number(e.target.value);
@@ -1462,7 +1480,7 @@ function TemplateEditor({
                    }}
                    className="text-xs w-12 text-center border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 bg-transparent" />
             <span className="text-xs text-gray-500">%</span>
-            <Button size="icon" variant="ghost" title="Ampliar" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.min(4, z + 0.05)); }}><ZoomIn size={16} /></Button>
+            <Button size="icon" variant="ghost" title="Ampliar zoom (ou Ctrl + roda do mouse)" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.min(4, z + 0.05)); }}><ZoomIn size={16} /></Button>
             <Button size="icon" variant="ghost" title="Ajustar à tela"
                     onClick={fitToScreen}><Maximize size={16} /></Button>
             <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
