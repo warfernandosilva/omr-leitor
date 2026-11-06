@@ -690,6 +690,8 @@ export default function CardGeneratorForm({
   const [examId, setExamId] = useState('');
   const [spec, setSpec] = useState<CardSpec>({ ...DEFAULT_SPEC });
   const [zoom, setZoom] = useState(1);
+  /** O usuário ajustou o zoom manualmente: não re-ajustar sozinho ao redimensionar. */
+  const zoomManualRef = useRef(false);
   const [showMargin, setShowMargin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -834,6 +836,7 @@ export default function CardGeneratorForm({
     setPropsTab('geral');
     setZoom(1);
     fittedRef.current = false;
+    zoomManualRef.current = false;
     past.current = [];
     future.current = [];
     lastCoalesce.current = null;
@@ -1250,6 +1253,8 @@ export default function CardGeneratorForm({
     const byWidth = availW / PAGE_BASE_PX;
     const byHeight = availH / (PAGE_BASE_PX * (pageH / pageW));
     setZoom(clamp(Math.floor(Math.min(byWidth, byHeight) * 100) / 100, 0.3, 2));
+    // "Ajustar à tela" é uma ação explícita: libera o re-ajuste automático.
+    zoomManualRef.current = false;
   }, [pageH, pageW]);
 
   // Ao entrar no editor a folha inteira cabe na tela; depois o zoom é livre.
@@ -1259,6 +1264,32 @@ export default function CardGeneratorForm({
     const timer = window.setTimeout(fitToScreen, 60);
     return () => window.clearTimeout(timer);
   }, [step, preview?.image, pageW, pageH, fitToScreen]);
+
+  // A área do editor muda de tamanho (janela, barra inferior, troca de painel):
+  // re-ajusta o zoom para a folha continuar cabendo — a menos que o usuário
+  // tenha escolhido um zoom manualmente.
+  useEffect(() => {
+    const el = canvasScrollRef.current;
+    if (!el) return;
+    let frame = 0;
+    const ro = new ResizeObserver(() => {
+      if (zoomManualRef.current || step !== 2) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (zoomManualRef.current || step !== 2) return;
+        const availW = Math.max(160, el.clientWidth - 48);
+        const availH = Math.max(160, el.clientHeight - 48);
+        const byWidth = availW / PAGE_BASE_PX;
+        const byHeight = availH / (PAGE_BASE_PX * (pageH / pageW));
+        setZoom(clamp(Math.floor(Math.min(byWidth, byHeight) * 100) / 100, 0.3, 2));
+      });
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [step, pageH, pageW]);
 
   // ─── Rótulos de seleção ────────────────────────────────────────────────────
 
@@ -1744,64 +1775,66 @@ export default function CardGeneratorForm({
 
   if (step === 1) {
     return (
-      <div className="overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
         <Stepper
           step={step} hasModel={false} hasPreview={false}
           meta="Criação · A4 retrato" onStep={goStep} onValidate={() => undefined}
         />
-        <div className="space-y-4 p-4 sm:p-6">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="page-title">Criar do zero</h2>
-              <p className="page-subtitle">
-                Escolha um modelo inicial e ajuste tudo no editor visual. As âncoras OMR
-                já vêm prontas para leitura.
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="page-title">Criar do zero</h2>
+                <p className="page-subtitle">
+                  Escolha um modelo inicial e ajuste tudo no editor visual. As âncoras OMR
+                  já vêm prontas para leitura.
+                </p>
+              </div>
+              <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {STARTERS.map((starter) => {
+                const Icon = starter.kind === 'quiz'
+                  ? FileText
+                  : starter.kind === 'exam'
+                    ? ListChecks
+                    : starter.kind === 'survey'
+                      ? MessageSquare
+                      : LayoutGrid;
+                return (
+                  <button
+                    key={starter.kind}
+                    type="button"
+                    onClick={() => startFrom(starter)}
+                    className="card card-hover group flex flex-col gap-3 p-3 text-left"
+                  >
+                    <div className="h-[190px] rounded-lg bg-[#F0EFEA] p-2.5 dark:bg-gray-800/60">
+                      <MiniPage kind={starter.kind} />
+                    </div>
+                    <div className="px-1 pb-1">
+                      <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-300">
+                        <Icon size={12} aria-hidden /> {starter.tag}
+                      </span>
+                      <h3 className="mt-1 text-base font-semibold text-ink dark:text-white">
+                        {starter.title}
+                      </h3>
+                      <p className="mt-0.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                        {starter.desc}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="callout-info flex items-start gap-2">
+              <Info size={16} className="mt-0.5 shrink-0" aria-hidden />
+              <p>
+                Você pode começar por qualquer modelo e mudar formato, questões, blocos e
+                elementos depois. Nada é gravado até clicar em <strong>Gerar cartão</strong>.
               </p>
             </div>
-            <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {STARTERS.map((starter) => {
-              const Icon = starter.kind === 'quiz'
-                ? FileText
-                : starter.kind === 'exam'
-                  ? ListChecks
-                  : starter.kind === 'survey'
-                    ? MessageSquare
-                    : LayoutGrid;
-              return (
-                <button
-                  key={starter.kind}
-                  type="button"
-                  onClick={() => startFrom(starter)}
-                  className="card card-hover group flex flex-col gap-3 p-3 text-left"
-                >
-                  <div className="h-[190px] rounded-lg bg-[#F0EFEA] p-2.5 dark:bg-gray-800/60">
-                    <MiniPage kind={starter.kind} />
-                  </div>
-                  <div className="px-1 pb-1">
-                    <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-300">
-                      <Icon size={12} aria-hidden /> {starter.tag}
-                    </span>
-                    <h3 className="mt-1 text-base font-semibold text-ink dark:text-white">
-                      {starter.title}
-                    </h3>
-                    <p className="mt-0.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                      {starter.desc}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="callout-info flex items-start gap-2">
-            <Info size={16} className="mt-0.5 shrink-0" aria-hidden />
-            <p>
-              Você pode começar por qualquer modelo e mudar formato, questões, blocos e
-              elementos depois. Nada é gravado até clicar em <strong>Gerar cartão</strong>.
-            </p>
           </div>
         </div>
       </div>
@@ -1812,109 +1845,111 @@ export default function CardGeneratorForm({
 
   if (step === 3) {
     return (
-      <div className="overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
         <Stepper
           step={step} hasModel hasPreview={!!preview}
           meta={`${spec.page_format === 'custom' ? 'Personalizado' : spec.page_format} · ${spec.orientation === 'landscape' ? 'paisagem' : 'retrato'}`}
           onStep={goStep} onValidate={() => undefined}
         />
-        <div className="grid gap-4 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="flex min-h-[420px] items-center justify-center overflow-auto rounded-xl bg-surface p-4 dark:bg-gray-950">
-            {preview?.image ? (
-              <img
-                src={preview.image}
-                alt="Prévia do cartão"
-                className="max-h-[64vh] w-auto max-w-full bg-white shadow-[0_4px_8px_rgba(20,22,28,.10),0_16px_30px_rgba(20,22,28,.10)]"
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-2 text-center">
-                {previewError ? (
-                  <>
-                    <AlertTriangle size={22} className="text-danger-500" aria-hidden />
-                    <p className="max-w-xs text-xs text-danger-600 dark:text-danger-300">{previewError}</p>
-                    <Button size="sm" variant="secondary" onClick={() => setRefreshKey((k) => k + 1)}>
-                      Tentar novamente
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Loader2 size={22} className="animate-spin text-brand-500" aria-hidden />
-                    <p className="text-xs text-gray-500">Gerando prévia…</p>
-                  </>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto grid w-full max-w-6xl gap-4 p-4 sm:p-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+            <div className="flex min-h-[420px] items-center justify-center overflow-auto rounded-xl bg-surface p-4 dark:bg-gray-950">
+              {preview?.image ? (
+                <img
+                  src={preview.image}
+                  alt="Prévia do cartão"
+                  className="max-h-[64vh] w-auto max-w-full bg-white shadow-[0_4px_8px_rgba(20,22,28,.10),0_16px_30px_rgba(20,22,28,.10)]"
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-2 text-center">
+                  {previewError ? (
+                    <>
+                      <AlertTriangle size={22} className="text-danger-500" aria-hidden />
+                      <p className="max-w-xs text-xs text-danger-600 dark:text-danger-300">{previewError}</p>
+                      <Button size="sm" variant="secondary" onClick={() => setRefreshKey((k) => k + 1)}>
+                        Tentar novamente
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 size={22} className="animate-spin text-brand-500" aria-hidden />
+                      <p className="text-xs text-gray-500">Gerando prévia…</p>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-lg font-bold tracking-tight text-ink dark:text-white">Validar e ativar</h2>
+                <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                  Confira o resumo da folha. Se estiver tudo certo, gere o cartão para começar a ler.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: 'Questões', value: preview?.summary.n_questions ?? totalQuestions },
+                  { label: 'Blocos', value: preview?.summary.n_blocks ?? blocks.length },
+                  { label: 'Âncoras', value: preview?.summary.n_anchors ?? 4 },
+                  { label: 'Elementos', value: preview?.summary.n_elements ?? elements.length },
+                ].map((item) => (
+                  <div key={item.label} className="rounded-lg bg-surface p-2.5 dark:bg-gray-800/60">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">{item.label}</p>
+                    <p className="text-lg font-semibold text-ink dark:text-white">{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {exams.length > 0 && (
+                <Field label="Vincular à prova (opcional)" htmlFor="gen-exam-valid">
+                  <Select id="gen-exam-valid" className={COMPACT} value={examId} onChange={(e) => setExamId(e.target.value)}>
+                    <option value="">Nenhuma</option>
+                    {exams.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+                  </Select>
+                </Field>
+              )}
+
+              <div className="space-y-1.5">
+                {errorCount > 0 && (
+                  <p className="callout-danger flex items-start gap-1.5 text-[11px]">
+                    <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
+                    {errorCount} problema(s) impedem a leitura. Volte ao editor e ajuste.
+                  </p>
+                )}
+                {preview?.warnings.map((w, i) => (
+                  <p key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                    <Info size={12} className="mt-0.5 shrink-0" aria-hidden />{w}
+                  </p>
+                ))}
+                {preview?.issues.filter((i) => i.level === 'error').map((i, k) => (
+                  <p key={k} className="flex items-start gap-1.5 text-[11px] text-danger-600 dark:text-danger-300">
+                    <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />{i.message}
+                  </p>
+                ))}
+                {errorCount === 0 && (
+                  <p className="callout-success flex items-start gap-1.5 text-[11px]">
+                    <Check size={13} className="mt-0.5 shrink-0" aria-hidden />
+                    Estrutura pronta: âncoras, QR e blocos serão gravados como um modelo normal.
+                  </p>
                 )}
               </div>
-            )}
-          </div>
 
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-lg font-bold tracking-tight text-ink dark:text-white">Validar e ativar</h2>
-              <p className="mt-1 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
-                Confira o resumo da folha. Se estiver tudo certo, gere o cartão para começar a ler.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'Questões', value: preview?.summary.n_questions ?? totalQuestions },
-                { label: 'Blocos', value: preview?.summary.n_blocks ?? blocks.length },
-                { label: 'Âncoras', value: preview?.summary.n_anchors ?? 4 },
-                { label: 'Elementos', value: preview?.summary.n_elements ?? elements.length },
-              ].map((item) => (
-                <div key={item.label} className="rounded-lg bg-surface p-2.5 dark:bg-gray-800/60">
-                  <p className="text-[10px] uppercase tracking-wide text-gray-400">{item.label}</p>
-                  <p className="text-lg font-semibold text-ink dark:text-white">{item.value}</p>
-                </div>
-              ))}
-            </div>
-
-            {exams.length > 0 && (
-              <Field label="Vincular à prova (opcional)" htmlFor="gen-exam-valid">
-                <Select id="gen-exam-valid" className={COMPACT} value={examId} onChange={(e) => setExamId(e.target.value)}>
-                  <option value="">Nenhuma</option>
-                  {exams.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </Select>
-              </Field>
-            )}
-
-            <div className="space-y-1.5">
-              {errorCount > 0 && (
-                <p className="callout-danger flex items-start gap-1.5 text-[11px]">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
-                  {errorCount} problema(s) impedem a leitura. Volte ao editor e ajuste.
-                </p>
-              )}
-              {preview?.warnings.map((w, i) => (
-                <p key={i} className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300">
-                  <Info size={12} className="mt-0.5 shrink-0" aria-hidden />{w}
-                </p>
-              ))}
-              {preview?.issues.filter((i) => i.level === 'error').map((i, k) => (
-                <p key={k} className="flex items-start gap-1.5 text-[11px] text-danger-600 dark:text-danger-300">
-                  <AlertTriangle size={12} className="mt-0.5 shrink-0" aria-hidden />{i.message}
-                </p>
-              ))}
-              {errorCount === 0 && (
-                <p className="callout-success flex items-start gap-1.5 text-[11px]">
-                  <Check size={13} className="mt-0.5 shrink-0" aria-hidden />
-                  Estrutura pronta: âncoras, QR e blocos serão gravados como um modelo normal.
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2 border-t border-line pt-3 dark:border-gray-800">
-              <Button
-                onClick={() => void handleGenerate()}
-                loading={busy}
-                disabled={!preview || previewing || errorCount > 0}
-                icon={<Sparkles size={15} aria-hidden />}
-              >
-                Gerar cartão e ativar
-              </Button>
-              <Button variant="secondary" onClick={() => setStep(2)} icon={<ArrowLeft size={15} aria-hidden />}>
-                Voltar ao editor
-              </Button>
-              <Button variant="ghost" onClick={onCancel} disabled={busy}>Cancelar</Button>
+              <div className="flex flex-col gap-2 border-t border-line pt-3 dark:border-gray-800">
+                <Button
+                  onClick={() => void handleGenerate()}
+                  loading={busy}
+                  disabled={!preview || previewing || errorCount > 0}
+                  icon={<Sparkles size={15} aria-hidden />}
+                >
+                  Gerar cartão e ativar
+                </Button>
+                <Button variant="secondary" onClick={() => setStep(2)} icon={<ArrowLeft size={15} aria-hidden />}>
+                  Voltar ao editor
+                </Button>
+                <Button variant="ghost" onClick={onCancel} disabled={busy}>Cancelar</Button>
+              </div>
             </div>
           </div>
         </div>
@@ -1925,7 +1960,7 @@ export default function CardGeneratorForm({
   // ─── Etapa 2: editor ──────────────────────────────────────────────────────
 
   return (
-    <div className="relative flex flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900 lg:h-[calc(100vh-11.5rem)] lg:min-h-[560px]">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
       {/* Topbar */}
       <div className="flex items-center gap-2 border-b border-line bg-white px-2.5 py-2 dark:border-gray-800 dark:bg-gray-900">
         <button
@@ -1997,11 +2032,11 @@ export default function CardGeneratorForm({
               <Layers size={12} aria-hidden /> 1 / 1
             </span>
             <span className="mx-1 h-5 w-px bg-line dark:bg-gray-700" aria-hidden />
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.3, 2))} aria-label="Diminuir zoom" title="Diminuir zoom">
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Diminuir zoom" title="Diminuir zoom">
               <ZoomOut size={15} aria-hidden />
             </button>
             <span className="w-10 text-center text-[11px] font-semibold text-gray-500">{Math.round(zoom * 100)}%</span>
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => setZoom((z) => clamp(Math.round((z + 0.1) * 10) / 10, 0.3, 2))} aria-label="Aumentar zoom" title="Aumentar zoom">
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z + 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Aumentar zoom" title="Aumentar zoom">
               <ZoomIn size={15} aria-hidden />
             </button>
             <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={fitToScreen} aria-label="Ajustar à tela" title="Ajustar à tela">

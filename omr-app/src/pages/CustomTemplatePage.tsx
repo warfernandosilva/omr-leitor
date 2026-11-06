@@ -44,6 +44,7 @@ import { pageWarnings } from '../utils/template-warnings';
 import type { TemplatePageWarning } from '../utils/template-warnings';
 import StatusBar from '../components/custom/StatusBar';
 import CardGeneratorForm from '../components/custom/CardGeneratorForm';
+import EditorShell from '../components/custom/EditorShell';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block' | 'element';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble' | 'text' | 'line';
@@ -101,6 +102,8 @@ export default function CustomTemplatePage() {
   const [templates, setTemplates] = useState<CustomTemplateSummary[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [detail, setDetail] = useState<CustomTemplateDetail | null>(null);
+  // Editor "do zero" aberto: a página vira área de trabalho (sem cabeçalho).
+  const [creating, setCreating] = useState(false);
 
   const refreshList = useCallback(async () => {
     setLoadingList(true);
@@ -126,11 +129,29 @@ export default function CustomTemplatePage() {
 
   if (detail) {
     return (
-      <TemplateEditor
-        detail={detail}
-        onClose={() => { setDetail(null); void refreshList(); }}
-        onSaved={setDetail}
-      />
+      <EditorShell>
+        <TemplateEditor
+          detail={detail}
+          onClose={() => { setDetail(null); void refreshList(); }}
+          onSaved={setDetail}
+        />
+      </EditorShell>
+    );
+  }
+
+  if (creating) {
+    return (
+      <EditorShell>
+        <TemplateList
+          templates={templates}
+          loading={loadingList}
+          onOpen={openTemplate}
+          onChanged={refreshList}
+          creating
+          onStartCreating={() => setCreating(true)}
+          onCancelCreating={() => setCreating(false)}
+        />
+      </EditorShell>
     );
   }
 
@@ -145,6 +166,9 @@ export default function CustomTemplatePage() {
         loading={loadingList}
         onOpen={openTemplate}
         onChanged={refreshList}
+        creating={creating}
+        onStartCreating={() => setCreating(true)}
+        onCancelCreating={() => setCreating(false)}
       />
     </div>
   );
@@ -156,11 +180,16 @@ export default function CustomTemplatePage() {
 
 function TemplateList({
   templates, loading, onOpen, onChanged,
+  creating, onStartCreating, onCancelCreating,
 }: {
   templates: CustomTemplateSummary[];
   loading: boolean;
   onOpen: (id: number) => void;
   onChanged: () => void;
+  /** Editor "do zero" aberto (o componente ocupa toda a área de trabalho). */
+  creating: boolean;
+  onStartCreating: () => void;
+  onCancelCreating: () => void;
 }) {
   const toast = useNotify();
   const { user } = useAuth();
@@ -171,7 +200,6 @@ function TemplateList({
   const [examId, setExamId] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmId, setConfirmId] = useState<number | null>(null);
-  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     try {
@@ -225,8 +253,8 @@ function TemplateList({
       {creating ? (
         <CardGeneratorForm
           exams={exams}
-          onCreated={(d) => { setCreating(false); onOpen(d.id); }}
-          onCancel={() => setCreating(false)}
+          onCreated={(d) => { onCancelCreating(); onOpen(d.id); }}
+          onCancel={onCancelCreating}
         />
       ) : (
         <>
@@ -245,7 +273,7 @@ function TemplateList({
                 Importar imagem
               </Button>
               <Button variant="secondary" icon={<LayoutTemplate size={16} aria-hidden />}
-                      onClick={() => setCreating(true)}>
+                      onClick={onStartCreating}>
                 Criar do zero
               </Button>
             </div>
@@ -380,6 +408,8 @@ function TemplateEditor({
   // Painel direito: uma aba por vez evita empilhar propriedades + diagnóstico + ações.
   const [rightTab, setRightTab] = useState<'props' | 'diag' | 'actions'>('props');
   const canvasWrapRef = useRef<HTMLDivElement>(null);
+  /** O usuário ajustou o zoom manualmente: não re-ajustar sozinho ao redimensionar. */
+  const zoomManualRef = useRef(false);
 
   // Seleção: clique simples substitui; Shift/Ctrl alterna dentro do grupo.
   const setSelection = (s: Selection, additive = false) => {
@@ -526,6 +556,32 @@ function TemplateEditor({
     // Centralização é do CSS (margin auto): quando o cartão cabe, não há barra.
     el.scrollLeft = 0;
     el.scrollTop = 0;
+    // "Ajustar à tela" é uma ação explícita: libera o re-ajuste automático.
+    zoomManualRef.current = false;
+  }, [baseW, baseH]);
+
+  // A área do editor muda de tamanho (janela, barras, troca de página):
+  // re-ajusta o zoom para o cartão continuar cabendo — a menos que o usuário
+  // tenha escolhido um zoom manualmente.
+  useEffect(() => {
+    const el = canvasWrapRef.current;
+    if (!el) return;
+    let frame = 0;
+    const ro = new ResizeObserver(() => {
+      if (zoomManualRef.current) return;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (zoomManualRef.current) return;
+        const pad = 24;
+        const z = clamp(Math.min((el.clientWidth - pad) / baseW, (el.clientHeight - pad) / baseH), 0.1, 4);
+        setZoom(z);
+      });
+    });
+    ro.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
   }, [baseW, baseH]);
 
   // Config recortada à página atual: o canvas/overlay/lista mostram só as
@@ -1232,30 +1288,34 @@ function TemplateEditor({
   });
 
   return (
-    <div className="space-y-3 animate-fade-in">
-      <PageHeader
-        title={detail.nome}
-        subtitle={`Gabarito personalizado · ${STATUS_LABEL[status] ?? status}${
-          saving ? ' · salvando…' : dirty ? ' · alterações não salvas' : ' · salvo'}`}
-        actions={
-          <>
-            <Button variant="ghost" size="sm" onClick={onClose}
-                    icon={<ArrowLeft size={15} aria-hidden />}>Modelos</Button>
-            <Button variant="secondary" size="sm" onClick={() => void save()} loading={saving}
-                    disabled={!dirty} icon={<Save size={15} aria-hidden />}>Salvar</Button>
-            <Button variant="secondary" size="sm" onClick={() => void runValidate()}
-                    icon={<CheckCircle2 size={15} aria-hidden />}>Validar</Button>
-            <Button variant="success" size="sm" onClick={() => void activate()}
-                    icon={<ShieldCheck size={15} aria-hidden />}>
-              {status === 'ativo' ? 'Ativar nova versão' : 'Ativar modelo'}
-            </Button>
-          </>
-        }
-      />
+    <div className="flex min-h-0 flex-col animate-fade-in">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line pb-2 dark:border-gray-800">
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-bold tracking-tight text-ink dark:text-white">
+            {detail.nome}
+          </h1>
+          <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
+            Gabarito personalizado · {STATUS_LABEL[status] ?? status}
+            {saving ? ' · salvando…' : dirty ? ' · alterações não salvas' : ' · salvo'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose}
+                  icon={<ArrowLeft size={15} aria-hidden />}>Modelos</Button>
+          <Button variant="secondary" size="sm" onClick={() => void save()} loading={saving}
+                  disabled={!dirty} icon={<Save size={15} aria-hidden />}>Salvar</Button>
+          <Button variant="secondary" size="sm" onClick={() => void runValidate()}
+                  icon={<CheckCircle2 size={15} aria-hidden />}>Validar</Button>
+          <Button variant="success" size="sm" onClick={() => void activate()}
+                  icon={<ShieldCheck size={15} aria-hidden />}>
+            {status === 'ativo' ? 'Ativar nova versão' : 'Ativar modelo'}
+          </Button>
+        </div>
+      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[250px_minmax(0,1fr)_320px] gap-3">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-[250px_minmax(0,1fr)_320px] lg:overflow-hidden">
         {/* Painel esquerdo */}
-        <div className="card space-y-3 max-h-[85vh] overflow-y-auto">
+        <div className="card space-y-3 lg:h-full lg:min-h-0 overflow-y-auto">
           {/* Multi-página (mesma folha): abas de página */}
           <div className="space-y-2">
             <p className="label">Páginas do cartão</p>
@@ -1390,18 +1450,19 @@ function TemplateEditor({
         </div>
 
         {/* Área central */}
-        <div className="card p-2 flex flex-col gap-2 h-[78vh]">
+        <div className="card p-2 flex flex-col gap-2 h-[78vh] lg:h-full lg:min-h-0">
           <div className="flex items-center flex-wrap gap-2">
-            <Button size="icon" variant="ghost" title="Reduzir" onClick={() => setZoom((z) => Math.max(0.1, z - 0.05))}><ZoomOut size={16} /></Button>
+            <Button size="icon" variant="ghost" title="Reduzir" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.max(0.1, z - 0.05)); }}><ZoomOut size={16} /></Button>
             <input type="number" min={10} max={400} step={1} value={Math.round(zoom * 100)}
                    onChange={(e) => {
                      const v = Number(e.target.value);
                      if (!Number.isFinite(v)) return;
+                     zoomManualRef.current = true;
                      setZoom(Math.max(0.1, Math.min(4, v / 100)));
                    }}
                    className="text-xs w-12 text-center border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 bg-transparent" />
             <span className="text-xs text-gray-500">%</span>
-            <Button size="icon" variant="ghost" title="Ampliar" onClick={() => setZoom((z) => Math.min(4, z + 0.05))}><ZoomIn size={16} /></Button>
+            <Button size="icon" variant="ghost" title="Ampliar" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.min(4, z + 0.05)); }}><ZoomIn size={16} /></Button>
             <Button size="icon" variant="ghost" title="Ajustar à tela"
                     onClick={fitToScreen}><Maximize size={16} /></Button>
             <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
@@ -1518,7 +1579,7 @@ function TemplateEditor({
         </div>
 
         {/* Painel direito: uma aba por vez (propriedades, diagnóstico, ações). */}
-        <div className="card flex max-h-[85vh] flex-col overflow-hidden">
+        <div className="card flex lg:h-full lg:min-h-0 flex-col overflow-hidden">
           <Tabs
             ariaLabel="Painel do modelo"
             active={rightTab}

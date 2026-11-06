@@ -219,3 +219,7 @@
    barras fixas usam estas classes. */
 .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
 .pt-safe { padding-top: env(safe-area-inset-top); }
+
+/* Editor em tela cheia: cancela o respiro do conteúdo do AppShell
+   (p-4 md:p-6). Manter os dois valores em sincronia. */
+.content-flush { @apply -m-4 md:-m-6; }
