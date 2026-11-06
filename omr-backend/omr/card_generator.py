@@ -13,7 +13,7 @@ resolução pedida e coordenadas 0..1 (independentes de resolução).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import cv2
@@ -82,6 +82,9 @@ class GeneratedCard:
     image: np.ndarray
     config: dict
     warnings: list[str]
+    # Geometria dos blocos desenhados (mm), usada pelo editor para mostrar
+    # as caixas de seleção em cima da prévia e para arrastar blocos.
+    layout: list[dict] = field(default_factory=list)
 
 
 def _num(spec: dict, key: str, lo: float, hi: float) -> float:
@@ -131,13 +134,24 @@ def _block_labels(raw: dict, spec: dict) -> list[str]:
     return list(LABELS[:max(2, min(len(LABELS), n))])
 
 
+def _opt_num(raw: dict, key: str, lo: float, hi: float) -> float | None:
+    """Número opcional; devolve None quando ausente ou inválido."""
+    v = raw.get(key)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        return max(lo, min(hi, float(v)))
+    except (TypeError, ValueError):
+        return None
+
+
 def _blocks_from_spec(spec: dict) -> list[dict]:
     """Lê `spec['blocks']` (múltiplos blocos) com valores seguros."""
     raw = spec.get("blocks")
     if not isinstance(raw, list):
         return []
     out: list[dict] = []
-    for b in raw:
+    for source_index, b in enumerate(raw):
         if not isinstance(b, dict):
             continue
         try:
@@ -167,6 +181,7 @@ def _blocks_from_spec(spec: dict) -> list[dict]:
             distribution = "column"
             block_cols = max(1, min(MAX_COLUMNS, cols))
         out.append({
+            "source_index": source_index,
             "title": str(b.get("title") or "").strip()[:80],
             "n_questions": max(1, min(MAX_QUESTIONS, n_q)),
             "labels": _block_labels(b, spec),
@@ -174,6 +189,13 @@ def _blocks_from_spec(spec: dict) -> list[dict]:
             "start_question": max(1, min(10000, start)),
             "distribution": distribution,
             "show_title": bool(b.get("show_title", True)),
+            "hidden": bool(b.get("hidden", False)),
+            # Posição livre opcional (mm). O editor grava estes campos quando
+            # o usuário arrasta/redimensiona um bloco no canvas.
+            "x_mm": _opt_num(b, "x_mm", 0.0, 1000.0),
+            "y_mm": _opt_num(b, "y_mm", 0.0, 1000.0),
+            "w_mm": _opt_num(b, "w_mm", 10.0, 1000.0),
+            "h_mm": _opt_num(b, "h_mm", 10.0, 1000.0),
         })
     return out
 
@@ -362,12 +384,139 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
 
     block_specs = _blocks_from_spec(s)
     blocks_config: list[dict] = []
+    block_layout: list[dict] = []
+    block_gap = mm2px(4.0)
+    title_h = small_px * 2.0
 
-    if block_specs:
+    def px_to_mm(v: float) -> float:
+        return v / mm2px(1.0)
+
+    # Uma lista de blocos só entra no modo livre quando TODOS têm posição.
+    # Sem posições, o layout automático (empilhado) continua valendo.
+    absolute_blocks = bool(block_specs) and all(
+        b["x_mm"] is not None and b["y_mm"] is not None for b in block_specs
+    )
+
+    if absolute_blocks:
+        # ── Blocos posicionados livremente (x/y/w/h em mm) ─────────────────
+        for b in block_specs:
+            if b["hidden"]:
+                continue
+            labels_b = b["labels"]
+            n_opts_b = len(labels_b)
+            bx0 = mm2px(b["x_mm"])
+            by0 = mm2px(b["y_mm"])
+            bw = mm2px(b["w_mm"]) if b["w_mm"] is not None else grid_w
+            bh = mm2px(b["h_mm"]) if b["h_mm"] is not None else None
+            th = title_h if b["title"] else 0.0
+
+            chosen_abs = None
+            for cols in range(b["columns"], MAX_COLUMNS + 1):
+                col_w = (bw - (cols - 1) * col_gap) / cols
+                if col_w <= num_w + d_req * 1.2:
+                    continue
+                step_x = (col_w - num_w) / n_opts_b
+                if step_x - gap_x < min_d:
+                    continue
+                rows_b = math.ceil(b["n_questions"] / cols)
+                if bh is not None:
+                    step_y = max(0.0, (bh - th - label_row_h) / rows_b)
+                else:
+                    step_y = d_req + gap_y
+                d = min(d_req, step_x - gap_x, step_y - gap_y)
+                if d < min_d:
+                    continue
+                chosen_abs = (cols, col_w, step_x, rows_b, step_y, d)
+                break
+
+            if chosen_abs is None:
+                raise ValueError(
+                    f"Não cabe: o bloco de {b['n_questions']} questões não cabe na "
+                    "posição/tamanho escolhidos. Aumente o bloco ou reduza as questões."
+                )
+
+            cols, col_w, step_x, rows_b, step_y, d = chosen_abs
+            if cols > b["columns"]:
+                warnings.append(
+                    f"O bloco {b['start_question']}–"
+                    f"{b['start_question'] + b['n_questions'] - 1} usa {cols} colunas "
+                    "para caber com bolhas legíveis."
+                )
+            if d < d_req - 0.5:
+                warnings.append(f"Bolhas reduzidas para {px_to_mm(d):.1f} mm para caber no bloco.")
+            if bh is None:
+                bh = th + label_row_h + rows_b * step_y
+
+            if b["title"] and b["show_title"]:
+                draw.text((bx0, by0), _fit_text(draw, b["title"], small_font, bw),
+                          font=small_font, fill=(60, 60, 60))
+            label_cy = by0 + th + label_row_h / 2
+            first_cy = by0 + th + label_row_h + step_y / 2
+            first_cx = bx0 + num_w + step_x / 2
+            col_pitch = col_w + col_gap
+            r = d / 2
+            outline_b = max(3, int(round(d * 0.09)))
+            label_font = load_font(max(9, int(d * 0.55)))
+            number_font = load_font(max(8, int(d * 0.55)))
+
+            for col in range(cols):
+                for i, label in enumerate(labels_b):
+                    bx = first_cx + col * col_pitch + i * step_x
+                    _center_text(draw, (bx, label_cy), label, label_font, (0, 0, 0))
+
+            for idx in range(b["n_questions"]):
+                if b["distribution"] == "row":
+                    row = idx // cols
+                    col = idx % cols
+                else:
+                    row = idx % rows_b
+                    col = idx // rows_b
+                cy = first_cy + row * step_y
+                num_x = bx0 + col * col_pitch + num_w - mm2px(2.0)
+                draw.text((num_x, cy), str(b["start_question"] + idx), font=number_font,
+                          fill=(0, 0, 0), anchor="rm")
+                for i in range(n_opts_b):
+                    bx = first_cx + col * col_pitch + i * step_x
+                    if shape == "square":
+                        draw.rectangle((bx - r, cy - r, bx + r, cy + r),
+                                       outline=(0, 0, 0), width=outline_b)
+                    else:
+                        draw.ellipse((bx - r, cy - r, bx + r, cy + r),
+                                     outline=(0, 0, 0), width=outline_b)
+
+            blocks_config.append({
+                "id": f"blk_{len(blocks_config) + 1}",
+                "type": "bubble_block",
+                "page": 0,
+                "first_x": first_cx / pw,
+                "first_y": first_cy / ph,
+                "option_step_x": step_x / pw,
+                "question_step_y": step_y / ph,
+                "column_step_x": col_pitch / pw,
+                "columns": cols,
+                "n_questions": b["n_questions"],
+                "labels": labels_b,
+                "radius": r / max(pw, ph),
+                "shape": shape,
+                "start_question": b["start_question"],
+                "distribution": b["distribution"],
+                "show_title": bool(b["show_title"]),
+            })
+            block_layout.append({
+                "index": b["source_index"],
+                "x_mm": round(px_to_mm(bx0), 2),
+                "y_mm": round(px_to_mm(by0), 2),
+                "w_mm": round(px_to_mm(bw), 2),
+                "h_mm": round(px_to_mm(bh), 2),
+                "columns": cols,
+                "rows": rows_b,
+                "start_question": b["start_question"],
+                "end_question": b["start_question"] + b["n_questions"] - 1,
+            })
+
+    elif block_specs:
         # ── Múltiplos blocos: divide a altura disponível entre os blocos ──
         total_q = sum(b["n_questions"] for b in block_specs)
-        block_gap = mm2px(4.0)
-        title_h = small_px * 2.0
         layout: list[dict] = []
 
         # Aumenta as colunas de todos os blocos juntos até caber. Como cada
@@ -434,6 +583,24 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             rows_b = t["rows"]
             step_y = t["step_y"]
             d = t["d"]
+            block_top = y_cursor
+            block_h = t["title_h"] + label_row_h + rows_b * step_y
+            # O layout inclui blocos ocultos: o editor precisa da geometria
+            # deles para congelar as posições ao arrastar os visíveis.
+            block_layout.append({
+                "index": b["source_index"],
+                "x_mm": round(px_to_mm(cx0), 2),
+                "y_mm": round(px_to_mm(block_top), 2),
+                "w_mm": round(px_to_mm(grid_w), 2),
+                "h_mm": round(px_to_mm(block_h), 2),
+                "columns": cols,
+                "rows": rows_b,
+                "start_question": b["start_question"],
+                "end_question": b["start_question"] + b["n_questions"] - 1,
+            })
+            if b["hidden"]:
+                y_cursor = block_top + block_h + block_gap
+                continue
             if cols > b["columns"]:
                 warnings.append(
                     f"O bloco {b['start_question']}–"
@@ -584,11 +751,24 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             "start_question": start_q,
             "distribution": "column",
         })
+        block_layout.append({
+            "index": 0,
+            "x_mm": round(px_to_mm(x_start), 2),
+            "y_mm": round(px_to_mm(header_bottom), 2),
+            "w_mm": round(px_to_mm(used_w), 2),
+            "h_mm": round(px_to_mm(label_row_h + rows * step_y), 2),
+            "columns": cols,
+            "rows": rows,
+            "start_question": start_q,
+            "end_question": start_q + n_q - 1,
+        })
 
     # ── Elementos decorativos (texto/linha) ─────────────────────────────────
     elements_config: list[dict] = []
     for e in s.get("elements") or []:
         if not isinstance(e, dict):
+            continue
+        if bool(e.get("hidden", False)):
             continue
         kind = e.get("kind") if e.get("kind") in ("text", "line") else "text"
         if e.get("kind") == "image":
@@ -703,7 +883,7 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         raise ValueError("; ".join(i["message"] for i in issues if i.get("level") == "error"))
     warnings.extend(i["message"] for i in issues if i.get("level") == "warning")
 
-    return GeneratedCard(image=img, config=config, warnings=warnings)
+    return GeneratedCard(image=img, config=config, warnings=warnings, layout=block_layout)
 
 
 # ── Ponte PIL (texto/linhas) ↔ numpy (ArUco) ──────────────────────────────

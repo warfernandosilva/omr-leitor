@@ -111,6 +111,22 @@ def test_multiple_blocks_are_readable():
     assert result.answers == marks
 
 
+def test_hidden_block_keeps_geometry_in_layout():
+    """Bloco oculto: não entra na leitura, mas o layout precisa cobrir a
+    geometria que o editor usará ao congelar posições de arraste."""
+    card = generate_card({
+        "blocks": [
+            {"n_questions": 5, "labels": ["A", "B", "C", "D"], "start_question": 1},
+            {"n_questions": 5, "labels": ["A", "B", "C", "D"], "start_question": 6,
+             "hidden": True},
+        ],
+    })
+    assert len(card.layout) == 2
+    assert card.layout[1]["start_question"] == 6
+    assert not ct.has_errors(ct.validate_config(card.config))
+    assert len(card.config["questions"]) == 1
+
+
 def test_decorative_elements_are_kept_in_config():
     """Texto/linha decorativos são desenhados e preservados na config."""
     card = generate_card({

@@ -279,6 +279,15 @@ export interface CardBlockSpec {
   distribution?: 'horizontal' | 'vertical';
   /** Exibe o título do bloco na folha. */
   show_title?: boolean;
+  /** Posição/tamanho livres no canvas (mm). Preenchidos ao arrastar/redimensionar. */
+  x_mm?: number;
+  y_mm?: number;
+  w_mm?: number;
+  h_mm?: number;
+  /** Oculta o bloco na impressão/prévia (continua na lista de camadas). */
+  hidden?: boolean;
+  /** Bloqueia o arraste no editor. */
+  locked?: boolean;
 }
 
 /** Elemento decorativo do gerador (texto ou linha). Coordenadas 0..1. */
@@ -293,6 +302,8 @@ export interface CardElementSpec {
   font_mm?: number;
   align?: 'left' | 'center' | 'right';
   bold?: boolean;
+  hidden?: boolean;
+  locked?: boolean;
 }
 
 export interface CardSpec {
@@ -329,12 +340,26 @@ export interface CardSpec {
   elements?: CardElementSpec[] | null;
 }
 
+export interface PreviewBlockLayout {
+  index: number;
+  x_mm: number;
+  y_mm: number;
+  w_mm: number;
+  h_mm: number;
+  columns: number;
+  rows: number;
+  start_question: number;
+  end_question: number;
+}
+
 export interface GeneratePreviewResult {
   ok: boolean;
   image: string; // data URL
   warnings: string[];
   issues: ValidationIssue[];
   summary: CustomTemplateSummary['config_summary'];
+  /** Geometria dos blocos desenhados, em mm. */
+  layout?: PreviewBlockLayout[];
 }
 
 export function previewGeneratedCard(spec: CardSpec): Promise<GeneratePreviewResult> {

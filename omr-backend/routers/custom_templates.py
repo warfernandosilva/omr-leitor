@@ -312,6 +312,7 @@ def generate_preview(req: GenerateCardRequest):
         "warnings": card.warnings,
         "issues": validate_config(card.config),
         "summary": config_summary(card.config),
+        "layout": card.layout,
     }
 
 
