@@ -8,7 +8,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold, Hash, Frame,
+  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold, Hash, Frame, FileJson,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -20,7 +20,7 @@ import EmptyState from '../components/ui/EmptyState';
 import Tabs from '../components/ui/Tabs';
 import { useToast } from '../components/ui/Toast';
 import { useAuth } from '../context/AuthContext';
-import { syncExam } from '../utils/api';
+import { saveBlob, syncExam } from '../utils/api';
 import { getExams } from '../utils/storage';
 import type { Exam } from '../types';
 import {
@@ -29,6 +29,7 @@ import {
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
   autoConfigureCustomTemplate, createCustomTemplate, customTemplateAsset, customTemplateImage,
+  customTemplateReadingModel,
   deleteCustomTemplate, detectCustomGrid, detectCustomAnchors, detectPageCorners, expandBlock,
   getCustomTemplate, getCustomVersion, listCustomTemplates, listCustomVersions,
   moveBlockTo, printCustomTemplate, printPreviewCustomTemplate,
@@ -2798,7 +2799,30 @@ function ActionsPanel({ detailId, onRestore }: { detailId: number; onRestore: (c
   const [result, setResult] = useState<CustomTestResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [truth, setTruth] = useState('');
+  const [modelBusy, setModelBusy] = useState(false);
   const testFileRef = useRef<HTMLInputElement>(null);
+
+  /** Baixa o modelo de leitura (JSON com a posição de cada bolha em mm). */
+  const downloadReadingModel = async () => {
+    setModelBusy(true);
+    try {
+      const model = await customTemplateReadingModel(detailId, 0);
+      saveBlob(
+        new Blob([JSON.stringify(model, null, 2)], { type: 'application/json' }),
+        `modelo-de-leitura-${detailId}.json`,
+      );
+      const t = model.totals;
+      toast.success(
+        `Modelo baixado: ${t.questions} questões, ${t.bubbles} bolhas`
+        + (t.studentIdBubbles ? `, ${t.studentIdBubbles} de matrícula` : '')
+        + ` (${model.page.unit}).`,
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Falha ao gerar o modelo de leitura');
+    } finally {
+      setModelBusy(false);
+    }
+  };
 
   const openVersions = async () => {
     setVersionsBusy(true);
@@ -2866,6 +2890,11 @@ function ActionsPanel({ detailId, onRestore }: { detailId: number; onRestore: (c
               onClick={() => setTestOpen(true)}>Testar com foto</Button>
       <Button size="sm" variant="secondary" className="w-full" icon={<Printer size={15} aria-hidden />}
               onClick={() => setPrintOpen(true)}>Imprimir / exportar</Button>
+      <Button size="sm" variant="secondary" className="w-full" icon={<FileJson size={15} aria-hidden />}
+              loading={modelBusy} onClick={() => void downloadReadingModel()}
+              title="Baixa a posição de cada bolha, campo e QR em JSON (mm quando o modelo declara o DPI)">
+        Modelo de leitura
+      </Button>
       <Button size="sm" variant="secondary" className="w-full" icon={<History size={15} aria-hidden />}
               loading={versionsBusy} onClick={() => void openVersions()}>Versões</Button>
 
@@ -2960,6 +2989,13 @@ function ActionsPanel({ detailId, onRestore }: { detailId: number; onRestore: (c
                 {(result.fallback_marks ?? []).length ? ` · ${(result.fallback_marks ?? []).length} por fallback` : ''}
                 {Object.keys(result.multi_marks ?? {}).length ? ` · ${Object.keys(result.multi_marks ?? {}).length} múltipla resposta` : ''}
                 {result.qr_id ? ` · QR: ${result.qr_id}` : ''}
+                {result.student_id_detail
+                  ? (result.student_id
+                    ? ` · matrícula: ${result.student_id}`
+                    : ` · matrícula: não identificada (${Object.values(result.student_id_detail)
+                        .filter((d) => d.value != null && d.score >= 0.25).length} de `
+                      + `${Object.keys(result.student_id_detail).length} dígitos lidos)`)
+                  : ''}
               </p>
               {result.comparison?.mismatches?.length ? (
                 <div className="text-xs">

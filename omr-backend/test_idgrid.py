@@ -264,3 +264,42 @@ def test_answers_are_unaffected_by_idgrid():
     b = ct.process_custom_image(_fill(plain.image, plain.config, marks), plain.config)
     assert a is not None and b is not None
     assert a.answers == b.answers == marks
+
+
+# ─── Etapa 5: impresso → lido → modelo, tudo concordando ──────────────────
+
+def test_print_read_and_reading_model_all_agree():
+    """Roda o caminho inteiro: gera, imprime, lê e confere contra o modelo."""
+    card = generate_card({"n_questions": 6, "n_options": 4, "student_id_digits": 4})
+    cfg = dict(card.config)
+    cfg["elements"] = [{
+        "id": "t", "kind": "text", "page": 0, "x": 0.1, "y": 0.05, "w": 0.5, "h": 0.05,
+        "text": "Aluno: {{nome}}", "font_size": 40, "align": "left",
+        "bold": False, "asset": None,
+    }]
+
+    # 1) o modelo de leitura descreve o que a leitura vai usar
+    m = ct.reading_model(cfg)
+    q1b = m["questions"][0]["options"][1]
+    b = next(x for x in ct.expand_bubbles(cfg)
+             if x["question"] == 1 and x["option"] == "B")
+    assert abs(q1b["x"] - b["x"] * m["page"]["width"]) < 0.011
+    assert abs(q1b["y"] - b["y"] * m["page"]["height"]) < 0.011
+    assert m["totals"] == {"questions": 6, "bubbles": 24, "fields": 3,
+                           "studentIdBubbles": 40}
+
+    # 2) imprime a folha da Ana (matrícula 1234, respostas 1B/4A/6D)
+    marks = {1: "B", 4: "A", 6: "D"}
+    cells = ct.expand_id_bubbles(cfg)
+    id_marks = [c for c in cells
+                if (c["digit_position"], c["value"]) in {(1, 1), (2, 2), (3, 3), (4, 4)}]
+    filled = _mark_cells(_fill(card.image, cfg, marks), id_marks)
+    printed = ct.render_overlay(ct.apply_name_placeholders(cfg, "Ana Souza"), filled,
+                                fields={"student_name": "Ana Souza"}, qr_payload="COD-ANA")
+
+    # 3) lê o que foi impresso
+    r = ct.process_custom_image(printed, cfg)
+    assert r is not None
+    assert r.answers == marks
+    assert r.student_id == "1234"
+    assert r.qr_id == "COD-ANA"
