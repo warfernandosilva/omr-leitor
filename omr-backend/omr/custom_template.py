@@ -2598,6 +2598,29 @@ def process_custom_image(
 # Impressão (seção 7) — usa a imagem original como fundo
 # ---------------------------------------------------------------------------
 
+NAME_PLACEHOLDER = "{{nome}}"
+
+
+def apply_name_placeholders(config: dict, nome: str) -> dict:
+    """Copia a config substituindo `{{nome}}` nos textos fixos do cartão.
+
+    Usado no lote (uma folha por aluno): o texto impresso pode citar o aluno
+    sem virar campo dinâmico — o QR continua sendo o `codigo_unico`. NUNCA
+    altera a config original: ela é compartilhada por todas as folhas do lote.
+    """
+    cfg = normalize_config(config)
+    name = (nome or "").strip()[:120]
+    if not name:
+        return cfg
+    out = dict(cfg)
+    out["elements"] = [
+        {**e, "text": e["text"].replace(NAME_PLACEHOLDER, name)}
+        if NAME_PLACEHOLDER in e.get("text", "") else e
+        for e in cfg["elements"]
+    ]
+    return out
+
+
 def load_assets(config: dict, image_path: str | None) -> dict[str, Any]:
     """Imagens dos elementos `kind=image` (arquivos `ast_*.png` na pasta do modelo)."""
     from PIL import Image

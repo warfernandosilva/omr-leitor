@@ -1676,7 +1676,9 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
     sairia no cartão NATIVO e a leitura/correção por QR não casaria com o modelo.
     """
     from models import CustomTemplate, CustomTemplateVersion
-    from omr.custom_template import load_assets, n_pages, page_image_path, render_overlay
+    from omr.custom_template import (
+        apply_name_placeholders, load_assets, n_pages, page_image_path, render_overlay,
+    )
     from routers.custom_templates import _fit_page_rect
 
     tpl = db.get(CustomTemplate, av.custom_template_id)
@@ -1710,6 +1712,9 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
     drawn = 0
     for g in gabaritos:
         aluno = g.aluno
+        # `{{nome}}` nos textos do cartão: uma cópia por aluno (nunca a config
+        # gravada, que é compartilhada por todas as folhas do lote).
+        sheet_cfg = apply_name_placeholders(cfg, (aluno.nome if aluno else "") or "")
         fields = {
             "student_name": (aluno.nome if aluno else "") or "",
             "matricula": (aluno.matricula if aluno else "") or "",
@@ -1717,7 +1722,7 @@ def _custom_batch_pdf(db: Session, av: Avaliacao, gabaritos: list, out_buf) -> i
             "exam_title": av.titulo or "",
         }
         for i, base in enumerate(bases):
-            img = render_overlay(cfg, base, fields=fields, qr_payload=g.codigo_unico,
+            img = render_overlay(sheet_cfg, base, fields=fields, qr_payload=g.codigo_unico,
                                  page=i, assets=assets)
             ok, jbuf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
             if not ok:

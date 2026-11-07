@@ -30,6 +30,7 @@ from models import (
 from omr.card_generator import generate_card
 from omr.custom_template import (
     _asset_id,
+    apply_name_placeholders,
     config_for_page,
     config_summary,
     default_config,
@@ -829,13 +830,16 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
         bases.append(img)
     assets = load_assets(cfg, tpl.image_path)
 
-    def _sheets(nome: str, codigo: str, fields: dict[str, str] | None
-                ) -> list[tuple[str, str, np.ndarray]]:
+    def _sheets(nome: str, codigo: str, fields: dict[str, str] | None,
+                aluno: str | None = None) -> list[tuple[str, str, np.ndarray]]:
+        # `{{nome}}` nos textos do cartão: uma cópia por aluno (nunca a config
+        # gravada, que é compartilhada por todas as folhas do lote).
+        sheet_cfg = apply_name_placeholders(cfg, aluno) if aluno else cfg
         out = []
         for i, base in enumerate(bases):
             title = nome if npg <= 1 else f"{nome} — Página {i + 1}/{npg}"
             out.append((title, codigo,
-                        render_overlay(cfg, base, fields=fields, qr_payload=codigo,
+                        render_overlay(sheet_cfg, base, fields=fields, qr_payload=codigo,
                                        page=i, assets=assets)))
         return out
 
@@ -883,7 +887,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
                 "turma": (av.turma if av else "") or "",
                 "exam_title": (av.titulo if av else "") or "",
             }
-            pages.extend(_sheets(aluno.nome, codigo, fields))
+            pages.extend(_sheets(aluno.nome, codigo, fields, aluno.nome))
         if persist:
             db.commit()
         return pages
@@ -902,7 +906,7 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
             "matricula": s.matricula or "",
             "code": codigo,
         }
-        pages.extend(_sheets(s.nome.strip(), codigo, fields))
+        pages.extend(_sheets(s.nome.strip(), codigo, fields, s.nome.strip()))
     return pages
 
 

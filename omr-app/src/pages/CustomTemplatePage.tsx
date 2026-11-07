@@ -2517,7 +2517,7 @@ function PropertiesPanel({
         </div>
         {el.kind === 'text' && (
           <>
-            <Field label="Texto" htmlFor="p-el-text" helper="Sai na impressão; a leitura OMR ignora.">
+            <Field label="Texto" htmlFor="p-el-text" helper="Sai na impressão; a leitura OMR ignora. Use {{nome}} para o nome do aluno no lote.">
               <textarea id="p-el-text" className="input" rows={2} maxLength={300}
                         value={el.text} onChange={(e) => upd({ text: e.target.value })} />
             </Field>
