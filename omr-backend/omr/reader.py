@@ -107,6 +107,11 @@ class OMRResult:
     # Gabarito Personalizado: questões resolvidas por regra alternativa
     darkest_marks: list[int] | None = None   # dupla resolvida pela marca mais escura
     fallback_marks: list[int] | None = None  # vazia recuperada pelo método alternativo
+    # Gabarito Personalizado: matrícula lida das bolhas de identificação.
+    # `None` quando não há grade de matrícula, quando um dígito não tem marca
+    # clara ou quando dois empatam (nunca inventa identificação).
+    student_id: str | None = None
+    student_id_detail: dict | None = None
     # Gabarito Personalizado (múltipla resposta): questão -> letras marcadas (ordenadas)
     multi_marks: dict[int, list[str]] | None = None
     # Melhorias opt-in (amazingOMR): estilo da marca e segunda opinião na faixa cinzenta

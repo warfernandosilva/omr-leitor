@@ -70,6 +70,9 @@ DEFAULTS: dict[str, Any] = {
     "anchor_mm": 10.0,
     "qr": True,
     "qr_mm": 22.0,
+    # 0 = sem matrícula em bolhas (modelos antigos não mudam).
+    "student_id_digits": 0,
+    "student_id_h_mm": 24.0,
 }
 
 MIN_BUBBLE_MM = 3.0
@@ -370,6 +373,53 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
 
     header_bottom = y + mm2px(2.5)
 
+    # ── Matrícula em bolhas (opcional) ───────────────────────────────────────
+    # Mesma geometria de `expand_id_bubbles`: cada dígito é uma coluna com 10
+    # bolhas (0–9) de cima para baixo, encostadas na direita da coluna.
+    id_digits = int(_num(s, "student_id_digits", 0, 12))
+    idgrids_config: list[dict] = []
+    if id_digits:
+        id_h = mm2px(_num(s, "student_id_h_mm", 24.0, 80.0))
+        id_row_h = id_h / 10
+        d_id = min(id_row_h * 0.82, mm2px(6.0))
+        r_id = d_id / 2
+        label_w = mm2px(14.0)
+        col_w = mm2px(6.5)
+        # A caixa da grade começa na PRIMEIRA coluna de bolhas: `expand_id_bubbles`
+        # divide `w` em `digits` colunas iguais, sem espaços nem rótulos dentro.
+        id_x0 = cx0 + label_w
+        id_w = id_digits * col_w
+        id_y0 = header_bottom
+        id_font = load_font(max(7, int(d_id * 0.62)))
+        draw.text((cx0, id_y0 - mm2px(1.0)), "Matrícula", font=id_font, fill=(0, 0, 0))
+        for c in range(id_digits):
+            col_x = id_x0 + c * col_w
+            # mesma regra de `expand_id_bubbles` (encostada na direita da coluna)
+            inset = min(r_id + 0.012 * pw, col_w - r_id)
+            bx = col_x + inset
+            for v in range(10):
+                cy = id_y0 + v * id_row_h + id_row_h / 2
+                _center_text(draw, (col_x - mm2px(0.8), cy), str(v), id_font, (0, 0, 0))
+                if shape == "square":
+                    draw.rectangle((bx - r_id, cy - r_id, bx + r_id, cy + r_id),
+                                   outline=(0, 0, 0), width=max(1, int(d_id * 0.12)))
+                else:
+                    draw.ellipse((bx - r_id, cy - r_id, bx + r_id, cy + r_id),
+                                 outline=(0, 0, 0), width=max(1, int(d_id * 0.12)))
+        idgrids_config.append({
+            "id": "idg_1",
+            "page": 0,
+            "x": id_x0 / pw,
+            "y": id_y0 / ph,
+            "w": id_w / pw,
+            "h": id_h / ph,
+            "digits": id_digits,
+            "radius": r_id / max(pw, ph),
+            "shape": shape,
+        })
+        header_bottom = id_y0 + id_h + mm2px(3.0)
+
+
     qr_region = None
     if qr_px:
         qx = cx1 - qr_px
@@ -391,7 +441,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     grid_w = cx1 - cx0
     grid_h = cy1 - header_bottom
     if grid_h < mm2px(20):
-        raise ValueError("Sobra pouco espaço para as questões: reduza o cabeçalho ou as margens.")
+        raise ValueError("Sobra pouco espaço para as questões: reduza o cabeçalho, "
+                         "a matrícula ou as margens.")
 
     d_req = mm2px(_num(s, "bubble_mm", MIN_BUBBLE_MM, 20.0))
     num_w = d_req * 1.8
@@ -876,6 +927,9 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         "page_h": ph,
         "n_pages": 1,
         "page_images": {},
+        "idgrids": idgrids_config,
+        # O gerador sabe o DPI: o modelo de leitura sai em milímetros.
+        "page_dpi": int(round(dpi)),
         "anchors": [
             {
                 "id": f"anc_{corner}",

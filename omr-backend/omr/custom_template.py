@@ -28,6 +28,7 @@ absoluto reescalada para a mesma faixa do estilo "filled".
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -141,9 +142,20 @@ def default_config(page_w: int = 0, page_h: int = 0) -> dict:
         # Não participam da leitura: o motor só olha âncoras, QR e bolhas.
         "elements": [],
         "questions": [],
+        # Identificação do aluno em bolhas (matrícula): uma coluna por dígito,
+        # 0–9 de cima para baixo. Lida por `read_student_id`.
+        "idgrids": [],
         "print_fields": [],
         "omr_params": {},
+        # DPI da imagem do modelo, quando conhecido (cartões do gerador).
+        # Sem ele o modelo de leitura sai em pixels da imagem, não em mm.
+        "page_dpi": None,
     }
+
+
+def r2(n: float) -> float:
+    """Arredonda para 2 casas (o modelo de leitura é lido por pessoas)."""
+    return round(float(n) + 0.0, 2)
 
 
 def _clamp01(v: Any, default: float = 0.0) -> float:
@@ -377,6 +389,26 @@ def normalize_config(config: dict | None) -> dict:
         })
     out["questions"] = questions
 
+    # Matrícula em bolhas: mesma geometria do gerador do FormRead (10 linhas
+    # por coluna, bolhas encostadas na direita de cada coluna).
+    idgrids = []
+    for g in cfg.get("idgrids") or []:
+        if not isinstance(g, dict):
+            continue
+        idgrids.append({
+            "id": str(g.get("id") or f"idg_{len(idgrids) + 1}"),
+            "page": _page_index(g.get("page")),
+            "x": _clamp01(g.get("x")),
+            "y": _clamp01(g.get("y")),
+            "w": _clamp01(g.get("w")),
+            "h": _clamp01(g.get("h")),
+            "digits": max(1, min(14, int(g.get("digits") or 8))),
+            "radius": _clamp01(g.get("radius"), DEFAULT_RADIUS) or DEFAULT_RADIUS,
+            "shape": g.get("shape") if g.get("shape") in ("circle", "square") else "circle",
+            "locked": bool(g.get("locked", False)),
+        })
+    out["idgrids"] = idgrids
+
     pf = []
     for f in cfg.get("print_fields") or []:
         if not isinstance(f, dict):
@@ -397,10 +429,15 @@ def normalize_config(config: dict | None) -> dict:
         "adaptive": bool(op.get("adaptive", False)),
     }
 
+    dpi = cfg.get("page_dpi")
+    out["page_dpi"] = (int(dpi) if isinstance(dpi, (int, float))
+                       and 50 <= float(dpi) <= 1200 else None)
+
     # Multi-página: respeita o nº declarado pelo editor e nunca "corta" uma
     # página que ainda tenha âncora/bloco (evita regiões inalcançáveis).
     used = ([a["page"] for a in out["anchors"]]
             + [b["page"] for b in out["questions"]]
+            + [g["page"] for g in out["idgrids"]]
             + [e["page"] for e in out["elements"]])
     out["n_pages"] = max(1, _page_index(cfg.get("n_pages") or 1),
                          (max(used) + 1) if used else 1)
@@ -538,6 +575,97 @@ def total_questions(config: dict) -> int:
     return len(nums)
 
 
+# ---------------------------------------------------------------------------
+# Identificação do aluno (matrícula em bolhas)
+# ---------------------------------------------------------------------------
+
+# Tinta mínima para aceitar um dígito e folga para considerar dois empatados.
+# Medido com `_bubble_metrics` (mesma métrica das respostas): bolha vazia numa
+# folha gerada fica em ~0.05 e uma bolha preenchida em ~0.6, então a folga é
+# grande dos dois lados.
+ID_DARK_FLOOR = 0.25
+ID_AMBIGUITY = 0.15
+
+
+def expand_id_bubbles(config: dict) -> list[dict]:
+    """Bolhas de matrícula em coords NORMALIZADAS (centro + raio).
+
+    Geometria espelhada do gerador do FormRead: cada dígito é uma coluna com
+    10 bolhas (0–9) de cima para baixo, encostadas na direita da coluna.
+    """
+    cfg = normalize_config(config)
+    out: list[dict] = []
+    for g in cfg.get("idgrids") or []:
+        digits = max(1, int(g.get("digits") or 8))
+        col_w = g["w"] / digits
+        row_h = g["h"] / 10
+        r = float(g.get("radius") or DEFAULT_RADIUS)
+        # folga de 1,2% da largura da página para a bolha não colar na borda
+        inset = min(r + 0.012, max(0.0, col_w - r))
+        for c in range(digits):
+            for v in range(10):
+                out.append({
+                    "grid": g["id"],
+                    "digit_position": c + 1,
+                    "value": v,
+                    "x": g["x"] + c * col_w + inset,
+                    "y": g["y"] + v * row_h + row_h / 2,
+                    "r": r,
+                    "shape": g.get("shape") or "circle",
+                })
+    return out
+
+
+def read_student_id(gray: np.ndarray, cfg: dict, cw: int, ch: int, snap: int,
+                    shift, weights=None) -> tuple[str | None, dict]:
+    """Lê a matrícula: em cada coluna, a bolha com mais tinta é o dígito.
+
+    Usa a MESMA métrica das bolhas de resposta (`_bubble_metrics`), então uma
+    marca que o motor aceita como resposta também é aceita como dígito.
+    `shift` é o ajuste fino do offset field, para os dois conjuntos de bolhas
+    não saírem de sincronia.
+
+    Devolve `(matricula|None, {coluna: {value, score, runner_up}})`. `None`
+    quando um dígito não tem marca clara ou quando dois empatam — melhor não
+    identificar o aluno do que identificá-lo errado.
+    """
+    cells = expand_id_bubbles(cfg)
+    if not cells:
+        return None, {}
+    w = weights if weights is not None else DEFAULT_WEIGHTS
+    by_col: dict[int, list[dict]] = {}
+    for c in cells:
+        by_col.setdefault(c["digit_position"], []).append(c)
+
+    detail: dict = {}
+    digits: list[str] = []
+    for pos in sorted(by_col):
+        best, best_score, second = None, -1.0, 0.0
+        for c in sorted(by_col[pos], key=lambda z: z["value"]):
+            cx, cy = shift(c["x"] * cw, c["y"] * ch)
+            r_px = max(3.0, c["r"] * max(cw, ch))
+            if c["shape"] == "square":
+                inset = 6
+                score = _square_metrics(gray, cx, cy, side=r_px * 2.0,
+                                        inset=inset, weights=w).score
+            else:
+                inner = max(3, int(round(r_px)) - 2)
+                score = _bubble_metrics(gray, int(round(cx)), int(round(cy)),
+                                        radius=inner, weights=w, snap=snap).score
+            if score > best_score:
+                best, best_score, second = c["value"], score, best_score
+            elif score > second:
+                second = score
+        detail[pos] = {"value": best, "score": round(best_score, 3),
+                       "runner_up": round(second, 3)}
+        if best is None or best_score < ID_DARK_FLOOR:
+            return None, detail
+        if second >= best_score - ID_AMBIGUITY:
+            return None, detail
+        digits.append(str(best))
+    return "".join(digits), detail
+
+
 def question_block_map(config: dict) -> dict[int, dict]:
     """Mapa questão → bloco que a define (para regras de decisão por bloco)."""
     cfg = normalize_config(config)
@@ -637,6 +765,7 @@ def validate_config(config: dict) -> list[dict]:
     # Elementos decorativos: fora da página é erro; sobre bolha/âncora/QR é
     # aviso forte — tinta sobre a bolha estraga a leitura.
     bubbles_all = expand_bubbles(cfg)
+    id_cells = expand_id_bubbles(cfg)
     for e in cfg["elements"]:
         if e["w"] <= 0 or e["h"] <= 0:
             add("error", "element_size", "Elemento sem largura/altura.", e["id"])
@@ -660,6 +789,23 @@ def validate_config(config: dict) -> list[dict]:
                                    or ey1 <= qr["y"] or qr["y"] + qr["h"] <= ey0):
             add("warning", "element_over_qr",
                 "Elemento sobre o QR Code — o QR precisa ficar limpo para ser lido.", e["id"])
+
+    # Matrícula em bolhas: fora da página é erro; sobre bolha de resposta é
+    # aviso (as duas leituras brigam pela mesma tinta).
+    for g in cfg["idgrids"]:
+        if g["w"] <= 0 or g["h"] <= 0:
+            add("error", "idgrid_size", "Grade de matrícula sem largura/altura.", g["id"])
+        if g["x"] + g["w"] > 1.0001 or g["y"] + g["h"] > 1.0001:
+            add("error", "idgrid_bounds", "Grade de matrícula ultrapassa a borda da imagem.", g["id"])
+        hit = next(
+            (b for b in bubbles_all
+             if g["x"] <= b["x"] <= g["x"] + g["w"] and g["y"] <= b["y"] <= g["y"] + g["h"]),
+            None,
+        )
+        if hit is not None:
+            add("warning", "idgrid_over_bubble",
+                f"Matrícula sobre a bolha da questão {hit['question']} {hit['option']} "
+                "pode impedir a leitura — separe as grades.", g["id"])
 
     # Cada página precisa de pelo menos um bloco de questões.
     for p in range(total_pages):
@@ -2245,6 +2391,15 @@ def process_custom_image(
     _t3 = _time.perf_counter()
 
     weights = p.weights if p.weights is not None else DEFAULT_WEIGHTS
+
+    # Matrícula em bolhas (se houver grade): usa o mesmo ajuste fino e os
+    # mesmos pesos das respostas, para os dois conjuntos de bolhas não
+    # saírem de sincronia.
+    student_id, student_id_detail = (None, None)
+    if cfg.get("idgrids"):
+        student_id, student_id_detail = read_student_id(
+            gray, cfg, cw, ch, snap, _shift, weights)
+
     all_ratios: dict[int, dict[str, float]] = {}
     all_darkness: dict[int, dict[str, float]] = {}
     all_pos: dict[int, dict[str, tuple[float, float]]] = {}
@@ -2430,6 +2585,8 @@ def process_custom_image(
         alignment=alignment,
         darkest_marks=sorted(darkest),
         fallback_marks=sorted(fallback_resolved),
+        student_id=student_id,
+        student_id_detail=student_id_detail,
         multi_marks=multi_marks,
         mark_styles=mark_styles_map,
         second_opinion=second_opinion_map,
@@ -2606,7 +2763,124 @@ def config_summary(config: dict) -> dict:
         "n_questions": total_questions(cfg),
         "n_print_fields": len(cfg["print_fields"]),
         "n_elements": len(cfg["elements"]),
+        "n_idgrids": len(cfg["idgrids"]),
         "n_pages": max(1, int(cfg.get("n_pages") or 1)),
         "page_w": cfg["page_w"],
         "page_h": cfg["page_h"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Modelo de leitura (contrato de impressão)
+# ---------------------------------------------------------------------------
+
+def reading_model(config: dict) -> dict:
+    """Posição de cada bolha, campo, matrícula e QR — pronto para automatizar.
+
+    Unidade: `mm` quando a config declara `page_dpi` (cartões do gerador sabem
+    o DPI); `px` da imagem do modelo caso contrário. O JSON declara `page.unit`
+    e as dimensões, então dá para converter para normalizado (0..1) sem adivinhar
+    nada: `normalizado = valor / dimensão_no_eixo`.
+
+    Espelha o formato do gerador do FormRead (`Gabarito Studio`) para que os
+    dois possam ser lidos pelo mesmo consumidor.
+    """
+    cfg = normalize_config(config)
+    pw = int(cfg["page_w"] or 0)
+    ph = int(cfg["page_h"] or 0)
+    dpi = cfg.get("page_dpi")
+    if dpi:
+        unit = "mm"
+        sx, sy = pw / dpi * 25.4, ph / dpi * 25.4
+    else:
+        unit = "px"
+        sx, sy = float(pw), float(ph)
+
+    def _x(v: float) -> float:
+        return r2(v * sx)
+
+    def _y(v: float) -> float:
+        return r2(v * sy)
+
+    def _d(radius: float) -> float:
+        # o raio é normalizado pela MAIOR dimensão (convenção do motor)
+        px = 2 * radius * max(pw, ph)
+        return r2(px / dpi * 25.4 if dpi else px)
+
+    grids: list[dict] = []
+    for b in cfg["questions"]:
+        per_q: dict[int, list[dict]] = {}
+        for bb in expand_block(b):
+            per_q.setdefault(bb["question"], []).append({
+                "label": bb["option"],
+                "x": _x(bb["x"]), "y": _y(bb["y"]),
+                "diameter": _d(bb["r"]),
+                "shape": bb.get("shape") or "circle",
+            })
+        grids.append({
+            "elementId": b["id"],
+            "page": b["page"],
+            "rows": int(b.get("n_questions") or 0),
+            "labels": list(b.get("labels") or []),
+            "columns": max(1, int(b.get("columns") or 1)),
+            "questions": [{"number": q, "options": per_q[q]} for q in sorted(per_q)],
+        })
+
+    questions = [q for g in grids for q in g["questions"]]
+    n_bubbles = sum(len(q["options"]) for q in questions)
+
+    id_cells = expand_id_bubbles(cfg)
+    student_id = {
+        # nº de colunas (= nº de dígitos), não de linhas (sempre 10)
+        "digits": len({c["digit_position"] for c in id_cells}),
+        "bubbles": [{
+            "grid": c["grid"], "digitPosition": c["digit_position"], "value": c["value"],
+            "x": _x(c["x"]), "y": _y(c["y"]), "diameter": _d(c["r"]),
+            "shape": c["shape"],
+        } for c in id_cells],
+    }
+
+    info = {r["id"]: r for r in cfg["info_regions"]}
+    fields = [{
+        "elementId": f.get("region_id") or "",
+        "source": f.get("source") or "",
+        "label": (info.get(f.get("region_id")) or {}).get("kind", ""),
+        "x": _x((info.get(f["region_id"]) or {}).get("x", 0.0)),
+        "y": _y((info.get(f["region_id"]) or {}).get("y", 0.0)),
+        "w": _x((info.get(f["region_id"]) or {}).get("w", 0.0)),
+        "h": _y((info.get(f["region_id"]) or {}).get("h", 0.0)),
+        "fontSize": max(10, int(f.get("font_size") or 34)),
+    } for f in cfg["print_fields"] if f.get("region_id") in info]
+
+    qr = cfg["qr"]
+    return {
+        "version": 1,
+        "generator": "omr-leitor",
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "name": None,
+        "page": {
+            "format": None,
+            "unit": unit,
+            "widthPx": pw,
+            "heightPx": ph,
+            "dpi": dpi,
+            "width": r2(sx),
+            "height": r2(sy),
+            "marginMm": None,
+        },
+        "grids": grids,
+        "questions": questions,
+        "fields": fields,
+        "studentId": student_id,
+        "qr": ([] if qr is None else [{
+            "elementId": qr["id"], "field": qr.get("field") or "",
+            "x": _x(qr["x"]), "y": _y(qr["y"]),
+            "w": _x(qr["w"]), "h": _y(qr["h"]),
+        }]),
+        "totals": {
+            "questions": len(questions),
+            "bubbles": n_bubbles,
+            "fields": len(fields),
+            "studentIdBubbles": len(student_id["bubbles"]),
+        },
     }

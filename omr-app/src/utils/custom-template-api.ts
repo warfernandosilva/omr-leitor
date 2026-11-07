@@ -122,6 +122,8 @@ export interface CustomConfig {
   info_regions: CustomInfoRegion[];
   elements?: CustomElement[];
   questions: CustomBlock[];
+  // Identificação do aluno em bolhas (matrícula): uma coluna por dígito.
+  idgrids?: CustomIdGrid[];
   print_fields: CustomPrintField[];
   omr_params: {
     floor?: number | null;
@@ -129,6 +131,24 @@ export interface CustomConfig {
     low_conf_threshold?: number | null;
     adaptive?: boolean;
   };
+  // DPI da imagem do modelo, quando conhecido (cartões do gerador). Com ele o
+  // modelo de leitura sai em milímetros; sem ele, em pixels da imagem.
+  page_dpi?: number | null;
+}
+
+/** Grade de matrícula: N colunas com 10 bolhas (0–9) cada, lidas de cima a baixo. */
+export interface CustomIdGrid {
+  id: string;
+  page?: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  digits: number;
+  /** Raio da bolha normalizado (fração da maior dimensão da página). */
+  radius: number;
+  shape: 'circle' | 'square';
+  locked?: boolean;
 }
 
 export interface CustomTemplateSummary {
@@ -147,6 +167,7 @@ export interface CustomTemplateSummary {
     n_questions: number;
     n_print_fields: number;
     n_elements?: number;
+    n_idgrids?: number;
     n_pages: number;
     page_w: number;
     page_h: number;
@@ -216,6 +237,9 @@ export interface CustomTestResult {
   fallback_marks?: number[];
   all_ratios?: Record<string, Record<string, number>>;
   qr_id?: string | null;
+  // Matrícula lida das bolhas de identificação (`null` se não deu para ler).
+  student_id?: string | null;
+  student_id_detail?: Record<string, { value: number | null; score: number; runner_up: number }> | null;
   floor_used?: number;
   floor_source?: string;
   timings_ms?: Record<string, number>;
@@ -462,6 +486,71 @@ export function customTemplateAsset(id: number, asset: string): Promise<Blob> {
 export async function customBubbles(id: number, page?: number): Promise<{ bubbles: ExpandedBubble[]; n_pages?: number }> {
   const q = page == null ? '' : `?page=${page}`;
   return apiJson(`/api/custom-templates/${id}/bubbles${q}`);
+}
+
+// ─── Modelo de leitura (contrato de impressão) ───
+
+/** Uma bolha do modelo de leitura (centro + diâmetro, na unidade de `page`). */
+export interface ReadingBubble {
+  label: string;
+  x: number;
+  y: number;
+  /** `diameter` em mm ou px, conforme `page.unit`. */
+  diameter: number;
+  shape: 'circle' | 'square';
+}
+
+export interface ReadingQuestion {
+  number: number;
+  options: ReadingBubble[];
+}
+
+export interface ReadingField {
+  elementId: string;
+  source: string;
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fontSize: number;
+}
+
+export interface ReadingStudentIdBubble {
+  grid: string;
+  digitPosition: number;
+  value: number;
+  x: number;
+  y: number;
+  diameter: number;
+  shape: 'circle' | 'square';
+}
+
+export interface ReadingModel {
+  version: number;
+  generator: string;
+  generatedAt: string;
+  name?: string | null;
+  page: {
+    unit: 'mm' | 'px';
+    widthPx: number;
+    heightPx: number;
+    dpi: number | null;
+    width: number;
+    height: number;
+  };
+  grids: { elementId: string; page: number; rows: number; labels: string[]; columns: number; questions: ReadingQuestion[] }[];
+  questions: ReadingQuestion[];
+  fields: ReadingField[];
+  studentId: { digits: number; bubbles: ReadingStudentIdBubble[] };
+  qr: { elementId: string; field: string; x: number; y: number; w: number; h: number }[];
+  totals: { questions: number; bubbles: number; fields: number; studentIdBubbles: number };
+}
+
+/** Modelo de leitura do modelo (ou de uma página, em multi-página). */
+export function customTemplateReadingModel(id: number, page?: number): Promise<ReadingModel> {
+  const q = page == null ? '' : `?page=${page}`;
+  return apiJson(`/api/custom-templates/${id}/reading-model${q}`);
 }
 
 // ─── Auto-detecção de grade (sugestão para o editor) ───

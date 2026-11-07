@@ -46,6 +46,7 @@ from omr.custom_template import (
     page_image_size,
     process_custom_image,
     question_offset_before_page,
+    reading_model,
     render_overlay,
     render_preview_overlay,
     validate_config,
@@ -689,6 +690,8 @@ def test_template(
         "multi_marks": {str(k): v for k, v in (result.multi_marks or {}).items()},
         "all_ratios": {str(k): v for k, v in result.all_ratios.items()},
         "qr_id": result.qr_id,
+        "student_id": result.student_id,
+        "student_id_detail": result.student_id_detail,
         "alignment": result.alignment,
         "floor_used": round(result.floor_used, 3),
         "floor_source": result.floor_source,
@@ -1032,6 +1035,28 @@ def template_bubbles(
         "summary": config_summary(cfg),
         "n_pages": n_pages(cfg),
     }
+
+
+@router.get("/api/custom-templates/{tid}/reading-model")
+def template_reading_model(
+    tid: int,
+    page: int | None = None,
+    current_user: User = Depends(auth.get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Modelo de leitura: posição de cada bolha, campo, matrícula e QR.
+
+    Saída em milímetros quando o modelo declara `page_dpi` (cartões gerados
+    pelo gerador); em pixels da imagem caso contrário. É o "contrato de
+    impressão" — quem for automatizar a correção não precisa adivinhar a
+    escala: divide as coordenadas pelas dimensões declaradas em `page`.
+    """
+    tpl = _get_template(db, tid, current_user)
+    cfg = tpl.config or {}
+    source = config_for_page(cfg, page) if page is not None else cfg
+    model = reading_model(source)
+    model["name"] = tpl.nome
+    return model
 
 
 # ---------------------------------------------------------------------------
