@@ -355,7 +355,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
         <div className="card max-w-2xl text-center py-12">
           <div className="animate-spin w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full mx-auto mb-4" role="status" aria-label="Gerando gabaritos" />
           <p className="text-gray-600 dark:text-gray-300 font-medium">{stage || 'Processando...'}</p>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Os dados estão sendo gravados no banco de dados do servidor.
           </p>
         </div>
@@ -388,7 +388,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
             IDs internos #{Math.min(...doneInfo.alunos.map(a => a.id))}–#{Math.max(...doneInfo.alunos.map(a => a.id))}
             {' '}• Códigos {doneInfo.primeiroCodigo} … {doneInfo.ultimoCodigo}
           </p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-6">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-6">
             A associação código ↔ aluno está salva no banco e sobrevive ao fechamento do sistema.
           </p>
 
@@ -454,7 +454,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                     }`}
                   >
                     Arquivo XLSX/CSV
-                    <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">enviar a planilha de novo</span>
+                    <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">enviar a planilha de novo</span>
                   </button>
                   <button
                     type="button"
@@ -468,7 +468,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                     }`}
                   >
                     Turma cadastrada
-                    <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">reutilizar o catálogo, sem planilha</span>
+                    <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">reutilizar o catálogo, sem planilha</span>
                   </button>
                 </div>
 
@@ -484,9 +484,9 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                       <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
                         Clique para importar o arquivo com os nomes dos alunos
                       </span>
-                      <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">.xlsx, .xls ou .csv</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">.xlsx, .xls ou .csv</p>
                     </button>
-                    {fileName && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Arquivo: {fileName}</p>}
+                    {fileName && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Arquivo: {fileName}</p>}
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -580,7 +580,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                       </ul>
                     )}
                     {!result.headerDetected && (
-                      <p className="text-gray-400 dark:text-gray-500 text-xs">Cabeçalho não detectado — primeira coluna com nomes utilizada automaticamente.</p>
+                      <p className="text-gray-500 dark:text-gray-400 text-xs">Cabeçalho não detectado — primeira coluna com nomes utilizada automaticamente.</p>
                     )}
                   </div>
                 )}
@@ -644,7 +644,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                     Gerar {n} gabarito{n > 1 ? 's' : ''} em PDF ({n} página{n > 1 ? 's' : ''})
                   </Button>
                 </div>
-                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+                <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
                   &quot;Apenas importar&quot; deixa os gabaritos pendentes — use depois o
                   {' '}<button onClick={() => onNavigate('manage-exam', activeExam!.id)} className="underline">Gerenciar Avaliação</button>
                   {' '}ou este mesmo botão para gerar o PDF.
@@ -664,7 +664,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                 >
                   Gerar gabaritos da turma &quot;{turmaDetail.nome}&quot; em PDF
                 </Button>
-                <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+                <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
                   Materializa o catálogo na prova (sem duplicar quem já está nela), vincula a turma
                   e gera o PDF. Alunos novos no catálogo entram na próxima geração.
                 </p>
@@ -699,7 +699,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   <tbody>
                     {students.map((s) => (
                       <tr key={s.seq} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
-                        <td className="py-1.5 px-3 text-gray-400 dark:text-gray-500 tabular-nums">{s.seq}</td>
+                        <td className="py-1.5 px-3 text-gray-500 dark:text-gray-400 tabular-nums">{s.seq}</td>
                         {result.identifierColumnLabel && (
                           <td className="py-1.5 px-3 text-gray-500 dark:text-gray-400">{s.identifier ?? '—'}</td>
                         )}
@@ -709,7 +709,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                 Os IDs internos e os códigos únicos (QR) são gerados pelo servidor durante a gravação no banco.
               </p>
 
@@ -726,7 +726,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2 text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
                     Prévia ilustrativa — ID textual e QR Code definitivos são inseridos na geração do PDF.
                   </p>
                 </>

@@ -69,7 +69,7 @@ export default function UploadPanel({ session, onUploaded }: Props) {
           className="hidden"
           onChange={e => { addFiles(e.target.files); e.target.value = ''; }}
         />
-        <ImagePlus size={28} strokeWidth={1.5} className="text-gray-400 dark:text-gray-500 mx-auto mb-2" aria-hidden />
+        <ImagePlus size={28} strokeWidth={1.5} className="text-gray-500 dark:text-gray-400 mx-auto mb-2" aria-hidden />
         <p className="text-sm text-gray-600 dark:text-gray-300">Arraste as fotos aqui</p>
         <Button variant="secondary" onClick={() => inputRef.current?.click()} className="mt-3">
           Escolher fotos…
@@ -98,7 +98,7 @@ export default function UploadPanel({ session, onUploaded }: Props) {
           <div className="flex flex-wrap gap-2 mb-3">
             <Badge tone="success">{ok.length} lida(s)</Badge>
             {fail.length > 0 && <Badge tone="danger">{fail.length} com erro</Badge>}
-            <span className="text-xs text-gray-400 dark:text-gray-500 self-center">{nArquivos} enviada(s)</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400 self-center">{nArquivos} enviada(s)</span>
           </div>
           <div className="space-y-2">
             {results.map((r, i) => (

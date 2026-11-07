@@ -29,7 +29,7 @@ export default function StatCard({ label, value, tone = 'default', icon, hint }:
       ) : null}
       <p className={`text-2xl font-bold tracking-tight ${tones[tone]}`}>{value}</p>
       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{label}</p>
-      {hint ? <p className="text-[11px] text-gray-400 dark:text-gray-500 mt-1">{hint}</p> : null}
+      {hint ? <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">{hint}</p> : null}
     </div>
   );
 }

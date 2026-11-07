@@ -77,7 +77,7 @@ export default function ReviewPanel({ images }: Props) {
                 }`}
               >
                 <span className="block truncate font-medium">{img.filename}</span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   {img.status === 'error' ? 'erro' : `${img.total_questions} questões`}
                 </span>
               </button>
@@ -116,7 +116,7 @@ export default function ReviewPanel({ images }: Props) {
             <div className="card">
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-100">Imagem retificada</h3>
-                <span className="text-xs text-gray-400 dark:text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   QR: {image.qr_id ?? '—'} · floor {image.floor_used?.toFixed(2) ?? '—'} ({image.floor_source ?? '—'})
                 </span>
               </div>
@@ -186,7 +186,7 @@ export default function ReviewPanel({ images }: Props) {
                     </div>
                   ))}
                   {(!questionDetail.options || questionDetail.options.length === 0) && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500">Sem componentes salvos para esta questão.</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Sem componentes salvos para esta questão.</p>
                   )}
                 </div>
               </div>

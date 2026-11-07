@@ -26,7 +26,7 @@ export default function StatusBar({
         <button
           type="button"
           onClick={onDiagnosticoClick}
-          className={`flex items-center gap-1 font-medium transition-colors ${isReady ? 'text-green-600' : 'text-amber-600 hover:text-amber-700'}`}
+          className={`flex items-center gap-1 min-h-[24px] -my-1 px-1 rounded font-medium transition-colors ${isReady ? 'text-green-600' : 'text-amber-600 hover:text-amber-700'}`}
         >
           {isReady ? <CheckCircle2 size={12} aria-hidden /> : <AlertTriangle size={12} aria-hidden />}
           {isReady ? 'Pronto para ler' : `${pendings} pendência(s) →`}

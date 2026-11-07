@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
 export interface TabItem {
@@ -19,6 +19,13 @@ interface Props {
 /** Abas com navegação por teclado (setas). */
 export default function Tabs({ tabs, active, onChange, ariaLabel = 'Abas' }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Em painel estreito a tira de abas rola; sem isto a aba ativa (e portanto
+  // o seu conteúdo) podia ficar fora da vista sem o usuário perceber.
+  useEffect(() => {
+    const btn = listRef.current?.querySelector<HTMLButtonElement>(`[data-tab="${active}"]`);
+    btn?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
@@ -53,7 +60,7 @@ export default function Tabs({ tabs, active, onChange, ariaLabel = 'Abas' }: Pro
             aria-selected={selected}
             disabled={t.disabled}
             onClick={() => onChange(t.id)}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors min-h-[44px] disabled:opacity-40 ${
+            className={`flex shrink-0 items-center gap-2 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors min-h-[44px] disabled:opacity-40 ${
               selected
                 ? 'border-brand-500 text-brand-600 dark:text-brand-200'
                 : 'border-transparent text-gray-500 hover:text-ink dark:text-gray-400 dark:hover:text-white'
@@ -62,7 +69,7 @@ export default function Tabs({ tabs, active, onChange, ariaLabel = 'Abas' }: Pro
             {t.icon ? <span className="inline-flex" aria-hidden>{t.icon}</span> : null}
             {t.label}
             {t.badge !== undefined ? (
-              <span className="badge-neutral badge">{t.badge}</span>
+              <span className="badge-neutral badge shrink-0">{t.badge}</span>
             ) : null}
           </button>
         );

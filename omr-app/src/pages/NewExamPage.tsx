@@ -417,7 +417,7 @@ const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' 
                   className={optionCard(templateType === t.id)}
                 >
                   {t.title}
-                  <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">{t.hint}</span>
+                  <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">{t.hint}</span>
                 </button>
               ))}
             </div>
@@ -481,7 +481,7 @@ const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' 
                   className={optionCard(layoutMode === 'single')}
                 >
                   1 disciplina
-                  <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">coluna única (até {MAX_QUESTIONS_SINGLE} questões)</span>
+                  <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">coluna única (até {MAX_QUESTIONS_SINGLE} questões)</span>
                 </button>
                 <button
                   type="button"
@@ -491,7 +491,7 @@ const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' 
                   className={optionCard(layoutMode === 'dual')}
                 >
                   2 disciplinas
-                  <span className="block text-xs font-normal text-gray-400 dark:text-gray-500">duas colunas (até {MAX_QUESTIONS_PER_SUBJECT} por disciplina)</span>
+                  <span className="block text-xs font-normal text-gray-500 dark:text-gray-400">duas colunas (até {MAX_QUESTIONS_PER_SUBJECT} por disciplina)</span>
                 </button>
               </div>
             </div>
@@ -717,7 +717,7 @@ const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' 
                         : `${exam.subjectLP} + ${exam.subjectMat}`}
                       {' '}— {exam.totalQuestions} questões — Escala: {exam.gradeScale}
                     </p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
                       Criada em {new Date(exam.createdAt).toLocaleString('pt-BR')}
                       {exam.answerKey && ' — Gabarito definido'}
                     </p>

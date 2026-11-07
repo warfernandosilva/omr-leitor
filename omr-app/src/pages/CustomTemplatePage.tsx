@@ -1495,15 +1495,17 @@ function TemplateEditor({
         <div className="card p-2 flex flex-col gap-2 h-[78vh] lg:h-full lg:min-h-0">
           <div className="flex items-center flex-wrap gap-2">
             <Button size="icon" variant="ghost" title="Reduzir zoom (ou Ctrl + roda do mouse)" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.max(0.1, z - 0.05)); }}><ZoomOut size={16} /></Button>
+            {/* h-6 (24px): alvo mínimo de clique/toque. */}
             <input type="number" min={10} max={400} step={1} value={Math.round(zoom * 100)}
+                   aria-label="Zoom em porcentagem"
                    onChange={(e) => {
                      const v = Number(e.target.value);
                      if (!Number.isFinite(v)) return;
                      zoomManualRef.current = true;
                      setZoom(Math.max(0.1, Math.min(4, v / 100)));
                    }}
-                   className="text-xs w-12 text-center border border-gray-300 dark:border-gray-700 rounded px-1 py-0.5 bg-transparent" />
-            <span className="text-xs text-gray-500">%</span>
+                   className="text-xs w-12 h-6 text-center border border-gray-300 dark:border-gray-700 rounded px-1 bg-transparent" />
+            <span className="text-xs text-gray-500 dark:text-gray-400">%</span>
             <Button size="icon" variant="ghost" title="Ampliar zoom (ou Ctrl + roda do mouse)" onClick={() => { zoomManualRef.current = true; setZoom((z) => Math.min(4, z + 0.05)); }}><ZoomIn size={16} /></Button>
             <Button size="icon" variant="ghost" title="Ajustar à tela"
                     onClick={fitToScreen}><Maximize size={16} /></Button>
@@ -2235,11 +2237,14 @@ function RegionalList({
   onDelete: (kind: RegionType, id: string) => void;
 }) {
   const Item = ({ kind, id, label, color }: { kind: RegionType; id: string; label: string; color: string }) => (
-    <div className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${selection?.kind === kind && selection?.id === id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}>
+    <div className={`flex items-center gap-2 rounded px-2 py-1 text-sm min-h-[28px] ${selection?.kind === kind && selection?.id === id ? 'bg-gray-100 dark:bg-gray-800' : ''}`}>
       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: color }} />
-      <button type="button" className="flex-1 text-left truncate" onClick={() => setSelection({ kind, id })}>{label}</button>
-      <button type="button" className="text-gray-400 hover:text-red-500" title="Excluir"
-              onClick={() => onDelete(kind, id)}><Trash2 size={14} /></button>
+      <button type="button" className="flex-1 min-h-[24px] text-left truncate"
+              onClick={() => setSelection({ kind, id })}>{label}</button>
+      {/* 24×24 é o alvo mínimo (WCAG 2.5.8): o ícone fica menor, a área de
+          clique não. Um botão de 14×14 é impossível de acertar com o dedo. */}
+      <button type="button" className="grid place-items-center h-6 w-6 -mr-1 shrink-0 text-gray-400 hover:text-red-500"
+              title="Excluir" onClick={() => onDelete(kind, id)}><Trash2 size={15} /></button>
     </div>
   );
   const empty = !config.anchors.length && !config.qr && !config.info_regions.length

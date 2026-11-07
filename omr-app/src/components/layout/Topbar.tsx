@@ -157,7 +157,7 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
           <Menu size={20} />
         </button>
         <div className="flex-1 min-w-0 py-0.5">
-          <p className="text-[11px] font-medium text-gray-400 dark:text-gray-500 leading-none truncate">{meta.group}</p>
+          <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 leading-none truncate">{meta.group}</p>
           <p className="text-[15px] font-bold text-ink dark:text-white leading-tight truncate">
             {meta.title}
             {contextExam ? (

@@ -2116,7 +2116,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             <span className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors ${continuous ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-600'}`}>
               <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${continuous ? 'translate-x-6' : 'translate-x-1'}`} />
             </span>
-            <span className="text-sm text-gray-700 dark:text-gray-300 text-left">Correção contínua <span className="text-gray-400 dark:text-gray-500">(vários cartões em sequência)</span></span>
+            <span className="text-sm text-gray-700 dark:text-gray-300 text-left">Correção contínua <span className="text-gray-500 dark:text-gray-400">(vários cartões em sequência)</span></span>
           </button>
           {sessionCount > 0 && (
             <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1">
@@ -2179,7 +2179,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                 />
                 Selecionar todos
                 {selectedPendingIds.size > 0 && (
-                  <span className="text-gray-400 dark:text-gray-500">({selectedPendingIds.size} selecionada(s))</span>
+                  <span className="text-gray-500 dark:text-gray-400">({selectedPendingIds.size} selecionada(s))</span>
                 )}
               </label>
               <ul className="space-y-2">
@@ -3652,7 +3652,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                                       {aiLetter}
                                     </button>
                                   ) : isBlank ? (
-                                    <span className="text-xs text-gray-400 dark:text-gray-500">em branco</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">em branco</span>
                                   ) : (
                                     <span className="text-gray-300 dark:text-gray-600">—</span>
                                   )}
@@ -3673,7 +3673,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
                                       </span>
                                     </span>
                                   ) : (
-                                    <span className="text-xs text-gray-400 dark:text-gray-500">Em branco</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">Em branco</span>
                                   )}
                                 </td>
                               </tr>
@@ -3887,9 +3887,9 @@ function BatchPanel({
             disabled={!selectedExamId || running}
             className="w-full border-2 border-dashed border-line dark:border-gray-600 rounded-lg p-6 text-center hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-700/10 transition-colors disabled:opacity-50 min-h-[44px]"
           >
-            <ImagePlus size={28} strokeWidth={1.5} className="text-gray-400 dark:text-gray-500 mx-auto mb-2" aria-hidden />
+            <ImagePlus size={28} strokeWidth={1.5} className="text-gray-500 dark:text-gray-400 mx-auto mb-2" aria-hidden />
             <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Selecione uma ou várias fotos</span>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">.jpg, .png — quantas quiser</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">.jpg, .png — quantas quiser</p>
           </button>
           <input
             ref={fileInputRef}

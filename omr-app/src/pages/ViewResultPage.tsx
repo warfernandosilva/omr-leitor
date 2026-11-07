@@ -141,7 +141,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
                         </span>
                       </span>
                     ) : !answer ? (
-                      <span className="text-xs text-gray-400 dark:text-gray-500">Em branco</span>
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Em branco</span>
                     ) : (
                       <span className="text-danger-600 dark:text-danger-100 font-medium">✗ Incorreta</span>
                     )}
@@ -169,7 +169,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
 
       <div className="card">
         <div className="flex items-center justify-between gap-3 mb-2">
-          <p className="text-sm text-gray-400 dark:text-gray-500">
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             Corrigido em {new Date(result.timestamp).toLocaleString('pt-BR')}
           </p>
           <div className="text-right shrink-0">

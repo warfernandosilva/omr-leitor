@@ -229,7 +229,7 @@ export default function AdminUsersPage({ onNavigate }: Props) {
                       </button>
                     </td>
                     <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 tabular-nums">{u.avaliacoes}</td>
-                    <td className="py-3 px-3 text-gray-400 dark:text-gray-500 text-xs hidden md:table-cell">
+                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400 text-xs hidden md:table-cell">
                       {u.created_at ? new Date(u.created_at).toLocaleString('pt-BR') : '—'}
                     </td>
                     <td className="py-3 px-3 text-center">
@@ -259,7 +259,7 @@ export default function AdminUsersPage({ onNavigate }: Props) {
                 );
               })}
               {users.length === 0 && (
-                <tr><td colSpan={7} className="py-8 text-center text-gray-400 dark:text-gray-500">Nenhum usuário cadastrado.</td></tr>
+                <tr><td colSpan={7} className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhum usuário cadastrado.</td></tr>
               )}
             </tbody>
           </table>

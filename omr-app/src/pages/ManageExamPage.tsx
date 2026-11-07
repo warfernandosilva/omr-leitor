@@ -146,7 +146,7 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
           )}
         </Field>
 
-        {loading && <p className="text-sm text-gray-400 dark:text-gray-500 mt-3" role="status">Consultando o banco de dados...</p>}
+        {loading && <p className="text-sm text-gray-500 dark:text-gray-400 mt-3" role="status">Consultando o banco de dados...</p>}
         {error && <div className="callout-danger mt-3">{error}</div>}
       </div>
 
@@ -184,9 +184,9 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
               columns={[
                 { key: 'aluno', header: 'Aluno', render: (g) => <span className="font-medium text-ink dark:text-gray-100">{g.aluno.nome}</span> },
                 { key: 'mat', header: 'Matrícula', render: (g) => <span className="text-gray-500 dark:text-gray-400">{g.aluno.matricula ?? '—'}</span> },
-                { key: 'id', header: 'ID interno', render: (g) => <span className="text-gray-400 dark:text-gray-500">#{g.aluno.id}</span> },
+                { key: 'id', header: 'ID interno', render: (g) => <span className="text-gray-500 dark:text-gray-400">#{g.aluno.id}</span> },
                 { key: 'qr', header: 'Gabarito (QR)', render: (g) => <span className="font-mono text-xs text-brand-600 dark:text-brand-200">{g.codigo_unico}</span> },
-                { key: 'pag', header: 'Pág.', className: 'text-center', render: (g) => <span className="text-gray-400 dark:text-gray-500">{g.numero_pagina}</span> },
+                { key: 'pag', header: 'Pág.', className: 'text-center', render: (g) => <span className="text-gray-500 dark:text-gray-400">{g.numero_pagina}</span> },
                 {
                   key: 'qrok', header: 'QR Code', className: 'text-center',
                   render: (g) => <span className="text-success-600 dark:text-success-100 font-bold" title={`Payload: ${g.qr_code_payload}`} aria-label="QR válido">✓</span>,

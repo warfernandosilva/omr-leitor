@@ -226,12 +226,12 @@ export default function ResultsPage({ onNavigate }: Props) {
                   <tr key={r.id} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
                     <td className="py-3 px-3 font-medium text-ink dark:text-gray-100">{r.studentName}</td>
                     <td className="py-3 px-3 text-gray-500 dark:text-gray-400 hidden sm:table-cell">{exam?.name || '—'}</td>
-                    <td className="py-3 px-3 text-gray-400 dark:text-gray-500 text-xs hidden md:table-cell">
+                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400 text-xs hidden md:table-cell">
                       {new Date(r.timestamp).toLocaleString('pt-BR')}
                     </td>
                     <td className="py-3 px-3 text-center text-success-600 dark:text-success-100 font-medium tabular-nums">{r.correctCount}</td>
                     <td className="py-3 px-3 text-center text-danger-600 dark:text-danger-100 font-medium tabular-nums">{r.incorrectCount}</td>
-                    <td className="py-3 px-3 text-center text-gray-400 dark:text-gray-500 tabular-nums">{r.blankCount}</td>
+                    <td className="py-3 px-3 text-center text-gray-500 dark:text-gray-400 tabular-nums">{r.blankCount}</td>
                     <td className="py-3 px-3 text-center font-bold text-brand-600 dark:text-brand-200 tabular-nums">{r.grade}</td>
                     <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 hidden lg:table-cell">
                       {subjectStats ? `${subjectStats.lp.correctCount}/${exam?.questionsPerSubject}` : '—'}

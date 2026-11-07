@@ -304,7 +304,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
         <h3 className="text-[10px] font-bold uppercase tracking-[0.09em] text-gray-500 dark:text-gray-400">
           {title}
         </h3>
-        {hint && <p className="mt-0.5 text-[10.5px] leading-relaxed text-gray-400 dark:text-gray-500">{hint}</p>}
+        {hint && <p className="mt-0.5 text-[10.5px] leading-relaxed text-gray-500 dark:text-gray-400">{hint}</p>}
       </div>
       {children}
     </section>

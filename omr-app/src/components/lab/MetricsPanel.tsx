@@ -371,7 +371,7 @@ export default function MetricsPanel({ session, detail }: Props) {
                       <div className="absolute inset-y-0 w-0.5 bg-danger-500" style={{ left: `${floor * 100}%` }} />
                     )}
                   </div>
-                  <div className="flex justify-between text-[10px] text-gray-400 dark:text-gray-500 mt-1">
+                  <div className="flex justify-between text-[10px] text-gray-500 dark:text-gray-400 mt-1">
                     <span>0.00</span><span>0.25</span><span>0.50</span><span>0.75</span><span>1.00</span>
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">

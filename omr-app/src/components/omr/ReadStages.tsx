@@ -56,7 +56,7 @@ export default function ReadStages({ doneCount, anchorLabel }: Props) {
               <span
                 className={`text-sm ${isDone || isCurrent
                   ? 'text-ink dark:text-gray-100 font-medium'
-                  : 'text-gray-400 dark:text-gray-500'}`}
+                  : 'text-gray-500 dark:text-gray-400'}`}
                 aria-current={isCurrent ? 'step' : undefined}
               >
                 {label}
@@ -75,7 +75,7 @@ export default function ReadStages({ doneCount, anchorLabel }: Props) {
         />
       </div>
       {done < 8 && (
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
           Este processo pode levar alguns segundos. Por favor, aguarde…
         </p>
       )}

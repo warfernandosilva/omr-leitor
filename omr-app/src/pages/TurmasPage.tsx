@@ -344,7 +344,7 @@ export default function TurmasPage({ onNavigate }: Props) {
                   <li key={a.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <span className="text-gray-700 dark:text-gray-200 truncate">
                       {a.nome}
-                      {a.matricula && <span className="text-gray-400 dark:text-gray-500"> — {a.matricula}</span>}
+                      {a.matricula && <span className="text-gray-500 dark:text-gray-400"> — {a.matricula}</span>}
                     </span>
                     <button
                       onClick={() => handleRemoveAluno(a.id, a.nome)}

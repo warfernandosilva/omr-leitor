@@ -300,7 +300,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                       <p className="text-gray-600 dark:text-gray-300"><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
                     </>
                   )}
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">ID do cartão: {cardId}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">ID do cartão: {cardId}</p>
                 </div>
               )}
 
@@ -374,7 +374,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         )}
 
         {showPreview && activeExam && (
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
             {sourceNote ?? 'O PDF é gerado pelo servidor com o mesmo desenho dos gabaritos oficiais (sem QR/nome de aluno).'}
           </p>
         )}

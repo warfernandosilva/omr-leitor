@@ -72,7 +72,7 @@ export default function Sidebar({
           if (items.length === 0) return null;
           return (
             <div key={group.id}>
-              <p className={`px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 ${collapsed ? 'lg:hidden' : ''}`}>
+              <p className={`px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 ${collapsed ? 'lg:hidden' : ''}`}>
                 {group.label}
               </p>
               {collapsed && (
