@@ -8,7 +8,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold, Hash,
+  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold, Hash, Frame,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -38,7 +38,10 @@ import {
   validateCustomTemplate,
   withBubbleOverride, withoutBubbleOverride,
 } from '../utils/custom-template-api';
-import { AlignMode, alignRects, clampRect, distributeRects, snapDelta } from '../utils/custom-template-edit';
+import {
+  AlignMode, alignRects, alignToMargin, clampRect, distributeRects,
+  organizeRects, snapDelta,
+} from '../utils/custom-template-edit';
 import type { CustomVersionRow, PrintPreviewResult } from '../utils/custom-template-api';
 import { makeAnchor, nextArucoId } from '../utils/custom-template-anchor';
 import { pageWarnings } from '../utils/template-warnings';
@@ -1284,6 +1287,24 @@ function TemplateEditor({
     apply(next);
   };
 
+  /** Organizar alinha pela margem da PÁGINA, então vale com 1 elemento. */
+  const applyToMovable = (fn: (rects: Rect[]) => Rect[], min = 1) => {
+    const items = movableSelected();
+    if (items.length < min) return;
+    const out = fn(items.map((x) => x.r));
+    let next = configRef.current;
+    items.forEach((x, i) => {
+      next = setRect(next, x.s.kind as Exclude<RegionType, 'block'>, x.s.id, clampRect(out[i]));
+    });
+    apply(next);
+  };
+
+  const organizeSelected = () =>
+    applyToMovable((rects) => organizeRects(rects, 0.05, 0.02, 0.45));
+
+  const alignToMarginSelected = (side: 'left' | 'right' | 'top' | 'bottom') =>
+    applyToMovable((rects) => alignToMargin(rects, side, 0.05));
+
   // Atalhos do editor (ignora campos de texto).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1537,6 +1558,11 @@ function TemplateEditor({
                       onClick={() => distributeSelected('x')}><AlignHorizontalDistributeCenter size={15} /></Button>
               <Button size="icon" variant="ghost" title="Distribuir verticalmente" disabled={selected.length < 3}
                       onClick={() => distributeSelected('y')}><AlignVerticalDistributeCenter size={15} /></Button>
+              <span className="w-px h-5 bg-gray-300 dark:bg-gray-700 mx-1" />
+              <Button size="icon" variant="ghost" title="Organizar (empilhar a partir da margem)"
+                      disabled={!selected.length} onClick={organizeSelected}><LayoutTemplate size={15} /></Button>
+              <Button size="icon" variant="ghost" title="Alinhar à margem da página (esquerda)"
+                      disabled={!selected.length} onClick={() => alignToMarginSelected('left')}><Frame size={15} /></Button>
             </div>
           )}
 

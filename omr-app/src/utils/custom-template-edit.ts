@@ -122,3 +122,43 @@ export function snapDelta(
 export function newRegionId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
 }
+
+/** Alinha pela MARGEM DA PÁGINA (não pela seleção, como `alignRects`). */
+export function alignToMargin(
+  rects: Rect[], side: 'left' | 'right' | 'top' | 'bottom', margin = 0.05,
+): Rect[] {
+  return rects.map((r) => {
+    switch (side) {
+      case 'left': return { ...r, x: margin };
+      case 'right': return { ...r, x: 1 - margin - r.w };
+      case 'top': return { ...r, y: margin };
+      default: return { ...r, y: 1 - margin - r.h };
+    }
+  });
+}
+
+/** Empilha os retângulos de cima para baixo, na ordem visual (y, depois x),
+ *  com uma folga fixa entre eles, alinhados à margem. Quando a pilha estoura a
+ *  altura da página, começa uma coluna nova à direita — como o "Organizar" de
+ *  um editor de documentos. */
+export function organizeRects(
+  rects: Rect[], margin = 0.05, gap = 0.02, colStep = 0.45,
+): Rect[] {
+  if (!rects.length) return rects;
+  const order = rects
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => a.r.y - b.r.y || a.r.x - b.r.x);
+  const out = rects.slice();
+  let col = 0;
+  let y = margin;
+  for (const o of order) {
+    if (y + o.r.h > 1 - margin) {
+      col += 1;
+      y = margin;
+    }
+    const x = margin + col * colStep;
+    out[o.i] = clampRect({ ...o.r, x, y });
+    y += o.r.h + gap;
+  }
+  return out;
+}

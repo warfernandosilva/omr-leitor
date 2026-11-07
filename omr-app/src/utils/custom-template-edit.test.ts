@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  alignRects, clampRect, distributeRects, snapDelta,
+  alignRects, alignToMargin, clampRect, distributeRects, organizeRects, snapDelta,
 } from './custom-template-edit';
 
 const r = (x: number, y: number, w = 0.1, h = 0.05) => ({ x, y, w, h });
@@ -54,6 +54,55 @@ describe('distributeRects', () => {
   it('não mexe com dois elementos', () => {
     const two = [r(0.1, 0), r(0.6, 0)];
     expect(distributeRects(two, 'x')).toEqual(two);
+  });
+});
+
+describe('alignToMargin', () => {
+  it('ignora a seleção e alinha pela margem da página', () => {
+    const out = alignToMargin([r(0.6, 0.7, 0.2, 0.1), r(0.1, 0.2, 0.05, 0.05)], 'left', 0.05);
+    expect(out.map((o) => o.x)).toEqual([0.05, 0.05]);
+  });
+
+  it('à direita encosta na borda menos a margem', () => {
+    const out = alignToMargin([r(0, 0, 0.3, 0.1)], 'right', 0.06);
+    expect(out[0].x).toBeCloseTo(1 - 0.06 - 0.3);
+  });
+
+  it('topo e base também usam a margem', () => {
+    expect(alignToMargin([r(0, 0, 0.1, 0.2)], 'top', 0.04)[0].y).toBeCloseTo(0.04);
+    expect(alignToMargin([r(0, 0, 0.1, 0.2)], 'bottom', 0.04)[0].y).toBeCloseTo(0.96 - 0.2);
+  });
+});
+
+describe('organizeRects', () => {
+  it('empilha na ordem visual com folga fixa, a partir da margem', () => {
+    const out = organizeRects([r(0.5, 0.5, 0.1, 0.05), r(0.1, 0.1, 0.1, 0.05)], 0.05, 0.02);
+    expect(out[1].y).toBeCloseTo(0.05);          // o de cima primeiro
+    expect(out[0].y).toBeCloseTo(0.05 + 0.05 + 0.02);
+    expect(out.every((o) => o.x === 0.05)).toBe(true);
+  });
+
+  it('estourando a altura, começa uma coluna nova', () => {
+    const many = Array.from({ length: 12 }, (_, i) => r(0.1, (i * 3) / 100, 0.1, 0.08));
+    const out = organizeRects(many, 0.05, 0.02, 0.45);
+    expect(out.every((o) => o.y <= 1 - o.h + 1e-9)).toBe(true);
+    // pelo menos uma coluna diferente da primeira
+    expect(new Set(out.map((o) => o.x)).size).toBeGreaterThan(1);
+    // todas dentro da página
+    for (const o of out) {
+      expect(o.x).toBeGreaterThanOrEqual(0);
+      expect(o.x + o.w).toBeLessThanOrEqual(1 + 1e-9);
+    }
+  });
+
+  it('com um elemento só, apenas o posiciona na margem', () => {
+    const out = organizeRects([r(0.8, 0.9)], 0.05, 0.02);
+    expect(out[0].x).toBe(0.05);
+    expect(out[0].y).toBe(0.05);
+  });
+
+  it('lista vazia não estoura', () => {
+    expect(organizeRects([])).toEqual([]);
   });
 });
 
