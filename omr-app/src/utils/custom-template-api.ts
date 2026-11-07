@@ -709,6 +709,7 @@ export function emptyConfig(pageW: number, pageH: number): CustomConfig {
     qr: null,
     info_regions: [],
     questions: [],
+    idgrids: [],
     print_fields: [],
     omr_params: {},
   };

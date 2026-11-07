@@ -8,7 +8,7 @@ import {
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
   AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter,
-  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold,
+  Grid3x3, Magnet, Lock, Copy, Type, Minus, ImagePlus, Bold, Hash,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
@@ -24,7 +24,8 @@ import { syncExam } from '../utils/api';
 import { getExams } from '../utils/storage';
 import type { Exam } from '../types';
 import {
-  CustomAnchor, CustomBlock, CustomConfig, CustomElement, CustomInfoRegion, CustomPrintField, CustomQr,
+  CustomAnchor, CustomBlock, CustomConfig, CustomElement, CustomIdGrid, CustomInfoRegion,
+  CustomPrintField, CustomQr,
   CustomTemplateDetail, CustomTemplateSummary, CustomTestResult,
   PRINT_SOURCES, STATUS_LABEL, ValidationIssue, activateCustomTemplate,
   autoConfigureCustomTemplate, createCustomTemplate, customTemplateAsset, customTemplateImage,
@@ -46,8 +47,8 @@ import StatusBar from '../components/custom/StatusBar';
 import CardGeneratorForm from '../components/custom/CardGeneratorForm';
 import EditorShell from '../components/custom/EditorShell';
 
-type RegionType = 'anchor' | 'qr' | 'info' | 'block' | 'element';
-type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble' | 'text' | 'line';
+type RegionType = 'anchor' | 'qr' | 'info' | 'block' | 'element' | 'idgrid';
+type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble' | 'text' | 'line' | 'idgrid';
 type Selection = { kind: RegionType; id: string } | null;
 type Selected = { kind: RegionType; id: string };
 
@@ -354,7 +355,7 @@ function TemplateList({
 // ───────────────────────────────────────────────────────────────────────────
 
 type MoveItem =
-  | { kind: 'anchor' | 'qr' | 'info' | 'element'; id: string; orig: Rect }
+  | { kind: 'anchor' | 'qr' | 'info' | 'element' | 'idgrid'; id: string; orig: Rect }
   | { kind: 'block'; id: string; orig: { x: number; y: number } };
 
 type DragState =
@@ -618,7 +619,7 @@ function TemplateEditor({
   const dragRef = useRef<DragState | null>(null);
   const snapRef = useRef<CustomConfig | null>(null);
   const creatingRef = useRef<CreateBox | null>(null);
-  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info' | 'text' | 'line'; anchorType: 'aruco' | 'quad'; arucoId: number; anchorSize: number; page: number }>(
+  const createCtxRef = useRef<{ tool: 'anchor' | 'qr' | 'info' | 'text' | 'line' | 'idgrid'; anchorType: 'aruco' | 'quad'; arucoId: number; anchorSize: number; page: number }>(
     { tool: 'anchor', anchorType: 'quad', arucoId: 0, anchorSize: 0.05, page: 0 },
   );
   const pendingBlockRef = useRef<CustomBlock | null>(null);
@@ -716,9 +717,10 @@ function TemplateEditor({
         let h = Math.abs(c.y1 - c.y0) / baseH;
         if (w < 0.012 || h < 0.012) {
           // Texto/linha aceitam clique sem arrasto (tamanho padrão).
-          if (ctx.tool !== 'text' && ctx.tool !== 'line') return;
-          w = Math.max(w, ctx.tool === 'line' ? 0.3 : 0.2);
-          h = Math.max(h, ctx.tool === 'line' ? 0.004 : 0.05);
+          if (ctx.tool !== 'text' && ctx.tool !== 'line' && ctx.tool !== 'idgrid') return;
+          // A matrícula precisa de 10 linhas: clique simples dá um tamanho útil.
+          w = Math.max(w, ctx.tool === 'line' ? 0.3 : ctx.tool === 'idgrid' ? 0.25 : 0.2);
+          h = Math.max(h, ctx.tool === 'line' ? 0.004 : ctx.tool === 'idgrid' ? 0.16 : 0.05);
         }
         const rect: Rect = {
           x: Math.min(c.x0, c.x1) / baseW,
@@ -1632,7 +1634,7 @@ function TemplateEditor({
 // ───────────────────────────────────────────────────────────────────────────
 
 function buildCreate(
-  cfg: CustomConfig, region: 'anchor' | 'qr' | 'info' | 'text' | 'line', rect: Rect,
+  cfg: CustomConfig, region: 'anchor' | 'qr' | 'info' | 'text' | 'line' | 'idgrid', rect: Rect,
   anchorType: 'aruco' | 'quad', arucoId: number,
   anchorSize: number = 0.05,
   page: number = 0,
@@ -1659,6 +1661,16 @@ function buildCreate(
       selection: { kind: 'element', id: el.id },
     };
   }
+  if (region === 'idgrid') {
+    const grid: CustomIdGrid = {
+      id: `idg_${rnd()}`, page, ...rect,
+      digits: 8, radius: 0.014, shape: 'circle',
+    };
+    return {
+      config: { ...cfg, idgrids: [...(cfg.idgrids ?? []), grid] },
+      selection: { kind: 'idgrid', id: grid.id },
+    };
+  }
   const size = anchorSize;
   const anchor: CustomAnchor = {
     id: `anc_${rnd()}`, type: anchorType, corner: null,
@@ -1675,6 +1687,7 @@ function isLocked(cfg: CustomConfig, kind: RegionType, id: string): boolean {
   if (kind === 'qr') return !!cfg.qr?.locked;
   if (kind === 'info') return !!cfg.info_regions.find((r) => r.id === id)?.locked;
   if (kind === 'block') return !!cfg.questions.find((b) => b.id === id)?.locked;
+  if (kind === 'idgrid') return !!(cfg.idgrids ?? []).find((g) => g.id === id)?.locked;
   return !!(cfg.elements ?? []).find((e) => e.id === id)?.locked;
 }
 
@@ -1683,6 +1696,7 @@ function removeRegion(cfg: CustomConfig, kind: RegionType, id: string): CustomCo
   if (kind === 'qr') return { ...cfg, qr: null };
   if (kind === 'info') return { ...cfg, info_regions: cfg.info_regions.filter((r) => r.id !== id) };
   if (kind === 'element') return { ...cfg, elements: (cfg.elements ?? []).filter((e) => e.id !== id) };
+  if (kind === 'idgrid') return { ...cfg, idgrids: (cfg.idgrids ?? []).filter((g) => g.id !== id) };
   return { ...cfg, questions: cfg.questions.filter((b) => b.id !== id) };
 }
 
@@ -1695,6 +1709,10 @@ function rectOf(cfg: CustomConfig, kind: RegionType, id: string): Rect | null {
   if (kind === 'element') {
     const e = (cfg.elements ?? []).find((x) => x.id === id);
     return e ? { x: e.x, y: e.y, w: e.w, h: e.h } : null;
+  }
+  if (kind === 'idgrid') {
+    const g = (cfg.idgrids ?? []).find((x) => x.id === id);
+    return g ? { x: g.x, y: g.y, w: g.w, h: g.h } : null;
   }
   if (kind === 'anchor') {
     const a = cfg.anchors.find((x) => x.id === id);
@@ -1710,6 +1728,9 @@ function setRect(cfg: CustomConfig, kind: Exclude<RegionType, 'block'>, id: stri
   }
   if (kind === 'element') {
     return { ...cfg, elements: (cfg.elements ?? []).map((e) => (e.id === id ? { ...e, ...rect } : e)) };
+  }
+  if (kind === 'idgrid') {
+    return { ...cfg, idgrids: (cfg.idgrids ?? []).map((g) => (g.id === id ? { ...g, ...rect } : g)) };
   }
   return {
     ...cfg,
@@ -1784,6 +1805,7 @@ function Toolbar({
     { id: 'info', label: 'Info', icon: Info },
     { id: 'text', label: 'Texto', icon: Type },
     { id: 'line', label: 'Linha', icon: Minus },
+    { id: 'idgrid', label: 'ID do aluno', icon: Hash },
     { id: 'bubble', label: 'Ajustar bolhas', icon: Move },
   ];
   return (
@@ -1903,6 +1925,29 @@ function Toolbar({
 // Overlay SVG
 // ───────────────────────────────────────────────────────────────────────────
 
+/** Bolhas de uma matrícula (0..1): N colunas × 10 linhas (0–9), encostadas na
+ *  direita de cada coluna. Mesma conta de `expand_id_bubbles` no backend — se
+ *  as duas divergirem, o desenho e a leitura olham lugares diferentes. */
+export function idGridBubbles(g: CustomIdGrid): { digit: number; value: number; x: number; y: number }[] {
+  const digits = Math.max(1, Math.min(14, Math.round(g.digits || 8)));
+  const colW = g.w / digits;
+  const rowH = g.h / 10;
+  const r = g.radius || 0.014;
+  const inset = Math.min(r + 0.012, Math.max(0, colW - r));
+  const out: { digit: number; value: number; x: number; y: number }[] = [];
+  for (let c = 0; c < digits; c++) {
+    for (let v = 0; v < 10; v++) {
+      out.push({
+        digit: c + 1,
+        value: v,
+        x: g.x + c * colW + inset,
+        y: g.y + v * rowH + rowH / 2,
+      });
+    }
+  }
+  return out;
+}
+
 function OverlayRegions({
   config, show, selection, selected, zoom, tool, grid, guides, assetUrls,
   onSelect, onStartDrag, onStartResize, onStartBubbleDrag, onStartPageCorner,
@@ -1995,6 +2040,27 @@ function OverlayRegions({
                   fill="rgba(16,185,129,0.12)" stroke="#10b981" strokeWidth={isSel('info', i.id) ? stroke * 1.6 : stroke} />
             <text x={r.x * pw} y={r.y * ph - 3 / zoom} fontSize={11 / zoom} fill="#047857">{i.kind}</text>
             {isPrimary('info', i.id) && handlesFor('info', i.id, r)}
+          </g>
+        );
+      })}
+
+      {(config.idgrids ?? []).map((g) => {
+        const r: Rect = { x: g.x, y: g.y, w: g.w, h: g.h };
+        const rPx = (g.radius || 0.014) * ph;
+        return (
+          <g key={g.id} onPointerDown={(e) => onStartDrag(e, 'idgrid', g.id)}
+             style={{ cursor: g.locked ? 'not-allowed' : 'move' }}>
+            <rect x={r.x * pw} y={r.y * ph} width={r.w * pw} height={r.h * ph}
+                  fill="rgba(99,102,241,0.08)" stroke="#6366f1"
+                  strokeWidth={isSel('idgrid', g.id) ? stroke * 1.6 : stroke}
+                  strokeDasharray="4 2" />
+            {idGridBubbles(g).map((b) => (
+              <circle key={`${b.digit}-${b.value}`} cx={b.x * pw} cy={b.y * ph} r={rPx}
+                      fill="none" stroke="#4f46e5" strokeWidth={1.2 / zoom} pointerEvents="none" />
+            ))}
+            <text x={r.x * pw} y={r.y * ph - 3 / zoom} fontSize={11 / zoom} fill="#4338ca"
+                  pointerEvents="none">ID · {g.digits} dígitos</text>
+            {isPrimary('idgrid', g.id) && handlesFor('idgrid', g.id, r)}
           </g>
         );
       })}
@@ -2150,7 +2216,8 @@ function RegionalList({
     </div>
   );
   const empty = !config.anchors.length && !config.qr && !config.info_regions.length
-    && !config.questions.length && !(config.elements ?? []).length;
+    && !config.questions.length && !(config.idgrids ?? []).length
+    && !(config.elements ?? []).length;
   const Group = ({ title, children }: { title: string; children: ReactNode }) => (
     <section className="space-y-0.5">
       <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">{title}</p>
@@ -2186,6 +2253,14 @@ function RegionalList({
           {config.questions.map((b) => (
             <Item key={b.id} kind="block" id={b.id} color="#ef4444"
                   label={`Q${b.start_question}–Q${b.start_question + b.n_questions - 1} (${b.n_questions}×${b.labels.length})`} />
+          ))}
+        </Group>
+      )}
+      {(config.idgrids ?? []).length > 0 && (
+        <Group title={`Matrícula (${(config.idgrids ?? []).length})`}>
+          {(config.idgrids ?? []).map((g) => (
+            <Item key={g.id} kind="idgrid" id={g.id} color="#6366f1"
+                  label={`ID · ${g.digits} dígitos`} />
           ))}
         </Group>
       )}
@@ -2226,6 +2301,55 @@ function PropertiesPanel({
     return <p className="text-sm text-gray-500 dark:text-gray-400">Selecione uma região no cartão para editar as propriedades.</p>;
   }
   const { kind, id } = selection;
+
+  if (kind === 'idgrid') {
+    const g = (config.idgrids ?? []).find((x) => x.id === id);
+    if (!g) return null;
+    const upd = (patch: Partial<CustomIdGrid>) =>
+      updateField({ idgrids: (config.idgrids ?? []).map((x) => (x.id === id ? { ...x, ...patch } : x)) });
+    return (
+      <div className="space-y-2">
+        <p className="font-semibold text-sm">Matrícula · {g.digits} dígitos</p>
+        <div className="grid grid-cols-2 gap-2">
+          <PctInput id="p-idg-x" label="X (%)" value={g.x} onChange={(v) => upd({ x: v })} />
+          <PctInput id="p-idg-y" label="Y (%)" value={g.y} onChange={(v) => upd({ y: v })} />
+          <PctInput id="p-idg-w" label="Largura (%)" value={g.w} onChange={(v) => upd({ w: v })} />
+          <PctInput id="p-idg-h" label="Altura (%)" value={g.h} onChange={(v) => upd({ h: v })} />
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Dígitos" htmlFor="p-idg-digits">
+            <Input id="p-idg-digits" type="number" min={1} max={14} step={1} value={g.digits}
+                   onChange={(e) => upd({ digits: Math.max(1, Math.min(14, Number(e.target.value) || 8)) })} />
+          </Field>
+          <Field label="Formato" htmlFor="p-idg-shape">
+            <Select id="p-idg-shape" value={g.shape}
+                    onChange={(e) => upd({ shape: e.target.value as 'circle' | 'square' })}>
+              <option value="circle">Círculo</option>
+              <option value="square">Quadrado</option>
+            </Select>
+          </Field>
+        </div>
+        <Field label="Tamanho da bolha (%)" htmlFor="p-idg-r"
+               helper="Fração da altura da página (o mesmo dos blocos de questões).">
+          <Input id="p-idg-r" type="number" step={0.001} min={0.004} max={0.06}
+                 value={Number((g.radius * 100).toFixed(3))}
+                 onChange={(e) => {
+                   const pct = Number(e.target.value);
+                   upd({ radius: pct > 0 ? Math.max(0.004, Math.min(0.06, pct / 100)) : 0.014 });
+                 }} />
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={!!g.locked} onChange={(e) => upd({ locked: e.target.checked })} />
+          Travar posição
+        </label>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400">
+          Cada coluna é um dígito; as 10 bolhas de 0 a 9 são lidas de cima para
+          baixo. A leitura só devolve a matrícula quando <b>todos</b> os dígitos
+          estão marcados sem ambiguidade.
+        </p>
+      </div>
+    );
+  }
 
   if (kind === 'anchor') {
     const a = config.anchors.find((x) => x.id === id);
@@ -2602,6 +2726,7 @@ function ValidationPanel({ issues, warnings, onGoTo }: {
     if (id.startsWith('qr')) return 'qr';
     if (id.startsWith('info')) return 'info';
     if (id.startsWith('blk')) return 'block';
+    if (id.startsWith('idg')) return 'idgrid';
     return null;
   };
   return (
