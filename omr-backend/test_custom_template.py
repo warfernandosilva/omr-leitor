@@ -588,6 +588,25 @@ def test_api_sync_rejects_missing_or_inactive_custom_template(authed):
     client.delete(f"/api/custom-templates/{tid}")
 
 
+def test_api_sync_rejects_pending_editor_version(authed):
+    """Prova nova não vincula modelo ativo com edição ainda não ativada."""
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Edição pendente").json()["id"]
+    assert client.put(f"/api/custom-templates/{tid}", json={"config": _config()}).status_code == 200
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+    assert client.put(f"/api/custom-templates/{tid}",
+                      json={"config": _config_shifted(0.06)}).status_code == 200
+
+    r = client.post("/api/exams/sync", json={
+        "external_id": "ex-custom-pending",
+        "titulo": "Prova com edição pendente",
+        "custom_template_id": tid,
+    })
+    assert r.status_code == 400, r.text
+    assert "alterações não ativadas" in r.json()["detail"].lower()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
 def test_api_process_endpoint_with_custom_template(authed):
     client = authed
     r = _create(client, _png_bytes(_make_card({})), "Leitura custom")
@@ -628,6 +647,84 @@ def test_api_process_endpoint_with_custom_template(authed):
     assert r.status_code == 200, r.text
     assert r.json()["success"] is True
 
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_official_config_prefers_active_snapshot(authed, db_session):
+    """Leitura/impressão oficiais usam a versão ativada, não a edição atual."""
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Snapshot ativo").json()["id"]
+    assert client.put(f"/api/custom-templates/{tid}", json={"config": _config()}).status_code == 200
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+
+    # Grade “errada” gravada no editor, sem reativar: não pode mudar a leitura.
+    assert client.put(f"/api/custom-templates/{tid}",
+                      json={"config": _config_shifted(0.06)}).status_code == 200
+    detail = client.get(f"/api/custom-templates/{tid}").json()
+    assert detail["status"] == "ativo"
+    assert detail["pending_version"] is True
+
+    db = db_session()
+    try:
+        from models import CustomTemplate
+        from routers.custom_templates import official_config
+        tpl = db.get(CustomTemplate, tid)
+        assert tpl.config["questions"][0]["first_x"] == pytest.approx(B1_FX + 0.06)
+        cfg = official_config(db, tpl)
+        assert cfg["questions"][0]["first_x"] == pytest.approx(B1_FX)
+    finally:
+        db.close()
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_api_process_uses_active_version_after_editor_change(authed):
+    """Cartão já emitido continua lido pela versão que o gerou."""
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Leitura do snapshot").json()["id"]
+    assert client.put(f"/api/custom-templates/{tid}", json={"config": _config()}).status_code == 200
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+    assert client.put(f"/api/custom-templates/{tid}",
+                      json={"config": _config_shifted(0.06)}).status_code == 200
+
+    marks = {1: "C", 2: "A", 3: "D", 4: "B", 5: "A"}
+    filled = _make_card(marks)
+    r = client.post(
+        "/api/omr/process",
+        files={"file": ("foto.png", _png_bytes(filled), "image/png")},
+        data={"template": "custom", "custom_template_id": str(tid)},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["success"] is True, body
+    for q, letter in marks.items():
+        assert body["answers"][str(q)] == letter
+    client.delete(f"/api/custom-templates/{tid}")
+
+
+def test_print_uses_active_version_after_editor_change(authed, monkeypatch):
+    """Impressão também usa o snapshot ativado, não a grade editada no editor."""
+    import routers.custom_templates as rct
+
+    client = authed
+    tid = _create(client, _png_bytes(_make_card({})), "Impressão do snapshot").json()["id"]
+    assert client.put(f"/api/custom-templates/{tid}", json={"config": _config()}).status_code == 200
+    assert client.post(f"/api/custom-templates/{tid}/activate").status_code == 200
+    assert client.put(f"/api/custom-templates/{tid}",
+                      json={"config": _config_shifted(0.06)}).status_code == 200
+
+    captured: dict = {}
+    real_overlay = rct.render_overlay
+
+    def spy(cfg, base, **kwargs):
+        captured["cfg"] = cfg
+        return real_overlay(cfg, base, **kwargs)
+
+    monkeypatch.setattr(rct, "render_overlay", spy)
+    r = client.post(f"/api/custom-templates/{tid}/print-preview",
+                    json={"mode": "blank", "format": "PNG"})
+    assert r.status_code == 200, r.text
+    assert "cfg" in captured, "impressão deveria passar pela renderização do overlay"
+    assert captured["cfg"]["questions"][0]["first_x"] == pytest.approx(B1_FX)
     client.delete(f"/api/custom-templates/{tid}")
 
 

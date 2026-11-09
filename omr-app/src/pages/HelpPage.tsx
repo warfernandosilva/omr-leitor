@@ -13,7 +13,7 @@ const ITEMS: { icon: LucideIcon; title: string; body: string }[] = [
   {
     icon: BookOpen,
     title: 'Central de ajuda',
-    body: 'Fluxo recomendado: 1) cadastre a Turma e importe os alunos; 2) crie a Prova e o gabarito oficial; 3) gere os cartões em PDF e imprima; 4) faça a Nova leitura com os 4 cantos visíveis; 5) revise a fila de Revisões pendentes antes de exportar.',
+    body: 'Fluxo recomendado: 1) cadastre a Turma e importe os alunos; 2) crie a Prova e o gabarito oficial; 3) se for usar cartão próprio, importe a imagem ou crie do zero, valide, teste e ative o Gabarito Personalizado; 4) gere os cartões em PDF e imprima; 5) faça a Nova leitura mantendo as marcações do modelo visíveis — ArUco no padrão, quadrados nos SAE/SAEV, QRs no Herby, réguas no Simulado e âncoras/config do modelo no personalizado; 6) revise a fila de Revisões pendentes antes de exportar.',
   },
   {
     icon: PlayCircle,

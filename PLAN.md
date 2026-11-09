@@ -1,5 +1,8 @@
 # Plano: Migrar OMR para Python Backend + React Frontend
 
+> Nota: este é um plano histórico da migração. Para o fluxo funcional atual e as
+> regras de negócio revisadas, use [`docs/FLUXOS.md`](docs/FLUXOS.md).
+
 ## Arquitetura Final
 
 ```

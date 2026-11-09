@@ -1356,6 +1356,18 @@ function TemplateEditor({
         </div>
       </div>
 
+      {detail.pending_version && (
+        <div className="callout-warning flex items-start gap-2 text-xs">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
+          <p>
+            Há alterações no editor que ainda não foram ativadas. A leitura e a
+            impressão oficiais usam a versão <strong>{detail.version}</strong>.
+            Clique em <strong>Ativar nova versão</strong> antes de gerar cartões
+            com o layout atual.
+          </p>
+        </div>
+      )}
+
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-[250px_minmax(0,1fr)_320px] lg:overflow-hidden">
         {/* Painel esquerdo */}
         <div className="card space-y-3 lg:h-full lg:min-h-0 overflow-y-auto">

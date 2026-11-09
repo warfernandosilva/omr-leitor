@@ -119,6 +119,45 @@ def _template_dir(tid: int) -> Path:
     return d
 
 
+def _config_signature(cfg: dict) -> str:
+    """Assinatura estável da config, para detectar edição não ativada."""
+    return json.dumps(normalize_config(cfg or {}), sort_keys=True, ensure_ascii=False)
+
+
+def _with_page_size(cfg: dict, tpl: CustomTemplate, page: int = 0) -> dict:
+    """Config normalizada com `page_w/page_h` da imagem desta página.
+
+    Cada página pode ter a própria imagem — e portanto o próprio tamanho
+    canônico. Sem imagem própria, cai na imagem base.
+    """
+    cfg = normalize_config(cfg or {})
+    real = page_image_size(cfg, tpl.image_path, page)
+    if real is not None:
+        cfg["page_w"], cfg["page_h"] = real
+    return cfg
+
+
+def official_config(db: Session, tpl: CustomTemplate, page: int = 0) -> dict:
+    """Config usada para LEITURA e IMPRESSÃO oficial do cartão.
+
+    Regra de negócio: quando o modelo tem versão ativada, o snapshot dessa
+    versão é a fonte da verdade — editar o modelo no editor não pode mudar
+    a interpretação de cartões já emitidos. Sem versão ativada, cai na
+    configuração atual (caso de rascunho/validado em preparação).
+    """
+    cfg = tpl.config or {}
+    if tpl.version:
+        ver = db.scalar(
+            select(CustomTemplateVersion).where(
+                CustomTemplateVersion.template_id == tpl.id,
+                CustomTemplateVersion.version == tpl.version,
+            )
+        )
+        if ver is not None and ver.config:
+            cfg = ver.config
+    return _with_page_size(cfg, tpl, page)
+
+
 def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
     """Decodifica com correção EXIF + fallback Pillow (mesmo do main.py)."""
     try:
@@ -177,7 +216,7 @@ def _next_codigo(db: Session) -> str:
 
 
 def _summary(tpl: CustomTemplate) -> dict:
-    return {
+    d = {
         "id": tpl.id,
         "nome": tpl.nome,
         "version": tpl.version,
@@ -189,6 +228,14 @@ def _summary(tpl: CustomTemplate) -> dict:
         "created_at": tpl.created_at.isoformat() if tpl.created_at else None,
         "updated_at": tpl.updated_at.isoformat() if tpl.updated_at else None,
     }
+    # Resumo também precisa avisar que a versão ativa ainda não reflete o
+    # editor: a tela de prova usa este campo para não oferecer vínculo.
+    active = next((v for v in tpl.versions if v.version == tpl.version), None)
+    if active is not None:
+        d["pending_version"] = (
+            _config_signature(active.config) != _config_signature(tpl.config)
+        )
+    return d
 
 
 def _size_mismatch_issue(tpl: CustomTemplate) -> dict | None:
@@ -220,16 +267,13 @@ def _size_mismatch_issue(tpl: CustomTemplate) -> dict | None:
 
 
 def _config_for_read(tpl: CustomTemplate, page: int = 0) -> dict:
-    """Config pronta para leitura: `page_w/page_h` da imagem DESTA página.
+    """Config ATUAL para edição/teste no editor.
 
-    Cada página pode ter a própria imagem (e portanto o próprio tamanho
-    canônico); sem imagem própria, cai na base.
+    Diferente de `official_config`, esta não consulta o snapshot ativado: é o
+    que o usuário está vendo e ajustando antes de clicar em "Ativar nova
+    versão".
     """
-    cfg = normalize_config(tpl.config or {})
-    real = page_image_size(cfg, tpl.image_path, page)
-    if real is not None:
-        cfg["page_w"], cfg["page_h"] = real
-    return cfg
+    return _with_page_size(tpl.config or {}, tpl, page)
 
 
 def _image_issues(tpl: CustomTemplate) -> list[dict]:
@@ -818,7 +862,9 @@ def _render_pages(tpl: CustomTemplate, req: PrintRequest, db: Session,
     (códigos temporários para quem ainda não tem gabarito). `max_pages` limita
     a renderização (a contagem total é feita à parte em `_print_count`).
     """
-    cfg = tpl.config or {}
+    # Impressão é ato oficial: usa o snapshot ativado quando existir, para a
+    # folha impressa e a leitura falarem sempre da mesma configuração.
+    cfg = official_config(db, tpl)
     # Multi-página: cada cartão gera UMA folha por página do modelo. Cada
     # página usa a própria imagem (sem imagem própria, repete a base).
     npg = n_pages(cfg)

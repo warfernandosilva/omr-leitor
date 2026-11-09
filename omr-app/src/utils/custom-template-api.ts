@@ -174,6 +174,8 @@ export interface CustomTemplateSummary {
   };
   created_at: string | null;
   updated_at: string | null;
+  /** Existe versão ativada e o editor tem mudanças ainda não ativadas. */
+  pending_version?: boolean;
 }
 
 export interface ValidationIssue {

@@ -582,23 +582,20 @@ def _photo_total(template_used: str, qps: int, layout_mode: str) -> int:
 
 
 def _load_custom_config(db: Session, tid: int, user: User, page: int = 0) -> dict | None:
-    """Config normalizada do Gabarito Personalizado (com checagem de acesso)."""
+    """Config oficial do Gabarito Personalizado (com checagem de acesso).
+
+    Usa o snapshot da versão ativada quando existir: cartões já impressos não
+    podem mudar de interpretação porque o editor mexeu no modelo. O tamanho
+    canônico (`page_w/page_h`) sempre vem da imagem desta página.
+    """
     from models import CustomTemplate
-    from omr.custom_template import normalize_config, page_image_size
     tpl = db.get(CustomTemplate, tid)
     if tpl is None:
         return None
     if tpl.owner_id != user.id and user.role != "admin":
         return None
-    cfg = normalize_config(tpl.config or {})
-    # O arquivo é a fonte de verdade: `page_w/page_h` defasados mudam o
-    # aspecto canônico e degradam (ou desalinham) a leitura. As coordenadas
-    # são normalizadas, então corrigir só as dimensões é seguro. Cada página
-    # pode ter a própria imagem — e portanto o próprio tamanho canônico.
-    real = page_image_size(cfg, tpl.image_path, page)
-    if real is not None:
-        cfg["page_w"], cfg["page_h"] = real
-    return cfg
+    from routers.custom_templates import official_config
+    return official_config(db, tpl, page)
 
 
 def _custom_active_version_id(db: Session, av: "Avaliacao") -> int | None:
@@ -1353,6 +1350,16 @@ def sync_exam(req: ExamSyncRequest, db: Session = Depends(get_db), current_user:
         auth.require_owner_or_admin(tpl, current_user)
         if tpl.status != "ativo":
             raise HTTPException(status_code=400, detail="Gabarito personalizado não está ativo")
+        # Prova nova só pode apontar para a versão ATIVA em si: se o editor
+        # tem alterações não ativadas, o cartão oficial ainda é o snapshot e o
+        # vínculo precisaria ser feito após "Ativar nova versão".
+        active = next((v for v in tpl.versions if v.version == tpl.version), None)
+        from routers.custom_templates import _config_signature
+        if active is None or _config_signature(active.config) != _config_signature(tpl.config):
+            raise HTTPException(
+                status_code=400,
+                detail="Gabarito personalizado tem alterações não ativadas. Ative a nova versão antes de vincular a prova.",
+            )
         av.custom_template_id = tpl.id
     # Prova com Gabarito Personalizado ativo mantém o vínculo (não volta p/ nativo).
     av.template = "custom" if av.custom_template_id is not None else req.template

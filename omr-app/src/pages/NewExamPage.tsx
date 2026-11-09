@@ -60,7 +60,8 @@ export default function NewExamPage({ onNavigate }: Props) {
   const isSimulado = templateType === 'simulado';
   const isCustom = isSae || isColar || templateType === 'custom';
 const isCustomTemplate = templateType === 'custom';
-const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' || t.status === 'validado');
+  const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' && !t.pending_version);
+  const pendingCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' && t.pending_version);
   // SAEV é sempre dual 16+16 a 26+26 (como o padrão dual, não como SAE single)
   // Herby: dual 1+1 a 26+26 ou single 1..26 (metade esquerda do cartão)
   // Simulado: tabela única, sempre single e sempre 22 questões
@@ -426,15 +427,17 @@ const readyCustomTemplates = customTemplates.filter((t) => t.status === 'ativo' 
           {templateType === 'custom' && (
             readyCustomTemplates.length === 0 ? (
               <div className="callout-warning text-sm">
-                Nenhum Gabarito Personalizado ativo. Crie e ative um modelo em{' '}
+                {pendingCustomTemplates.length > 0
+                  ? 'Há Gabarito Personalizado ativo com alterações ainda não ativadas. Abra o modelo e clique em "Ativar nova versão" antes de vincular a esta prova.'
+                  : 'Nenhum Gabarito Personalizado ativo.'}{' '}
                 <button
                   type="button"
                   className="text-brand-600 hover:text-brand-700 dark:text-brand-200 underline"
                   onClick={() => onNavigate('custom-template')}
                 >
                   Gabarito personalizado
-                </button>{' '}
-                antes de vincular a esta prova.
+                </button>
+                {' '}antes de vincular a esta prova.
               </div>
             ) : (
               <>

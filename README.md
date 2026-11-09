@@ -109,6 +109,7 @@ omr-app/        # React + Vite + Tailwind, páginas Home/NewExam/Generate/Roster
 omr-backend/omr/ # template.py (1448×2048), detector.py (ArUco), reader.py (CLAHE+blur 35), grading.py
 omr-backend/routers/ # rotas por domínio (admin: backup/restore + usuários)
 omr-backend/backup.py # dump/restore JSON portátil (+ lápides anti-ressurreição)
+docs/FLUXOS.md        # fluxo funcional revisado + regras de negócio
 docker-compose*.yml / deploy-zimaos.ps1 / .github/workflows/  # deploy ZimaOS via GHCR
 start-omr.bat / iniciar.bat / iniciar-desktop.bat / build-desktop.bat
 ```
