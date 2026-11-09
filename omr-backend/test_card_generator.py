@@ -253,6 +253,13 @@ def test_spec_that_does_not_fit_raises():
 # API
 # ---------------------------------------------------------------------------
 
+def test_api_preview_requires_auth(client):
+    """A prévia usa o mesmo desenhista oficial — exige sessão."""
+    r = client.post("/api/custom-templates/generate-preview",
+                    json={"spec": {"n_questions": 20, "n_options": 4}})
+    assert r.status_code in (401, 403), r.text
+
+
 def test_api_preview_does_not_persist(authed):
     before = len(authed.get("/api/custom-templates").json()["templates"])
     r = authed.post("/api/custom-templates/generate-preview",

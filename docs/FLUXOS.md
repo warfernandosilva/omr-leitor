@@ -117,3 +117,7 @@ Regras oficiais:
   thresholds.
 - Fontes do editor de criação usam `pt`; a conversão para px depende do DPI do
   cartão.
+- A prévia do gerador de cartão (`/api/custom-templates/generate-preview`) não
+  grava nada, mas exige sessão porque usa o mesmo desenhista oficial.
+- Impressão por lista manual gera códigos temporários e não substitui o lote
+  oficial vinculado à prova.

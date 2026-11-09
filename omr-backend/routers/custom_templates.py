@@ -349,8 +349,12 @@ def _generated_or_400(spec: dict):
 
 
 @router.post("/api/custom-templates/generate-preview")
-def generate_preview(req: GenerateCardRequest):
-    """Prévia ao vivo: desenha o cartão e devolve imagem + avisos (não grava)."""
+def generate_preview(req: GenerateCardRequest, current_user: User = Depends(auth.get_current_user)):
+    """Prévia ao vivo: desenha o cartão e devolve imagem + avisos (não grava).
+
+    Não persiste nada, mas consome o mesmo desenhista do gerador oficial — por
+    isso exige sessão, como os demais endpoints do editor.
+    """
     card = _generated_or_400(req.spec)
     return {
         "ok": True,

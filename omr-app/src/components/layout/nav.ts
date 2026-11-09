@@ -103,7 +103,6 @@ export const VIEW_META: Record<AppView, { title: string; group: string }> = {
   pending: { title: 'Revisões pendentes', group: 'Correção OMR' },
   dashboard: { title: 'Resultados', group: 'Análises' },
   reports: { title: 'Relatórios', group: 'Análises' },
-  export: { title: 'Exportar', group: 'Análises' },
   lab: { title: 'Banco de testes OMR', group: 'Análises' },
   'view-result': { title: 'Detalhe da correção', group: 'Correção OMR' },
   settings: { title: 'Configurações', group: 'Sistema' },

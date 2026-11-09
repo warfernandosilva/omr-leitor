@@ -3092,10 +3092,17 @@ function PrintModal({ open, onClose, detailId }: { open: boolean; onClose: () =>
         <Field label="O que gerar" htmlFor="pr-mode">
           <Select id="pr-mode" value={mode} onChange={(e) => setMode(e.target.value as typeof mode)}>
             <option value="blank">Cartão em branco</option>
-            <option value="students">Cartões por aluno (lista)</option>
+            <option value="students">Cartões por aluno (lista manual)</option>
             <option value="avaliacao">Cartões da turma da prova (banco)</option>
           </Select>
         </Field>
+        {mode === 'students' && (
+          <div className="callout-info text-xs">
+            Lista manual não grava gabaritos oficiais no banco: os QR saem com
+            código temporário. Para leitura/correção vinculada à prova, use
+            “Cartões da turma da prova”.
+          </div>
+        )}
         {mode !== 'avaliacao' && (
           <Field label="Formato" htmlFor="pr-fmt">
             <Select id="pr-fmt" value={format} onChange={(e) => setFormat(e.target.value as typeof format)}>

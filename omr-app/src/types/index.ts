@@ -187,7 +187,6 @@ export type AppView =
   | 'pending'
   | 'dashboard'
   | 'reports'
-  | 'export'
   | 'lab'
   | 'view-result'
   | 'settings'
