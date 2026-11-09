@@ -247,16 +247,17 @@ function numOrUndefined(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Converte `font_mm` de modelos antigos no equivalente em px (dpi padrão do gerador). */
-function fontMmToPx(fontMm: number | undefined): number {
-  return Math.max(6, Math.round(((fontMm ?? 4) / 25.4) * 200));
+/** Converte `font_mm` de modelos antigos no equivalente em pontos (1 pt = 1/72"). */
+function fontMmToPt(fontMm: number | undefined): number {
+  return Math.max(4, Math.round(((fontMm ?? 4) / 25.4) * 72));
 }
 
 /**
- * Tamanho de fonte em px. Vazio = `auto`, que mantém o tamanho padrão do
- * gerador (derivado de mm), então modelos antigos continuam iguais.
+ * Tamanho da fonte em pontos tipográficos (pt). Vazio = `auto`, que mantém o
+ * tamanho padrão do gerador (derivado de mm), então modelos antigos continuam
+ * iguais.
  */
-function FontPxField({ label, value, onChange }: {
+function FontPtField({ label, value, onChange }: {
   label: string;
   value: number | undefined;
   onChange: (v: number | undefined) => void;
@@ -265,11 +266,11 @@ function FontPxField({ label, value, onChange }: {
     <div>
       <span className="mb-0.5 block text-[10px] text-gray-400">{label}</span>
       <Input
-        type="number" min={6} max={400} step={1}
+        type="number" min={4} max={200} step={0.5}
         className={COMPACT}
         value={value ?? ''}
         placeholder="auto"
-        aria-label={`Tamanho da fonte de ${label} em pixels`}
+        aria-label={`Tamanho da fonte de ${label} em pontos`}
         onChange={(e) => onChange(numOrUndefined(e.target.value))}
       />
     </div>
@@ -528,12 +529,13 @@ function ElementCard({
           />
           <div className="mb-2 grid grid-cols-2 gap-2">
             <div>
-              <span className="mb-0.5 block text-[10px] text-gray-400">Fonte (px)</span>
+              <span className="mb-0.5 block text-[10px] text-gray-400">Fonte (pt)</span>
               <Input
-                type="number" min={6} max={400} step={1}
-                value={element.font_px ?? fontMmToPx(element.font_mm)}
+                type="number" min={4} max={200} step={0.5}
+                value={element.font_pt ?? fontMmToPt(element.font_mm)}
                 className={COMPACT}
-                onChange={(e) => onChange({ font_px: numOrUndefined(e.target.value), font_mm: undefined }, `el-${index}-font`)}
+                aria-label="Tamanho da fonte do texto em pontos"
+                onChange={(e) => onChange({ font_pt: numOrUndefined(e.target.value), font_mm: undefined }, `el-${index}-font`)}
               />
             </div>
             <div>
@@ -713,30 +715,32 @@ function CardFontsPanel({
   mutate: (patch: Partial<CardSpec>, coalesce: string) => void;
 }) {
   return (
-    <Section title="Tamanho das fontes" hint="Em pixels da imagem do cartão; use auto para o padrão.">
+    <Section title="Tamanho das fontes" hint="Em pontos tipográficos (pt); use auto para o padrão.">
       <div className="grid grid-cols-2 gap-2">
-        <FontPxField label="Título" value={spec.title_font_px}
-                     onChange={(v) => mutate({ title_font_px: v }, 'font-title')} />
-        <FontPxField label="Subtítulo" value={spec.subtitle_font_px}
-                     onChange={(v) => mutate({ subtitle_font_px: v }, 'font-subtitle')} />
-        <FontPxField label="Escola" value={spec.school_font_px}
-                     onChange={(v) => mutate({ school_font_px: v }, 'font-school')} />
-        <FontPxField label="Professor(a)" value={spec.teacher_font_px}
-                     onChange={(v) => mutate({ teacher_font_px: v }, 'font-teacher')} />
-        <FontPxField label="Instruções" value={spec.instructions_font_px}
-                     onChange={(v) => mutate({ instructions_font_px: v }, 'font-instr')} />
-        <FontPxField label="Rótulos dos campos" value={spec.field_font_px}
-                     onChange={(v) => mutate({ field_font_px: v }, 'font-field')} />
-        <FontPxField label="Título dos blocos" value={spec.block_title_font_px}
-                     onChange={(v) => mutate({ block_title_font_px: v }, 'font-block-title')} />
-        <FontPxField label="Número das questões" value={spec.question_font_px}
-                     onChange={(v) => mutate({ question_font_px: v }, 'font-question')} />
-        <FontPxField label="Letras das alternativas" value={spec.label_font_px}
-                     onChange={(v) => mutate({ label_font_px: v }, 'font-label')} />
+        <FontPtField label="Título" value={spec.title_font_pt}
+                     onChange={(v) => mutate({ title_font_pt: v }, 'font-title')} />
+        <FontPtField label="Subtítulo" value={spec.subtitle_font_pt}
+                     onChange={(v) => mutate({ subtitle_font_pt: v }, 'font-subtitle')} />
+        <FontPtField label="Escola" value={spec.school_font_pt}
+                     onChange={(v) => mutate({ school_font_pt: v }, 'font-school')} />
+        <FontPtField label="Professor(a)" value={spec.teacher_font_pt}
+                     onChange={(v) => mutate({ teacher_font_pt: v }, 'font-teacher')} />
+        <FontPtField label="Instruções" value={spec.instructions_font_pt}
+                     onChange={(v) => mutate({ instructions_font_pt: v }, 'font-instr')} />
+        <FontPtField label="Rótulos dos campos" value={spec.field_font_pt}
+                     onChange={(v) => mutate({ field_font_pt: v }, 'font-field')} />
+        <FontPtField label="Título dos blocos" value={spec.block_title_font_pt}
+                     onChange={(v) => mutate({ block_title_font_pt: v }, 'font-block-title')} />
+        <FontPtField label="Número das questões" value={spec.question_font_pt}
+                     onChange={(v) => mutate({ question_font_pt: v }, 'font-question')} />
+        <FontPtField label="Letras das alternativas" value={spec.label_font_pt}
+                     onChange={(v) => mutate({ label_font_pt: v }, 'font-label')} />
       </div>
       <p className="text-[10px] text-gray-400">
         O valor <strong>auto</strong> mantém o tamanho padrão do gerador, calculado a
-        partir das bolhas — bom ponto de partida antes de ajustar no olho.
+        partir das bolhas — bom ponto de partida antes de ajustar no olho. Pontos são
+        a unidade do papel: 1 pt = 1/72 de polegada, então o texto sai do mesmo
+        tamanho na impressão, independente da resolução do cartão.
       </p>
     </Section>
   );
@@ -1062,7 +1066,7 @@ export default function CardGeneratorForm({
 
   const addElement = (kind: CardElementSpec['kind']) => {
     const base: CardElementSpec = kind === 'text'
-      ? { kind, text: 'Novo texto', x: 0.08, y: 0.12, w: 0.5, h: 0.05, font_mm: 4, align: 'left' }
+      ? { kind, text: 'Novo texto', x: 0.08, y: 0.12, w: 0.5, h: 0.05, font_pt: 11, align: 'left' }
       : { kind, x: 0.08, y: 0.5, w: 0.84, h: 0.006 };
     const newIndex = elements.length;
     mutate({ elements: [...elements, base] }, 'elements');

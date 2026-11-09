@@ -98,13 +98,21 @@ def _num(spec: dict, key: str, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def _px_font(spec: dict, key: str, fallback_px: float, lo: int = 6, hi: int = 400) -> int:
+def _px_font(spec: dict, key: str, fallback_px: float, dpi: float, lo: int = 6, hi: int = 400) -> int:
     """Tamanho da fonte em px da imagem.
 
-    A chave `*_font_px` (escolhida no editor) tem prioridade; sem ela usa o
-    default histórico derivado de milímetros, para modelos antigos não mudarem.
+    O editor grava em pontos (`*_font_pt`), a unidade tipográfica que não
+    depende da resolução; aqui converte para px pelo dpi do cartão. Sem a
+    chave em pt, aceita o px legado (`*_font_px`) e, por fim, o default
+    histórico derivado de milímetros — assim modelos antigos não mudam.
     """
-    raw = spec.get(key)
+    raw = spec.get(key + "_pt")
+    if raw is not None and not (isinstance(raw, str) and not raw.strip()):
+        try:
+            return max(lo, min(hi, int(round(float(raw) / 72.0 * dpi))))
+        except (TypeError, ValueError):
+            pass
+    raw = spec.get(key + "_px")
     if raw is not None and not (isinstance(raw, str) and not raw.strip()):
         try:
             return max(lo, min(hi, int(round(float(raw)))))
@@ -284,13 +292,13 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     pil = _PIL(img)
     draw = _draw(pil)
 
-    title_px = _px_font(s, "title_font_px", mm2px(6.0))
-    sub_px = _px_font(s, "subtitle_font_px", mm2px(3.6))
-    school_px = _px_font(s, "school_font_px", mm2px(3.6))
-    teacher_px = _px_font(s, "teacher_font_px", mm2px(2.6))
-    field_px = _px_font(s, "field_font_px", mm2px(3.2))
-    instr_px = _px_font(s, "instructions_font_px", mm2px(2.6))
-    block_title_px = _px_font(s, "block_title_font_px", mm2px(2.6))
+    title_px = _px_font(s, "title_font", mm2px(6.0), dpi)
+    sub_px = _px_font(s, "subtitle_font", mm2px(3.6), dpi)
+    school_px = _px_font(s, "school_font", mm2px(3.6), dpi)
+    teacher_px = _px_font(s, "teacher_font", mm2px(2.6), dpi)
+    field_px = _px_font(s, "field_font", mm2px(3.2), dpi)
+    instr_px = _px_font(s, "instructions_font", mm2px(2.6), dpi)
+    block_title_px = _px_font(s, "block_title_font", mm2px(2.6), dpi)
     title_font = load_font(title_px)
     sub_font = load_font(sub_px)
     school_font = load_font(school_px)
@@ -528,8 +536,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             col_pitch = col_w + col_gap
             r = d / 2
             outline_b = max(3, int(round(d * 0.09)))
-            label_font = load_font(_px_font(s, "label_font_px", max(9, int(d * 0.55))))
-            number_font = load_font(_px_font(s, "question_font_px", max(8, int(d * 0.55))))
+            label_font = load_font(_px_font(s, "label_font", max(9, int(d * 0.55)), dpi))
+            number_font = load_font(_px_font(s, "question_font", max(8, int(d * 0.55)), dpi))
 
             for col in range(cols):
                 for i, label in enumerate(labels_b):
@@ -693,8 +701,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             col_pitch = col_w + col_gap
             r = d / 2
             outline_b = max(3, int(round(d * 0.09)))
-            label_font = load_font(_px_font(s, "label_font_px", max(9, int(d * 0.55))))
-            number_font = load_font(_px_font(s, "question_font_px", max(8, int(d * 0.55))))
+            label_font = load_font(_px_font(s, "label_font", max(9, int(d * 0.55)), dpi))
+            number_font = load_font(_px_font(s, "question_font", max(8, int(d * 0.55)), dpi))
 
             for col in range(cols):
                 for i, label in enumerate(labels_b):
@@ -781,8 +789,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
 
         r = d / 2
         outline = max(3, int(round(d * 0.09)))
-        label_font = load_font(_px_font(s, "label_font_px", max(9, int(d * 0.55))))
-        number_font = load_font(_px_font(s, "question_font_px", max(8, int(d * 0.55))))
+        label_font = load_font(_px_font(s, "label_font", max(9, int(d * 0.55)), dpi))
+        number_font = load_font(_px_font(s, "question_font", max(8, int(d * 0.55)), dpi))
         col_pitch = col_w + col_gap
 
         # Letras das alternativas no topo de cada coluna.
@@ -862,7 +870,7 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         except (TypeError, ValueError):
             font_mm = 4.0
         # `font_px` (editado no painel) tem prioridade sobre `font_mm`.
-        font_px = _px_font(e, "font_px", mm2px(font_mm))
+        font_px = _px_font(e, "font", mm2px(font_mm), dpi)
         x_px, y_px = ex * pw, ey * ph
         w_px, h_px = ew * pw, eh * ph
         fill = (40, 40, 40)

@@ -142,10 +142,10 @@ def test_decorative_elements_are_kept_in_config():
     assert ct.config_summary(card.config)["n_elements"] == 2
 
 
-# ── Tamanhos de fonte em px ────────────────────────────────────────────────
+# ── Tamanhos de fonte em pontos (pt) ────────────────────────────────────────
 
-def test_font_px_keys_override_defaults():
-    """`*_font_px` do editor mandam no tamanho da fonte do cartão."""
+def test_font_pt_keys_override_defaults():
+    """`*_font_pt` do editor mandam no tamanho da fonte do cartão."""
     base = {"n_questions": 5, "title": "T", "subtitle": "S",
             "instructions": "Instrua", "school": "Escola", "teacher": "Prof",
             "fields": ["student_name"]}
@@ -153,44 +153,61 @@ def test_font_px_keys_override_defaults():
     default_card = generate_card(base)
     assert default_card.config["print_fields"][0]["font_size"] == 25
 
-    # O rótulo dos campos segue `field_font_px`.
-    card_field = generate_card({**base, "field_font_px": 50})
+    # O rótulo dos campos segue `field_font_pt` (18 pt a 200 dpi = 50 px).
+    card_field = generate_card({**base, "field_font_pt": 18})
     assert card_field.config["print_fields"][0]["font_size"] == 50
 
     # Os demais tamanhos não quebram a validação nem mudam os campos.
-    with_px = generate_card({
+    with_pt = generate_card({
         **base,
-        "title_font_px": 90,
-        "subtitle_font_px": 70,
-        "school_font_px": 65,
-        "teacher_font_px": 60,
-        "instructions_font_px": 55,
-        "question_font_px": 48,
-        "label_font_px": 46,
+        "title_font_pt": 32,
+        "subtitle_font_pt": 25,
+        "school_font_pt": 23,
+        "teacher_font_pt": 22,
+        "instructions_font_pt": 20,
+        "question_font_pt": 17,
+        "label_font_pt": 16,
     })
-    assert not ct.has_errors(ct.validate_config(with_px.config))
-    assert with_px.config["print_fields"][0]["font_size"] == 25
+    assert not ct.has_errors(ct.validate_config(with_pt.config))
+    assert with_pt.config["print_fields"][0]["font_size"] == 25
 
 
-def test_font_px_is_clamped_when_out_of_range():
-    """Valores fora da faixa são limitados em 6..400 px."""
-    clamped = generate_card({"n_questions": 5, "field_font_px": 99999,
+def test_font_pt_is_clamped_when_out_of_range():
+    """Valores fora da faixa são limitados em 6..400 px equivalentes."""
+    clamped = generate_card({"n_questions": 5, "field_font_pt": 99999,
                              "fields": ["student_name"]})
     assert clamped.config["print_fields"][0]["font_size"] == 400
 
-    tiny = generate_card({"n_questions": 5, "field_font_px": 1,
+    tiny = generate_card({"n_questions": 5, "field_font_pt": 1,
                           "fields": ["student_name"]})
     assert tiny.config["print_fields"][0]["font_size"] == 6
 
 
-def test_element_font_px_wins_over_font_mm():
-    """`font_px` do elemento tem prioridade sobre `font_mm` legado."""
-    by_px = generate_card({
+def test_font_pt_honors_card_dpi():
+    """O mesmo pt rende px diferente conforme o dpi do cartão."""
+    low = generate_card({"n_questions": 5, "field_font_pt": 18, "dpi": 96,
+                         "fields": ["student_name"]})
+    high = generate_card({"n_questions": 5, "field_font_pt": 18, "dpi": 400,
+                          "fields": ["student_name"]})
+    assert low.config["print_fields"][0]["font_size"] == 24   # 18/72*96
+    assert high.config["print_fields"][0]["font_size"] == 100  # 18/72*400
+
+
+def test_legacy_font_px_still_applies():
+    """Modelos gravados em px continuam sendo lidos como px."""
+    legacy = generate_card({"n_questions": 5, "field_font_px": 50,
+                             "fields": ["student_name"]})
+    assert legacy.config["print_fields"][0]["font_size"] == 50
+
+
+def test_element_font_pt_wins_over_font_mm():
+    """`font_pt` do elemento tem prioridade sobre `font_mm` legado."""
+    by_pt = generate_card({
         "n_questions": 5,
         "elements": [{"kind": "text", "text": "x", "x": 0.1, "y": 0.9,
-                      "w": 0.5, "h": 0.04, "font_mm": 4, "font_px": 80}],
+                      "w": 0.5, "h": 0.04, "font_mm": 4, "font_pt": 29}],
     })
-    assert by_px.config["elements"][0]["font_size"] == 80
+    assert by_pt.config["elements"][0]["font_size"] == 81  # 29 pt a 200 dpi
 
     by_mm = generate_card({
         "n_questions": 5,
