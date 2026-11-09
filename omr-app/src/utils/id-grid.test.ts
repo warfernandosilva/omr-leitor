@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomIdGrid } from './custom-template-api';
-import { idGridBubbles } from '../pages/CustomTemplatePage';
+import { idGridBubbles } from './id-grid';
 
 const grid = (over: Partial<CustomIdGrid> = {}): CustomIdGrid => ({
   id: 'idg_1', x: 0.1, y: 0.2, w: 0.4, h: 0.2,
