@@ -58,6 +58,8 @@ import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import ReadStages from '../components/omr/ReadStages';
+import CaptureViewport from '../components/correct/CaptureViewport';
+import ReaderSettingsPanel from '../components/correct/ReaderSettingsPanel';
 import { anchorLabelFor } from '../utils/read-stages';
 import { findStudentMatches, mergeStudentOptions, StudentOption } from '../utils/alunos';
 
@@ -2374,122 +2376,24 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           </div>
 
           {/* visor full-bleed: preenche o espaço entre a instrução e a barra */}
-          <div
-            ref={viewRef}
-            onClick={handleViewTap}
-            className="relative min-h-0 w-full flex-1 overflow-hidden bg-black"
-          >
-            <video ref={videoRef} autoPlay playsInline muted className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
-            {/* chip do modelo da prova */}
-            {autoMode && !confirmUrl && (
-              <span className="absolute top-2 left-2 z-10 text-[11px] font-semibold text-white bg-black/55 rounded-full px-2.5 py-1 pointer-events-none">
-                {examModelLabel}
-              </span>
-            )}
-            {/* ajustes ficam no header (ícone) e no sheet; visor limpo como na referência */}
-            {/* grade regra-dos-terços (composição) */}
-            {showThirds && autoMode && !confirmUrl && (
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none" aria-hidden>
-                {[100 / 3, 200 / 3].map(v => (
-                  <g key={v} stroke="rgba(255,255,255,0.45)" strokeWidth="0.4">
-                    <line x1={v} y1="0" x2={v} y2="100" />
-                    <line x1="0" y1={v} x2="100" y2={v} />
-                  </g>
-                ))}
-              </svg>
-            )}
-            {/* guia A4 calculado para o visor + alvos das âncoras do modelo (0..100) */}
-            {autoMode && !confirmUrl && (
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 w-full h-full pointer-events-none">
-                {/* scrim: escurece fora do guia para dar contraste em mesa clara */}
-                <path
-                  d={`M0,0 H100 V100 H0 Z M${guide.x},${guide.y} H${guide.x + guide.w} V${guide.y + guide.h} H${guide.x} Z`}
-                  fill="rgba(0,0,0,0.5)"
-                  fillRule="evenodd"
-                />
-                {/* moldura do guia — verde ao travar */}
-                <rect
-                  x={guide.x} y={guide.y} width={guide.w} height={guide.h} fill="none" rx="1"
-                  stroke={frameAnalysis?.locked ? '#22c55e' : 'rgba(255,255,255,0.9)'}
-                  strokeWidth="0.8"
-                />
-                {/* cantoneiras grossas do guia */}
-                {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
-                  const gx = k === 'TL' || k === 'BL' ? guide.x : guide.x + guide.w;
-                  const gy = k === 'TL' || k === 'TR' ? guide.y : guide.y + guide.h;
-                  const sx = k === 'TL' || k === 'BL' ? 1 : -1;
-                  const sy = k === 'TL' || k === 'TR' ? 1 : -1;
-                  const L = 9;
-                  const c = frameAnalysis?.locked ? '#22c55e' : '#ffffff';
-                  return (
-                    <g key={k} stroke={c} strokeWidth="1.8" strokeLinecap="round">
-                      <line x1={gx} y1={gy} x2={gx + sx * L} y2={gy} />
-                      <line x1={gx} y1={gy} x2={gx} y2={gy + sy * L} />
-                    </g>
-                  );
-                })}
-                {/* 🎯 alvos: onde as 4 âncoras do modelo devem cair */}
-                {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
-                  const p = anchorTargets[k];
-                  const c = frameAnalysis?.locked ? '#22c55e' : '#fbbf24';
-                  return (
-                    <g key={`t-${k}`} stroke={c} strokeWidth="0.9" fill="none" opacity="0.95">
-                      <circle cx={p.x} cy={p.y} r="2.4" />
-                      <circle cx={p.x} cy={p.y} r="0.4" fill={c} stroke="none" />
-                    </g>
-                  );
-                })}
-                {/* cantoneiras detectadas nos cantos reais do cartão */}
-                {(['TL', 'TR', 'BR', 'BL'] as const).map(k => {
-                  const p = frameAnalysis?.corners[k];
-                  if (!p) return null;
-                  const ok = frameAnalysis?.locked;
-                  const x = p.x * 100, y = p.y * 100;
-                  const c = ok ? '#22c55e' : '#fbbf24';
-                  const L = 6;
-                  const sx = k === 'TL' || k === 'BL' ? 1 : -1;
-                  const sy = k === 'TL' || k === 'TR' ? 1 : -1;
-                  return (
-                    <g key={k} stroke={c} strokeWidth="1.2" strokeLinecap="round">
-                      <line x1={x} y1={y} x2={x + sx * L} y2={y} />
-                      <line x1={x} y1={y} x2={x} y2={y + sy * L} />
-                    </g>
-                  );
-                })}
-              </svg>
-            )}
-            {/* prévia congelada aguardando confirmação */}
-            {confirmUrl && (
-              <img src={confirmUrl} alt="Prévia travada" className="absolute inset-0 w-full h-full object-cover" />
-            )}
-            {/* flash do obturador ao travar */}
-            {flashOn && (
-              <div className="absolute inset-0 bg-white pointer-events-none" />
-            )}
-            {!autoMode && (
-              <div className="absolute inset-4 border-2 border-dashed border-white/60 rounded-lg pointer-events-none" />
-            )}
-            {/* dica de enquadramento difícil: chip sobre o visor */}
-            {autoMode && !confirmUrl && searchSecs >= 8 && !frameAnalysis?.locked && (
-              <p className="absolute inset-x-3 bottom-12 z-10 rounded-lg border border-amber-300/40 bg-black/60 px-2 py-1.5 text-center text-[11px] text-amber-100 pointer-events-none">
-                Enquadramento difícil? Toque no <strong>obturador</strong> para forçar a captura.
-              </p>
-            )}
-            {/* status da captura automática: overlay fino no rodapé do visor */}
-            {autoMode && !confirmUrl && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 px-3 pb-2">
-                <div className="flex items-center justify-between gap-2 text-[11px] leading-tight">
-                  <span className={frameAnalysis?.locked ? 'font-medium text-emerald-300' : 'text-white/90'}>
-                    {sharpRetry ?? (frameAnalysis ? frameAnalysis.hint : 'Apontando a câmera...')}
-                  </span>
-                  <span className="shrink-0 tabular-nums text-white/70">{frameAnalysis ? `${frameAnalysis.found}/4 cantos` : ''}</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/20">
-                  <div className="h-1.5 rounded-full bg-emerald-400 transition-all duration-150" style={{ width: `${Math.round(lockProgress * 100)}%` }} />
-                </div>
-              </div>
-            )}
-          </div>
+          <CaptureViewport
+            videoRef={videoRef}
+            viewRef={viewRef}
+            canvasRef={canvasRef}
+            onViewTap={handleViewTap}
+            autoMode={autoMode}
+            confirmUrl={confirmUrl}
+            showThirds={showThirds}
+            examModelLabel={examModelLabel}
+            guide={guide}
+            anchorTargets={anchorTargets}
+            frameAnalysis={frameAnalysis}
+            searchSecs={searchSecs}
+            sharpRetry={sharpRetry}
+            lockProgress={lockProgress}
+            flashOn={flashOn}
+          />
+
           {/* sheet Ajustes: bottom-sheet no celular, painel lateral no desktop (tema escuro) */}
           {showAdjust && !confirmUrl && (
             <>
@@ -2719,59 +2623,21 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         document.body,
       )}
 
-      {settingsOpen && createPortal(
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-4 space-y-3">
-            <h3 className="font-bold text-lg">Configurações de detecção (globais)</h3>
-            <p className="text-xs text-gray-500">Valores vazios usam o padrão do modelo.</p>
-            {[
-              { key: 'floor', label: 'Piso (floor)', step: 0.01 },
-              { key: 'margin', label: 'Margem (margin)', step: 0.01 },
-              { key: 'low_conf_threshold', label: 'Limiar baixa confiança', step: 0.01 },
-              { key: 'clahe_clip', label: 'CLAHE clip', step: 0.1 },
-            ].map(({ key, label, step }) => (
-              <div key={key} className="flex items-center gap-2">
-                <label className="text-sm flex-1">{label}</label>
-                <input
-                  type="number"
-                  step={step}
-                  className="border rounded px-2 py-1 w-24 text-sm"
-                  value={String(globalSettings[key] ?? '')}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setGlobalSettings((s) => {
-                      const next = { ...s };
-                      if (v === '') delete next[key];
-                      else next[key] = Number(v);
-                      return next;
-                    });
-                  }}
-                />
-              </div>
-            ))}
-            <div className="flex gap-2 justify-end pt-2">
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => setSettingsOpen(false)}
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={() => {
-                  localStorage.setItem('omr_global_settings', JSON.stringify(globalSettings));
-                  setSettingsOpen(false);
-                }}
-              >
-                Salvar
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
+      <ReaderSettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        values={globalSettings}
+        onChange={(key, value) => setGlobalSettings((prev) => {
+          const next = { ...prev };
+          if (value === undefined) delete next[key];
+          else next[key] = value;
+          return next;
+        })}
+        onSave={() => {
+          localStorage.setItem('omr_global_settings', JSON.stringify(globalSettings));
+          setSettingsOpen(false);
+        }}
+      />
 
       {batchOpen && createPortal(
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
