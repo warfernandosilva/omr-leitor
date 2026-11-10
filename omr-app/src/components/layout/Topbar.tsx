@@ -151,17 +151,17 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
   const contextExam = examId ? exams.find((e) => e.id === examId) : undefined;
 
   return (
-    <header className="sticky top-0 z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur border-b border-line dark:border-gray-800">
+    <header className="sticky top-0 z-30 glass border-b border-line dark:border-gray-800">
       <div className="flex items-center gap-2 md:gap-3 px-4 py-2.5">
         <button onClick={onOpenMenu} className="btn-icon lg:hidden" aria-label="Abrir menu">
           <Menu size={20} />
         </button>
         <div className="flex-1 min-w-0 py-0.5">
-          <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 leading-none truncate">{meta.group}</p>
-          <p className="text-[15px] font-bold text-ink dark:text-white leading-tight truncate">
+          <p className="text-[11px] font-medium text-[#71809A] dark:text-gray-400 leading-none truncate">{meta.group}</p>
+          <p className="text-[15px] font-bold text-[#172B4D] dark:text-white leading-tight truncate">
             {meta.title}
             {contextExam ? (
-              <span className="font-medium text-gray-500 dark:text-gray-400"> · {contextExam.name}</span>
+              <span className="font-medium text-[#71809A] dark:text-gray-400"> · {contextExam.name}</span>
             ) : null}
           </p>
         </div>
@@ -247,6 +247,10 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
           panelClassName="w-[240px]"
           trigger={
             <>
+              <span className="hidden md:flex flex-col items-end leading-tight mr-1 min-w-0">
+                <span className="max-w-[140px] truncate text-[13px] font-semibold text-[#172B4D] dark:text-white">{userName}</span>
+                <span className="text-[11px] text-[#71809A] dark:text-gray-400">{user?.role === 'admin' ? 'Administrador' : 'Professor'}</span>
+              </span>
               <Avatar name={userName} size="sm" />
               <ChevronDown size={14} className="text-gray-400 hidden sm:block" aria-hidden />
             </>

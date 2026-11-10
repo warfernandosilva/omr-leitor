@@ -6,6 +6,7 @@ import EmptyState from '../components/ui/EmptyState';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
+import Pagination from '../components/ui/Pagination';
 import { getResults, getExams, deleteResult } from '../utils/storage';
 import { downloadCSV, downloadXLSX, downloadSaevCsv, examsWithRemoteFallback } from '../utils/export';
 import { computeSubjectStats } from '../utils/exam';
@@ -47,6 +48,8 @@ export default function ResultsPage({ onNavigate }: Props) {
   const [filterExamId, setFilterExamId] = useState('');
   const [filterTurmaId, setFilterTurmaId] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'name' | 'grade'>('date');
+  const [page, setPage] = useState(1);
+  const pageSize = 20;
 
   const reloadDbResults = () => {
     setDbError(null);
@@ -67,6 +70,10 @@ export default function ResultsPage({ onNavigate }: Props) {
     if (!mergedMap.has(key)) mergedMap.set(key, r);
   }
   const allResults = Array.from(mergedMap.values());
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, filterExamId, filterTurmaId, sortBy, allResults.length]);
 
   const examById = useMemo(
     () => new Map(examsWithRemoteFallback(exams, dbResults).map(e => [e.id, e])),
@@ -95,6 +102,10 @@ export default function ResultsPage({ onNavigate }: Props) {
       if (sortBy === 'grade') return b.grade - a.grade;
       return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
     });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const pagedResults = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   const handleExportCSV = () => downloadCSV(filtered, examsForExport);
   const handleExportXLSX = () => downloadXLSX(filtered, examsForExport);
@@ -127,7 +138,7 @@ export default function ResultsPage({ onNavigate }: Props) {
   };
 
   return (
-    <div className="animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Resultados"
         subtitle={`${filtered.length} resultado(s) encontrado(s)`}
@@ -202,58 +213,61 @@ export default function ResultsPage({ onNavigate }: Props) {
           description={allResults.length === 0 ? 'Corrija cartões-resposta para ver os resultados aqui.' : 'Tente ajustar os filtros de busca.'}
         />
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line dark:border-gray-700">
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Aluno</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400 hidden sm:table-cell">Prova</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">Data/Hora</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">✓</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">✗</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">—</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Nota</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400 hidden lg:table-cell">LP</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400 hidden lg:table-cell">MAT</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => {
-                const exam = examById.get(r.examId);
-                const subjectStats = exam?.answerKey ? computeSubjectStats(exam, r.answers, r.duplicateQuestions ?? []) : null;
-                return (
-                  <tr key={r.id} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
-                    <td className="py-3 px-3 font-medium text-ink dark:text-gray-100">{r.studentName}</td>
-                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400 hidden sm:table-cell">{exam?.name || '—'}</td>
-                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400 text-xs hidden md:table-cell">
-                      {new Date(r.timestamp).toLocaleString('pt-BR')}
-                    </td>
-                    <td className="py-3 px-3 text-center text-success-600 dark:text-success-100 font-medium tabular-nums">{r.correctCount}</td>
-                    <td className="py-3 px-3 text-center text-danger-600 dark:text-danger-100 font-medium tabular-nums">{r.incorrectCount}</td>
-                    <td className="py-3 px-3 text-center text-gray-500 dark:text-gray-400 tabular-nums">{r.blankCount}</td>
-                    <td className="py-3 px-3 text-center font-bold text-brand-600 dark:text-brand-200 tabular-nums">{r.grade}</td>
-                    <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 hidden lg:table-cell">
-                      {subjectStats ? `${subjectStats.lp.correctCount}/${exam?.questionsPerSubject}` : '—'}
-                    </td>
-                    <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 hidden lg:table-cell">
-                      {subjectStats ? `${subjectStats.mat.correctCount}/${exam?.questionsPerSubject}` : '—'}
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <div className="flex gap-1 justify-center">
-                        <Button size="sm" variant="secondary" onClick={() => onNavigate('view-result', r.id)}>
-                          Ver
-                        </Button>
-                        <Button size="sm" variant="danger" onClick={() => handleDelete(r.id)} icon={<Trash2 size={14} aria-hidden />}>
-                          Excluir
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="table-shell">
+          <div className="table-scroll max-h-[calc(100vh-260px)] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 z-10 bg-[#F8FAFF] dark:bg-gray-800">
+                <tr className="border-b border-line dark:border-gray-700">
+                  <th className="table-th">Aluno</th>
+                  <th className="table-th hidden sm:table-cell">Prova</th>
+                  <th className="table-th hidden md:table-cell">Data/Hora</th>
+                  <th className="table-th text-center">✓</th>
+                  <th className="table-th text-center">✗</th>
+                  <th className="table-th text-center">—</th>
+                  <th className="table-th text-center">Nota</th>
+                  <th className="table-th text-center hidden lg:table-cell">LP</th>
+                  <th className="table-th text-center hidden lg:table-cell">MAT</th>
+                  <th className="table-th text-center">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pagedResults.map((r) => {
+                  const exam = examById.get(r.examId);
+                  const subjectStats = exam?.answerKey ? computeSubjectStats(exam, r.answers, r.duplicateQuestions ?? []) : null;
+                  return (
+                    <tr key={r.id} className="border-b border-line/60 dark:border-gray-800 hover:bg-[#F8FAFF] dark:hover:bg-gray-800/60">
+                      <td className="table-td font-medium text-[#172B4D] dark:text-gray-100">{r.studentName}</td>
+                      <td className="table-td text-[#71809A] dark:text-gray-400 hidden sm:table-cell">{exam?.name || '—'}</td>
+                      <td className="table-td text-[#71809A] dark:text-gray-400 text-xs hidden md:table-cell">
+                        {new Date(r.timestamp).toLocaleString('pt-BR')}
+                      </td>
+                      <td className="table-td text-center text-success-600 dark:text-success-100 font-medium tabular-nums">{r.correctCount}</td>
+                      <td className="table-td text-center text-danger-600 dark:text-danger-100 font-medium tabular-nums">{r.incorrectCount}</td>
+                      <td className="table-td text-center text-[#71809A] dark:text-gray-400 tabular-nums">{r.blankCount}</td>
+                      <td className="table-td text-center font-bold text-brand-600 dark:text-brand-200 tabular-nums">{r.grade}</td>
+                      <td className="table-td text-center text-[#71809A] dark:text-gray-300 hidden lg:table-cell">
+                        {subjectStats ? `${subjectStats.lp.correctCount}/${exam?.questionsPerSubject}` : '—'}
+                      </td>
+                      <td className="table-td text-center text-[#71809A] dark:text-gray-300 hidden lg:table-cell">
+                        {subjectStats ? `${subjectStats.mat.correctCount}/${exam?.questionsPerSubject}` : '—'}
+                      </td>
+                      <td className="table-td text-center">
+                        <div className="flex gap-1 justify-center">
+                          <Button size="sm" variant="secondary" onClick={() => onNavigate('view-result', r.id)}>
+                            Ver
+                          </Button>
+                          <Button size="sm" variant="danger" onClick={() => handleDelete(r.id)} icon={<Trash2 size={14} aria-hidden />}>
+                            Excluir
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onChange={setPage} />}
         </div>
       )}
     </div>

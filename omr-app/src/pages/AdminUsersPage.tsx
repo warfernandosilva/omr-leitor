@@ -123,7 +123,7 @@ export default function AdminUsersPage({ onNavigate }: Props) {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Usuários do sistema"
         subtitle="Exclusivo para administradores — gerencie acesso e papéis"

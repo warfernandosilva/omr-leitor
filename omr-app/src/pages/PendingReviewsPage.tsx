@@ -20,7 +20,7 @@ export default function PendingReviewsPage({ onNavigate }: Props) {
   const examName = (id: string) => exams.find((e) => e.id === id)?.name ?? 'Prova';
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Revisões pendentes"
         subtitle={pending.length > 0

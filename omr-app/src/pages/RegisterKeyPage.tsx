@@ -229,9 +229,11 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
     return (
       <div
         key={q}
-        className={`flex items-center gap-3 p-2 rounded-lg ${flag ? 'bg-warning-50 border border-warning-500/30 dark:bg-warning-500/10' : 'hover:bg-surface dark:hover:bg-gray-800'}`}
+        className={`flex items-center gap-3 p-2.5 rounded-[10px] border ${flag
+          ? 'bg-warning-50 border-warning-500/30 dark:bg-warning-500/10'
+          : 'border-line bg-white hover:border-brand-200 dark:border-gray-800 dark:bg-gray-900'}`}
       >
-        <span className="w-8 text-sm font-bold text-gray-600 dark:text-gray-300 text-right tabular-nums">
+        <span className="w-9 text-sm font-bold text-[#172B4D] dark:text-gray-200 text-right tabular-nums">
           {String(displayNumber).padStart(2, '0')}
         </span>
         <div className="flex gap-2" role="radiogroup" aria-label={`Questão ${displayNumber}`}>
@@ -243,7 +245,7 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
               aria-checked={answerKey[q] === opt}
               aria-label={`Questão ${displayNumber}: ${opt}`}
               onClick={() => handleSetAnswer(q, opt)}
-              className={`bubble-option w-10 h-10 min-w-[44px] min-h-[44px] ${
+              className={`bubble-option w-11 h-11 min-w-[44px] min-h-[44px] text-base ${
                 answerKey[q] === opt ? 'selected' : ''
               }`}
             >
@@ -254,8 +256,8 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
         {flag ? (
           <Badge tone="warning" className="ml-2">{FLAG_LABEL[flag]}</Badge>
         ) : answerKey[q] && (
-          <span className="text-sm text-gray-500 dark:text-gray-400 ml-2">
-            Resposta: <strong className="text-ink dark:text-white">{answerKey[q]}</strong>
+          <span className="text-sm text-[#71809A] dark:text-gray-400 ml-2">
+            Resposta: <strong className="text-brand-600 dark:text-brand-200">{answerKey[q]}</strong>
           </span>
         )}
       </div>
@@ -263,26 +265,36 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
   };
 
   const renderSubjectSection = (sid: 'lp' | 'mat', start: number, end: number) => (
-    <div key={sid} className="mb-4">
-      <h3 className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-2 flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-brand-500 inline-block" aria-hidden />
-        {activeExam ? getSubjectName(activeExam, sid) : sid.toUpperCase()} (1–{end - start + 1})
-      </h3>
-      <div className="space-y-1">
+    <div key={sid} className="panel">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-[#172B4D] dark:text-white flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-brand-500 inline-block" aria-hidden />
+          {activeExam ? getSubjectName(activeExam, sid) : sid.toUpperCase()} (1–{end - start + 1})
+        </h3>
+        <Badge tone="neutral">{end - start + 1} questões</Badge>
+      </div>
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2 2xl:grid-cols-3">
         {Array.from({ length: end - start + 1 }, (_, i) => start + i).map((q, idx) => renderQuestionRow(q, idx + 1))}
       </div>
     </div>
   );
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Cadastrar gabarito"
         subtitle="Defina a resposta correta para cada questão"
+        actions={
+          activeExam ? (
+            <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()} loading={reading} icon={<Camera size={15} aria-hidden />}>
+              Ler por foto
+            </Button>
+          ) : null
+        }
       />
 
-      <div className="card max-w-2xl">
-        <div className="space-y-4">
+      <div className="card w-full">
+        <div className="space-y-5">
           <Field label="Selecione a prova" htmlFor="key-exam-select">
             {exams.length === 0 ? (
               <EmptyState
@@ -305,31 +317,33 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
 
           {activeExam && (
             <>
-              <div className="bg-surface dark:bg-gray-800/60 rounded-lg p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                  <span className="text-sm text-gray-600 dark:text-gray-300">
-                    Progresso: <strong className="text-ink dark:text-white tabular-nums">{filledCount}/{totalQuestions}</strong> questões
-                  </span>
-                  {isCustomExam(activeExam) && customNPages > 1 && (
-                    <div className="flex flex-wrap items-center gap-2 mb-2">
-                      <span className="text-sm text-gray-600 dark:text-gray-300">Página do gabarito:</span>
-                      {Array.from({ length: customNPages }, (_, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => setCustomPage(i)}
-                          className={`btn btn-sm min-h-[36px] px-3 ${i === customPage ? 'btn-primary' : 'btn-secondary'}`}
-                        >
-                          {i + 1}{readPages.has(i) ? ' ✓' : ''}
-                        </button>
-                      ))}
-                      {readPages.size > 0 && readPages.size < customNPages && (
-                        <span className="text-xs text-brand-600 dark:text-brand-200">
-                          {readPages.size} de {customNPages} página(s) lida(s).
-                        </span>
-                      )}
-                    </div>
-                  )}
+              <div className="panel">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-sm text-[#71809A] dark:text-gray-300">
+                      Progresso: <strong className="text-[#172B4D] dark:text-white tabular-nums">{filledCount}/{totalQuestions}</strong> questões
+                    </span>
+                    {isCustomExam(activeExam) && customNPages > 1 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm text-[#71809A] dark:text-gray-300">Página do gabarito:</span>
+                        {Array.from({ length: customNPages }, (_, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setCustomPage(i)}
+                            className={`btn btn-sm min-h-[36px] px-3 ${i === customPage ? 'btn-primary' : 'btn-secondary'}`}
+                          >
+                            {i + 1}{readPages.has(i) ? ' ✓' : ''}
+                          </button>
+                        ))}
+                        {readPages.size > 0 && readPages.size < customNPages && (
+                          <span className="text-xs text-brand-600 dark:text-brand-200">
+                            {readPages.size} de {customNPages} página(s) lida(s).
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <Button
                       size="sm"
@@ -346,6 +360,10 @@ export default function RegisterKeyPage({ examId, onNavigate }: Props) {
                 </div>
                 <div className="h-2 rounded-full bg-line dark:bg-gray-700 overflow-hidden" role="progressbar" aria-valuenow={progressPct} aria-valuemin={0} aria-valuemax={100} aria-label="Progresso do gabarito">
                   <div className="h-full bg-brand-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+                </div>
+                <div className="mt-2 flex justify-between text-xs text-[#71809A] dark:text-gray-400">
+                  <span>{progressPct}% preenchido</span>
+                  <span>{totalQuestions - filledCount > 0 ? `${totalQuestions - filledCount} restantes` : 'completo'}</span>
                 </div>
               </div>
               <input

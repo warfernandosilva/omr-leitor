@@ -14,6 +14,7 @@ import Field from '../components/ui/Field';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
@@ -231,7 +232,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <div className="no-print">
         <PageHeader
           title="Gerar cartão-resposta"
@@ -244,8 +245,8 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         />
 
         {!showPreview && (
-          <div className="card max-w-2xl">
-            <div className="space-y-4">
+          <div className="card w-full max-w-6xl">
+            <div className="space-y-5">
               <Field label="Selecione a prova" htmlFor="card-exam-select">
                 {exams.length === 0 ? (
                   <EmptyState
@@ -267,46 +268,50 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
               </Field>
 
               {activeExam && (
-                <div className="bg-surface dark:bg-gray-800/60 rounded-lg p-4 text-sm">
-                  <p className="text-ink dark:text-gray-100"><strong>Prova:</strong> {activeExam.name}</p>
-                  {isCustom ? (
-                    <>
-                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Gabarito Personalizado{customTpl ? ` — ${customTpl.nome}` : ''}</p>
-                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {customTpl?.config_summary.n_questions ?? activeExam.questionsPerSubject}</p>
-                    </>
-                  ) : isColar ? (
-                    <>
-                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Colar em Avaliação (só o gabarito, sem cabeçalho)</p>
-                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
-                    </>
-                  ) : isSimulado ? (
-                    <>
-                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Simulado (só a tabela · réguas como âncora · sem QR/nome/turma)</p>
-                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject} fixas</p>
-                    </>
-                  ) : isSae ? (
-                    <>
-                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Modelo:</strong> Avaliação Contínua (cabeçalho editável abaixo)</p>
-                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
-                    </>
-                  ) : activeExam.layoutMode === 'single' ? (
-                    <>
-                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Disciplina:</strong> {activeExam.subjectLP}{isHerby ? ' (Herby 1 disciplina — metade esquerda)' : ''}</p>
-                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-gray-600 dark:text-gray-300 mt-1"><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>
-                      <p className="text-gray-600 dark:text-gray-300"><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
-                    </>
-                  )}
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">ID do cartão: {cardId}</p>
+                <div className="panel text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <p className="text-[#172B4D] dark:text-gray-100 font-semibold">{activeExam.name}</p>
+                    <Badge tone="info">ID {cardId}</Badge>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    {isCustom ? (
+                      <>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Modelo:</strong> Gabarito Personalizado{customTpl ? ` — ${customTpl.nome}` : ''}</p>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Questões:</strong> {customTpl?.config_summary.n_questions ?? activeExam.questionsPerSubject}</p>
+                      </>
+                    ) : isColar ? (
+                      <>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Modelo:</strong> Colar em Avaliação</p>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                      </>
+                    ) : isSimulado ? (
+                      <>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Modelo:</strong> Simulado</p>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject} fixas</p>
+                      </>
+                    ) : isSae ? (
+                      <>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Modelo:</strong> Avaliação Contínua</p>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                      </>
+                    ) : activeExam.layoutMode === 'single' ? (
+                      <>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Disciplina:</strong> {activeExam.subjectLP}</p>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Questões:</strong> {activeExam.questionsPerSubject}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Disciplinas:</strong> {activeExam.subjectLP} e {activeExam.subjectMat}</p>
+                        <p className="text-[#71809A] dark:text-gray-300"><strong>Questões por disciplina:</strong> {activeExam.questionsPerSubject}</p>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
 
               {activeExam && isSae && (
-                <div className="border border-brand-500/30 rounded-lg p-4 space-y-3 bg-brand-50/50 dark:bg-brand-700/10">
-                  <p className="text-sm font-medium text-brand-800 dark:text-brand-200">Cabeçalho do cartão — Avaliação Contínua</p>
+                <div className="panel space-y-4">
+                  <p className="text-sm font-medium text-brand-700 dark:text-brand-200">Cabeçalho do cartão — Avaliação Contínua</p>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Ano" htmlFor="sae-ano">
                       <Input id="sae-ano" value={saeSpec.ano} onChange={(e) => setSae({ ano: e.target.value })} />
@@ -360,7 +365,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         )}
 
         {showPreview && activeExam && (
-          <div className="flex flex-wrap gap-2 mb-4">
+          <div className="flex flex-wrap gap-2 mb-3">
             <Button variant="success" onClick={handlePrint} icon={<Printer size={16} aria-hidden />}>
               Imprimir
             </Button>
@@ -374,15 +379,16 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
         )}
 
         {showPreview && activeExam && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+          <p className="text-xs text-[#71809A] dark:text-gray-400">
             {sourceNote ?? 'O PDF é gerado pelo servidor com o mesmo desenho dos gabaritos oficiais (sem QR/nome de aluno).'}
           </p>
         )}
 
         {showPreview && activeExam && (
-          <div className="bg-gray-200 dark:bg-gray-800 p-4 rounded-xl overflow-auto flex justify-center">
+          <div className="rounded-2xl border border-line bg-[#EEF3FB] p-3 dark:border-gray-800 dark:bg-gray-800 sm:p-5">
+            <div className="flex justify-center overflow-auto">
             {pngUrl ? (
-              <div className="w-full max-w-3xl">
+              <div className="w-full max-w-5xl">
                 <PDFViewer width="100%" height={800} showToolbar style={{ border: 'none', borderRadius: 12 }}>
                   <CardPdfDocument pngUrl={pngUrl} title={`Cartao-resposta ${cardId}`} />
                 </PDFViewer>
@@ -421,6 +427,7 @@ const [herbySpec, setHerbySpec] = useState<HerbySpec>({ ...DEFAULT_HERBY_SPEC })
                 )}
               </div>
             )}
+            </div>
           </div>
         )}
       </div>

@@ -18,7 +18,7 @@ export default function ProfilePage({ onNavigate }: Props) {
   const isAdmin = user?.role === 'admin';
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Perfil do usuário"
         subtitle="Sua identificação no aplicativo"

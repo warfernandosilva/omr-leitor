@@ -25,7 +25,7 @@ export default function AppShell({
   collapsed, onToggleCollapse, drawerOpen, onOpenDrawer, onCloseDrawer,
 }: Props) {
   return (
-    <div className="min-h-screen flex bg-surface dark:bg-gray-950">
+    <div className="app-bg min-h-screen flex text-[#172B4D] dark:text-gray-100">
       <Sidebar
         currentView={currentView}
         onNavigate={onNavigate}
@@ -34,7 +34,7 @@ export default function AppShell({
         collapsed={collapsed}
         onToggleCollapse={onToggleCollapse}
       />
-      <div className={`flex-1 min-w-0 min-h-screen transition-[margin] duration-300 ${collapsed ? 'lg:ml-[76px]' : 'lg:ml-[260px]'}`}>
+      <div className={`flex-1 min-w-0 min-h-screen transition-[margin] duration-300 ${collapsed ? 'lg:ml-[84px]' : 'lg:ml-[268px]'}`}>
         <Topbar
           currentView={currentView}
           examId={examId}
@@ -42,14 +42,14 @@ export default function AppShell({
           onOpenMenu={onOpenDrawer}
         />
         <main className="pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
-          <div className={wide ? 'p-4 md:p-6 animate-fade-in' : 'p-4 md:p-6 lg:p-8 max-w-6xl mx-auto animate-fade-in'}>
+          <div className={`p-4 md:p-6 lg:p-7 animate-fade-in ${wide ? 'w-full' : 'mx-auto w-full max-w-[1440px]'}`}>
             {children}
           </div>
         </main>
       </div>
       <BottomNav currentView={currentView} onNavigate={onNavigate} onOpenMenu={onOpenDrawer} />
       {drawerOpen && (
-        <div className="fixed inset-0 bg-navy-950/50 z-40 lg:hidden" onClick={onCloseDrawer} aria-hidden />
+        <div className="fixed inset-0 bg-navy-950/40 backdrop-blur-sm z-40 lg:hidden" onClick={onCloseDrawer} aria-hidden />
       )}
     </div>
   );

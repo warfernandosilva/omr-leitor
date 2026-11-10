@@ -345,14 +345,14 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
   const ignoredOther = result ? result.ignored.filter(i => i.reason !== 'Linha vazia') : [];
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Cartões por lista da prova"
         subtitle="1 nome válido importado = 1 aluno persistido = 1 gabarito com QR Code = 1 página no PDF"
       />
 
       {step === 'generating' && (
-        <div className="card max-w-2xl text-center py-12">
+        <div className="card max-w-3xl text-center py-12">
           <div className="animate-spin w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full mx-auto mb-4" role="status" aria-label="Gerando gabaritos" />
           <p className="text-gray-600 dark:text-gray-300 font-medium">{stage || 'Processando...'}</p>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -362,7 +362,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
       )}
 
       {step === 'done' && doneInfo && (
-        <div className="card max-w-2xl text-center py-12">
+        <div className="card max-w-4xl text-center py-12">
           <div className="w-16 h-16 bg-success-50 dark:bg-success-700/20 rounded-full flex items-center justify-center mx-auto mb-4 text-success-600 dark:text-success-100" aria-hidden>
             <CheckCircle2 size={32} strokeWidth={1.8} />
           </div>
@@ -405,7 +405,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
 
       {step === 'form' && (
         <>
-          <div className="card max-w-3xl space-y-5">
+          <div className="card w-full max-w-6xl space-y-5">
             <Field label="Selecione a prova" htmlFor="roster-exam-select" required>
               {exams.length === 0 ? (
                 <EmptyState
@@ -676,7 +676,7 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
           </div>
 
           {source === 'file' && result && n > 0 && (
-            <div className="card max-w-3xl mt-6">
+            <div className="card w-full max-w-6xl mt-6">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-lg font-semibold text-ink dark:text-white">
                   Alunos importados ({n})

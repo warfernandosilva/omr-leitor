@@ -1934,7 +1934,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   };
 
   return (
-    <div className="animate-fade-in">
+    <div className="app-section animate-fade-in">
       {/* Visor imersivo: sem título/subtítulo no passo da câmera */}
       {step !== 'capture' && (
         <PageHeader
@@ -1944,16 +1944,16 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       )}
 
       {step === 'form' && (
-        <div className="flex flex-wrap items-center gap-2 mb-6">
+        <div className="flex flex-wrap items-center gap-2">
           {(['individual', 'lote'] as const).map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
               disabled={batchRunning}
-              className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+              className={`px-4 py-2.5 rounded-[10px] text-sm font-medium border transition-all duration-200 ${
                 mode === m
-                  ? 'border-brand-500 bg-brand-50 dark:bg-brand-700/15 text-brand-800 dark:text-brand-200'
-                  : 'border-line dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-surface dark:bg-gray-800/60'
+                  ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-soft dark:bg-brand-700/15 dark:text-brand-200 dark:border-brand-400'
+                  : 'border-line bg-white text-[#71809A] hover:text-brand-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
               }`}
             >
               {m === 'individual' ? 'Individual' : 'Em lote (várias fotos)'}
@@ -1964,10 +1964,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             disabled={batchRunning}
             aria-pressed={adaptive}
             title="Calcula o divisor marcado/vazio a partir da própria foto (experimental)"
-            className={`ml-auto px-4 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${
+            className={`ml-auto px-4 py-2.5 rounded-[10px] text-sm font-medium border transition-all duration-200 min-h-[44px] ${
               adaptive
-                ? 'border-brand-500 bg-brand-50 dark:bg-brand-700/15 text-brand-700 dark:text-brand-200'
-                : 'border-line dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-surface dark:hover:bg-gray-800'
+                ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-700/15 dark:text-brand-200 dark:border-brand-400'
+                : 'border-line bg-white text-[#71809A] hover:text-brand-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
             }`}
           >
             Limiar adaptativo
@@ -1977,10 +1977,10 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             disabled={batchRunning}
             aria-pressed={debugMode}
             title="Retorna o heatmap de scores por bolha (diagnóstico)"
-            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors min-h-[44px] ${
+            className={`px-4 py-2.5 rounded-[10px] text-sm font-medium border transition-all duration-200 min-h-[44px] ${
               debugMode
-                ? 'border-brand-500 bg-brand-50 dark:bg-brand-700/15 text-brand-700 dark:text-brand-200'
-                : 'border-line dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-surface dark:hover:bg-gray-800'
+                ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-700/15 dark:text-brand-200 dark:border-brand-400'
+                : 'border-line bg-white text-[#71809A] hover:text-brand-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300'
             }`}
           >
             Diagnóstico
@@ -2006,7 +2006,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       )}
 
       {mode === 'individual' && step === 'form' && (
-        <div className="card max-w-2xl space-y-4">
+        <div className="card w-full max-w-5xl space-y-4">
           <div>
               <div className="flex items-center justify-between gap-2">
                 <span className="label">Selecione a prova *</span>

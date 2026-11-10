@@ -19,6 +19,7 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 
 interface Props {
@@ -319,20 +320,25 @@ const isCustomTemplate = templateType === 'custom';
   ];
 
   const optionCard = (selected: boolean) =>
-    `p-3 rounded-lg border text-sm font-medium text-left transition-colors min-h-[44px] ${
+    `p-3 rounded-[10px] border text-sm font-medium text-left transition-all duration-200 min-h-[44px] ${
       selected
-        ? 'border-brand-500 bg-brand-50 text-ink dark:bg-brand-700/15 dark:text-white dark:border-brand-400'
-        : 'border-line text-gray-600 hover:bg-surface dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800'
+        ? 'border-brand-500 bg-brand-50 text-brand-700 shadow-soft dark:bg-brand-700/15 dark:text-brand-200 dark:border-brand-400'
+        : 'border-line bg-white text-[#71809A] hover:border-brand-200 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800'
     }`;
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title={editingId ? 'Editar prova' : 'Nova prova'}
         subtitle="Configure o modelo do cartão, as disciplinas e a escala de nota"
+        actions={
+          <Button variant="secondary" size="sm" onClick={() => refreshFromServer(false)} loading={syncing} icon={<RefreshCw size={14} aria-hidden />}>
+            Atualizar do servidor
+          </Button>
+        }
       />
 
-      <div className="card max-w-2xl">
+      <div className="card w-full max-w-5xl">
         {saved && (
           <div className="callout-success mb-4">
             Prova salva com sucesso! Redirecionando...
@@ -340,27 +346,26 @@ const isCustomTemplate = templateType === 'custom';
         )}
 
         {/* Assistente em etapas */}
-        <ol className="flex items-center gap-1 mb-5" aria-label="Etapas da criação">
+        <ol className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Etapas da criação">
           {STEPS.map((label, i) => {
             const done = i < step;
             const current = i === step;
             return (
-              <li key={label} className="flex-1 min-w-0">
+              <li key={label}>
                 <button
                   type="button"
                   onClick={() => { if (i < step) setStep(i); }}
                   disabled={i > step}
                   aria-current={current ? 'step' : undefined}
-                  className="w-full flex flex-col items-center gap-1.5 group"
+                  className="w-full flex items-center gap-3 rounded-[10px] border border-line bg-white px-3 py-2.5 text-left transition-all disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 min-h-[44px]"
                 >
-                  <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                    ${done ? 'bg-success-500 text-white' : current ? 'bg-brand-500 text-white' : 'bg-surface text-gray-400 dark:bg-gray-800'}`}>
+                  <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors shrink-0
+                    ${done ? 'bg-success-500 text-white' : current ? 'bg-brand-500 text-white' : 'bg-[#F4F7FD] text-[#71809A] dark:bg-gray-800'}`}>
                     {done ? '✓' : i + 1}
                   </span>
-                  <span className={`text-[11px] font-medium truncate max-w-full ${current ? 'text-brand-700 dark:text-brand-200' : 'text-gray-400'}`}>
+                  <span className={`text-[12px] font-medium truncate ${current ? 'text-brand-700 dark:text-brand-200' : 'text-[#71809A] dark:text-gray-400'}`}>
                     {label}
                   </span>
-                  <span aria-hidden className={`h-1 w-full rounded-full ${done || current ? 'bg-brand-500' : 'bg-line dark:bg-gray-800'}`} />
                 </button>
               </li>
             );
@@ -656,42 +661,36 @@ const isCustomTemplate = templateType === 'custom';
       </div>
 
       {exams.length > 0 && (
-        <section aria-label="Provas cadastradas" className="max-w-2xl">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold text-ink dark:text-white">Provas cadastradas</h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => refreshFromServer(false)}
-              loading={syncing}
-              icon={<RefreshCw size={14} aria-hidden />}
-            >
-              Atualizar do servidor
-            </Button>
+        <section aria-label="Provas cadastradas">
+          <div className="section-header mb-3">
+            <h2 className="text-lg font-semibold text-[#172B4D] dark:text-white">Provas cadastradas</h2>
+            <span className="text-xs text-[#71809A] dark:text-gray-400">{exams.length} prova(s)</span>
           </div>
-          {syncMsg && <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{syncMsg}</p>}
-          <div className="flex flex-col sm:flex-row gap-2 mb-3">
-            <Input
-              type="search"
-              aria-label="Buscar prova"
-              placeholder="Buscar prova..."
-              value={examSearch}
-              onChange={(e) => setExamSearch(e.target.value)}
-              className="flex-1"
-            />
-            <Select
-              aria-label="Filtrar por situação"
-              value={examStatusFilter}
-              onChange={(e) => setExamStatusFilter(e.target.value as '' | ExamStatus)}
-              className="sm:w-44"
-            >
-              <option value="">Todas</option>
-              <option value="ativa">Ativas</option>
-              <option value="rascunho">Rascunhos</option>
-              <option value="arquivada">Arquivadas</option>
-            </Select>
-          </div>
-          <div className="space-y-2">
+          {syncMsg && <p className="text-xs text-[#71809A] dark:text-gray-400 mb-2">{syncMsg}</p>}
+          <Card className="mb-3">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                type="search"
+                aria-label="Buscar prova"
+                placeholder="Buscar prova..."
+                value={examSearch}
+                onChange={(e) => setExamSearch(e.target.value)}
+                className="flex-1"
+              />
+              <Select
+                aria-label="Filtrar por situação"
+                value={examStatusFilter}
+                onChange={(e) => setExamStatusFilter(e.target.value as '' | ExamStatus)}
+                className="sm:w-44"
+              >
+                <option value="">Todas</option>
+                <option value="ativa">Ativas</option>
+                <option value="rascunho">Rascunhos</option>
+                <option value="arquivada">Arquivadas</option>
+              </Select>
+            </div>
+          </Card>
+          <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
             {exams
               .filter((exam) => {
                 if (examStatusFilter && normalizeExamStatus(exam.status) !== examStatusFilter) return false;
@@ -701,7 +700,7 @@ const isCustomTemplate = templateType === 'custom';
               .map((exam) => {
               const st = normalizeExamStatus(exam.status);
               return (
-              <div key={exam.id} className="card p-4">
+              <div key={exam.id} className="card card-hover flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-ink dark:text-gray-100 truncate">{exam.name}</p>
@@ -758,7 +757,7 @@ const isCustomTemplate = templateType === 'custom';
         </section>
       )}
       {exams.length === 0 && (
-        <div className="max-w-2xl">
+        <div>
           <EmptyState
             title="Nenhuma prova cadastrada"
             description="Preencha o formulário acima para criar a primeira."

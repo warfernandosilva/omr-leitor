@@ -112,13 +112,13 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Gerenciar avaliação"
         subtitle="Alunos persistidos, gabaritos gerados e status de correção — dados do banco do servidor"
       />
 
-      <div className="card max-w-3xl">
+      <div className="card w-full max-w-6xl">
         <Field label="Selecione a prova" htmlFor="manage-exam-select">
           {exams.length === 0 ? (
             <EmptyState
@@ -152,16 +152,17 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
 
       {data && (
         <>
-          <div className="card max-w-3xl">
-            <h2 className="text-lg font-semibold text-ink dark:text-white">{data.avaliacao.titulo}</h2>
-            {data.avaliacao.turma && (
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                Turma: <Badge tone="success">{data.avaliacao.turma}</Badge>
-              </p>
-            )}
+          <div className="card w-full">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-wider text-[#71809A] dark:text-gray-400">Avaliação</p>
+                <h2 className="text-lg font-semibold text-[#172B4D] dark:text-white truncate">{data.avaliacao.titulo}</h2>
+              </div>
+              {data.avaliacao.turma && <Badge tone="success">{data.avaliacao.turma}</Badge>}
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 max-w-5xl">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
             <StatCard label="Alunos cadastrados" value={data.stats.alunos_cadastrados} tone="info" />
             <StatCard label="Gabaritos gerados" value={data.stats.gabaritos_gerados} />
             <StatCard label="Lidos" value={data.stats.gabaritos_lidos} tone="info" />
@@ -170,13 +171,13 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
           </div>
 
           {data.stats.alunos_cadastrados > data.stats.gabaritos_gerados && (
-            <div className="callout-warning max-w-5xl">
+            <div className="callout-warning">
               {data.stats.alunos_cadastrados - data.stats.gabaritos_gerados} aluno(s) ainda
               {' '}não possuem gabarito gerado. Use <strong>&quot;Gerar gabaritos em PDF&quot;</strong> abaixo.
             </div>
           )}
 
-          <div className="card max-w-5xl">
+          <div className="card w-full">
             <DataTable
               rows={data.gabaritos}
               rowKey={(g) => String(g.id)}
@@ -217,7 +218,7 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
             />
           </div>
 
-          <div className="flex flex-wrap gap-2 max-w-5xl">
+          <div className="flex flex-wrap gap-2">
             <Button onClick={() => onNavigate('correct-card', data.avaliacao.external_id)} icon={<ScanLine size={16} aria-hidden />}>
               Corrigir cartões
             </Button>

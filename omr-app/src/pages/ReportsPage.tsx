@@ -111,7 +111,7 @@ export default function ReportsPage({ onNavigate }: Props) {
   const fmt = (v: number) => v.toFixed(1).replace('.', ',');
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Relatórios"
         subtitle={`${filtered.length} resultado(s) no recorte`}

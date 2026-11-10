@@ -144,7 +144,7 @@ export default function SettingsPage({ onNavigate }: Props) {
   };
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Configurações"
         subtitle="Preferências, backup e informações do aplicativo"

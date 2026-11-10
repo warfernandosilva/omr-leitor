@@ -94,7 +94,7 @@ export default function DashboardPage({ onNavigate }: Props) {
   }
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Resultados"
         subtitle="Visão geral da prova selecionada"

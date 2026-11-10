@@ -110,6 +110,7 @@ omr-backend/omr/ # template.py (1448×2048), detector.py (ArUco), reader.py (CLA
 omr-backend/routers/ # rotas por domínio (admin: backup/restore + usuários)
 omr-backend/backup.py # dump/restore JSON portátil (+ lápides anti-ressurreição)
 docs/FLUXOS.md        # fluxo funcional revisado + regras de negócio
+docs/DESIGN_SYSTEM.md # tokens, classes e componentes do redesign azul/branco
 docker-compose*.yml / deploy-zimaos.ps1 / .github/workflows/  # deploy ZimaOS via GHCR
 start-omr.bat / iniciar.bat / iniciar-desktop.bat / build-desktop.bat
 ```

@@ -42,7 +42,7 @@ export default function HelpPage({ onNavigate }: Props) {
   const [open, setOpen] = useState<string | null>(ITEMS[0].title);
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Ajuda e suporte"
         subtitle="Documentação, tutoriais e contato"

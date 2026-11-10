@@ -13,7 +13,7 @@ export default function BottomNav({ currentView, onNavigate, onOpenMenu }: Props
   return (
     <nav
       aria-label="Navegação rápida"
-      className="fixed bottom-0 inset-x-0 z-40 lg:hidden bg-white dark:bg-gray-900 border-t border-line dark:border-gray-800 shadow-[0_-4px_16px_rgba(16,24,40,0.08)]"
+      className="fixed bottom-0 inset-x-0 z-40 lg:hidden glass border-t border-line dark:border-gray-800 shadow-glass"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <div className="grid grid-cols-5">

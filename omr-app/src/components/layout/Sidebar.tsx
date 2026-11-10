@@ -25,13 +25,13 @@ export default function Sidebar({
   return (
     <aside
       aria-label="Navegação principal"
-      className={`fixed top-0 left-0 z-50 h-full w-[260px] flex flex-col bg-white dark:bg-gray-900 border-r border-line dark:border-gray-800 transition-all duration-300
+      className={`fixed top-0 left-0 z-50 h-full w-[268px] flex flex-col glass border-r border-line dark:border-gray-800 transition-all duration-300
         ${drawerOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0
-        ${collapsed ? 'lg:w-[76px]' : ''}`}
+        ${collapsed ? 'lg:w-[84px]' : ''}`}
     >
       {/* Topo: logo + colapso */}
       <div className={`flex items-center gap-3 p-4 border-b border-line dark:border-gray-800 ${collapsed ? 'lg:flex-col lg:justify-center lg:gap-2 lg:px-2 lg:py-3' : ''}`}>
-        <div className="w-10 h-10 rounded-xl bg-brand-500 flex items-center justify-center shrink-0" aria-hidden>
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-secondary-500 flex items-center justify-center shrink-0 shadow-soft" aria-hidden>
           <ScanSearch size={22} strokeWidth={2} className="text-white" />
         </div>
         <div className={`flex-1 min-w-0 ${collapsed ? 'lg:hidden' : ''}`}>
@@ -72,7 +72,7 @@ export default function Sidebar({
           if (items.length === 0) return null;
           return (
             <div key={group.id}>
-              <p className={`px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 ${collapsed ? 'lg:hidden' : ''}`}>
+              <p className={`px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-[#71809A] dark:text-gray-400 ${collapsed ? 'lg:hidden' : ''}`}>
                 {group.label}
               </p>
               {collapsed && (
@@ -89,14 +89,15 @@ export default function Sidebar({
                         aria-label={item.label}
                         aria-current={active ? 'page' : undefined}
                         title={collapsed ? item.label : undefined}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px]
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-all duration-200 min-h-[44px] relative
                           ${collapsed ? 'lg:justify-center lg:px-0' : ''}
                           ${active
-                            ? 'bg-brand-50 text-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
-                            : 'text-gray-600 hover:bg-surface hover:text-ink dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
+                            ? 'bg-brand-50 text-brand-700 shadow-soft dark:bg-brand-700/20 dark:text-brand-200'
+                            : 'text-[#71809A] hover:bg-white/70 hover:text-brand-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'
                           }`}
                       >
-                        <Icon size={20} strokeWidth={2} className="shrink-0" aria-hidden />
+                        {active && <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-brand-500" aria-hidden />}
+                        <Icon size={20} strokeWidth={active ? 2.2 : 2} className="shrink-0" aria-hidden />
                         <span className={`flex-1 text-left truncate ${collapsed ? 'lg:hidden' : ''}`}>
                           {item.label}
                         </span>

@@ -98,7 +98,7 @@ export default function LabPage({ onNavigate }: Props) {
   const needsSession = tab !== 'sessoes' && tab !== 'calibracao';
 
   return (
-    <div className="space-y-4 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Banco de testes OMR"
         subtitle="Valide a leitura com gabarito e calibre thresholds"

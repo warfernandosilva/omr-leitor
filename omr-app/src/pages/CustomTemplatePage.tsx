@@ -162,7 +162,7 @@ export default function CustomTemplatePage() {
   }
 
   return (
-    <div className="space-y-5 animate-fade-in">
+    <div className="app-section animate-fade-in">
       <PageHeader
         title="Gabarito personalizado"
         subtitle="Importe a imagem de um cartão-resposta próprio, marque as regiões e leia com o motor OMR do sistema."
@@ -264,8 +264,8 @@ function TemplateList({
         />
       ) : (
         <>
-          <div className="card max-w-2xl">
-            <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+          <div className="card w-full max-w-6xl">
+            <p className="text-sm text-[#71809A] dark:text-gray-300 mb-3">
               Envie uma imagem (PNG/JPG) do seu cartão-resposta. Depois você desenha as
               âncoras, o QR e as bolhas no editor visual.
             </p>
@@ -305,16 +305,16 @@ function TemplateList({
               description="Importe uma imagem acima ou crie um cartão do zero."
             />
           ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {templates.map((t) => (
-                <div key={t.id} className="card flex flex-col gap-2">
+                <div key={t.id} className="card card-hover flex flex-col gap-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="font-semibold text-ink dark:text-white truncate">{t.nome}</h3>
+                    <h3 className="font-semibold text-[#172B4D] dark:text-white truncate">{t.nome}</h3>
                     <span className={`badge ${t.status === 'ativo' ? 'badge-success' : 'badge-info'}`}>
                       {STATUS_LABEL[t.status] ?? t.status}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                  <p className="text-xs text-[#71809A] dark:text-gray-400">
                     {t.config_summary.n_blocks} bloco(s) · {t.config_summary.n_questions} questão(ões) ·
                     {' '}{t.config_summary.n_anchors} âncora(s){t.config_summary.has_qr ? ' · QR' : ''}
                   </p>
