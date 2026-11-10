@@ -58,6 +58,8 @@ Fonte principal: **Inter**.
 - `AppShell`, `Sidebar`, `Topbar`, `BottomNav`
 - `EditorTopBar`, `EditorMobilePanels`
 - `CaptureViewport`, `ReaderSettingsPanel`
+- `AiAssistPanel`, `ManualReviewPanel`, `ResultSummaryPanel`
+- `BatchQueuePanel`, `MultiPageBatchModal`
 
 ## Regras de uso
 

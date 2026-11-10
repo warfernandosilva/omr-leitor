@@ -111,6 +111,68 @@ Depois disso, valide:
 - Resultados;
 - Relatórios.
 
+## Validação rápida com o seed
+
+1. Suba o backend apontando para `dev-demo.db`.
+2. Suba o frontend.
+3. Faça login com `demo@example.com`.
+4. Abra **Provas e avaliações** e clique em **Atualizar do servidor**.
+5. Verifique:
+   - Painel inicial com contadores;
+   - Turmas com 3 turmas;
+   - Alunos com 94 alunos;
+   - Resultados com médias, gráficos e ranking;
+   - Relatórios com filtros e exports;
+   - Gabarito Personalizado com o modelo ativo.
+
+Para regressão do motor OMR sem depender da interface:
+
+```bat
+cd omr-backend
+.\.venv\Scripts\python.exe -m pytest -q --ignore=test_simulado_detector.py test_custom_template.py test_e2e.py
+```
+
+## Como simular uma pendência local
+
+A tela **Revisões pendentes** lê o cache local do navegador. Para testá-la com o seed:
+
+1. Abra o DevTools → Console.
+2. Descubra a chave do usuário logado.
+3. Injira um resultado com `duplicateQuestions`, `lowConfidence` ou `qrOk: false`.
+4. Recarregue a página e abra **Revisões pendentes**.
+
+Exemplo de resultado:
+
+```js
+const key = 'omr-app-data-1';
+const data = JSON.parse(localStorage.getItem(key));
+data.results = [
+  ...data.results,
+  {
+    id: 'pendente-demo-1',
+    examId: data.exams[0].id,
+    studentName: 'Aluno Pendente Demo',
+    answers: { 1: 'A' },
+    correctCount: 1,
+    incorrectCount: 0,
+    blankCount: 0,
+    duplicateCount: 1,
+    duplicateQuestions: [5],
+    duplicateMarks: { 5: ['B', 'C'] },
+    lowConfidence: [6],
+    codigoUnico: 'OMR-PENDENTE-DEMO-1',
+    grade: 5,
+    timestamp: new Date().toISOString(),
+    manualOverrides: {},
+    qrOk: false,
+    reviewed: false,
+  },
+];
+localStorage.setItem(key, JSON.stringify(data));
+```
+
+Depois recarregue o app e abra **Correção OMR → Revisões pendentes**.
+
 ## Limitações atuais do seed
 
 - A tela **Revisões pendentes** depende do cache local do navegador. Para testá-la com dados do seed, é preciso corrigir um cartão no app e deixá-lo com pendência, ou usar um resultado local já existente.
