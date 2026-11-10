@@ -43,17 +43,15 @@ import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 import {
-  ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudOff, Eye, Flashlight, FlashlightOff, Focus,
-  ImagePlus, ImageUp, Info, PenLine, Play, RefreshCw, RotateCcw, Save,
+  ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudOff, Flashlight, FlashlightOff, Focus,
+  ImagePlus, ImageUp, Info, PenLine, RefreshCw, RotateCcw, Save,
   SlidersHorizontal, Sun, SwitchCamera, Trash2, X, ZoomIn,
 } from 'lucide-react';
 import PageHeader from '../components/ui/PageHeader';
 import CornerEditor from '../components/CornerEditor';
-import Field from '../components/ui/Field';
 import Select from '../components/ui/Select';
 import type { AutocompleteOption } from '../components/ui/Autocomplete';
 import Button from '../components/ui/Button';
-import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import ReadStages from '../components/omr/ReadStages';
 import CaptureViewport from '../components/correct/CaptureViewport';
@@ -61,6 +59,8 @@ import ReaderSettingsPanel from '../components/correct/ReaderSettingsPanel';
 import AiAssistPanel from '../components/correct/AiAssistPanel';
 import ResultSummaryPanel from '../components/correct/ResultSummaryPanel';
 import ManualReviewPanel from '../components/correct/ManualReviewPanel';
+import MultiPageBatchModal from '../components/correct/MultiPageBatchModal';
+import BatchQueuePanel from '../components/correct/BatchQueuePanel';
 import { anchorLabelFor } from '../utils/read-stages';
 import { findStudentMatches, mergeStudentOptions, StudentOption } from '../utils/alunos';
 
@@ -1913,6 +1913,45 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setStep('review');
   };
 
+  const runMultiPageBatch = async () => {
+    setBatchBusy(true);
+    setBatchResults([]);
+    const nPages = customGeom?.nPages ?? 1;
+    const minLen = batchFiles.length ? Math.min(...batchFiles.map((f) => f.length)) : 0;
+    const out: { idx: number; answers: Record<string, string>; error?: string }[] = [];
+    for (let i = 0; i < minLen; i++) {
+      const merged: Record<string, string> = {};
+      let err: string | undefined;
+      for (let pg = 0; pg < nPages; pg++) {
+        try {
+          const file = batchFiles[pg][i];
+          const res = await apiProcessImage(
+            file,
+            activeExam?.questionsPerSubject ?? 22,
+            activeExam?.layoutMode ?? 'dual',
+            'custom',
+            useAdaptive,
+            debugMode,
+            activeExam?.customTemplateId,
+            null,
+            pg,
+            globalSettings,
+          );
+          if (res.success && res.answers) {
+            Object.assign(merged, res.answers);
+          } else {
+            err = res.error || 'Falha na leitura';
+          }
+        } catch (e) {
+          err = e instanceof Error ? e.message : 'Erro';
+        }
+      }
+      out.push({ idx: i + 1, answers: merged, error: err });
+    }
+    setBatchResults(out);
+    setBatchBusy(false);
+  };
+
   return (
     <div className="app-section animate-fade-in">
       {/* Visor imersivo: sem título/subtítulo no passo da câmera */}
@@ -1969,7 +2008,7 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       )}
 
       {mode === 'lote' && step === 'form' && (
-        <BatchPanel
+        <BatchQueuePanel
           exams={exams}
           selectedExamId={selectedExamId}
           onExamChange={setSelectedExamId}
@@ -2617,117 +2656,20 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         }}
       />
 
-      {batchOpen && createPortal(
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-4 space-y-3 max-h-[80vh] overflow-y-auto">
-            <h3 className="font-bold text-lg">Lote multi-página (page order)</h3>
-            <p className="text-xs text-gray-500">
-              Envie, para cada página, a lista de fotos na mesma ordem. As respostas são casadas por posição.
-            </p>
-            {Array.from({ length: customGeom?.nPages ?? 1 }, (_, p) => (
-              <div key={p} className="space-y-1">
-                <label className="text-sm font-medium">Página {p + 1}</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(e) => {
-                    const files = Array.from(e.target.files ?? []);
-                    setBatchFiles((prev) => {
-                      const next = [...prev];
-                      next[p] = files;
-                      return next;
-                    });
-                  }}
-                  className="block w-full text-sm"
-                />
-                <span className="text-xs text-gray-500">{(batchFiles[p]?.length ?? 0)} arquivo(s)</span>
-              </div>
-            ))}
-            <div className="flex gap-2 justify-end">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setBatchOpen(false)} disabled={batchBusy}>
-                Fechar
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={batchBusy || batchFiles.some((f) => !f.length)}
-                onClick={async () => {
-                  setBatchBusy(true);
-                  setBatchResults([]);
-                  const nPages = customGeom?.nPages ?? 1;
-                  const minLen = Math.min(...batchFiles.map((f) => f.length));
-                  const out: { idx: number; answers: Record<string, string>; error?: string }[] = [];
-                  for (let i = 0; i < minLen; i++) {
-                    const merged: Record<string, string> = {};
-                    let err: string | undefined;
-                    for (let pg = 0; pg < nPages; pg++) {
-                      try {
-                        const file = batchFiles[pg][i];
-                        const res = await apiProcessImage(
-                          file,
-                          activeExam?.questionsPerSubject ?? 22,
-                          activeExam?.layoutMode ?? 'dual',
-                          'custom',
-                          useAdaptive,
-                          debugMode,
-                          activeExam?.customTemplateId,
-                          null,
-                          pg,
-                          globalSettings,
-                        );
-                        if (res.success && res.answers) {
-                          Object.assign(merged, res.answers);
-                        } else {
-                          err = res.error || 'Falha na leitura';
-                        }
-                      } catch (e) {
-                        err = e instanceof Error ? e.message : 'Erro';
-                      }
-                    }
-                    out.push({ idx: i + 1, answers: merged, error: err });
-                  }
-                  setBatchResults(out);
-                  setBatchBusy(false);
-                }}
-              >
-                {batchBusy ? 'Processando...' : 'Processar lote'}
-              </button>
-            </div>
-            {batchFiles.some((f, i) => i > 0 && f.length !== batchFiles[0].length) && (
-              <p className="text-xs text-amber-600">
-                Atenção: as páginas têm quantidades diferentes de arquivos. Serão processados os primeiros {Math.min(...batchFiles.map((f) => f.length))} de cada.
-              </p>
-            )}
-            {batchResults.length > 0 && (
-              <div className="space-y-2">
-                <h4 className="font-semibold text-sm">Resultados ({batchResults.length})</h4>
-                <div className="overflow-x-auto">
-                  <table className="text-xs w-full border-collapse">
-                    <thead>
-                      <tr>
-                        <th className="border px-2 py-1 text-left">#</th>
-                        <th className="border px-2 py-1 text-left">Respostas</th>
-                        <th className="border px-2 py-1 text-left">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {batchResults.map((r) => (
-                        <tr key={r.idx}>
-                          <td className="border px-2 py-1">{r.idx}</td>
-                          <td className="border px-2 py-1 font-mono">{Object.entries(r.answers).map(([q, a]) => `${q}:${a}`).join(' ') || '—'}</td>
-                          <td className="border px-2 py-1">{r.error ? <span className="text-red-600">{r.error}</span> : 'OK'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>,
-        document.body,
-      )}
+      <MultiPageBatchModal
+        open={batchOpen}
+        onClose={() => setBatchOpen(false)}
+        nPages={customGeom?.nPages ?? 1}
+        busy={batchBusy}
+        files={batchFiles}
+        results={batchResults}
+        onFilesChange={(page, files) => setBatchFiles((prev) => {
+          const next = [...prev];
+          next[page] = files;
+          return next;
+        })}
+        onProcess={() => void runMultiPageBatch()}
+      />
 
       {step === 'processing' && (
         <div className="card max-w-2xl">
@@ -3292,209 +3234,3 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     </div>
   );
 }
-
-// ═══════════════════════ Painel de correção em lote ═══════════════════════
-
-const BATCH_STATUS_META: Record<BatchStatus, { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
-  pending: { label: 'Na fila', tone: 'neutral' },
-  processing: { label: 'Processando…', tone: 'info' },
-  saved: { label: 'Corrigido', tone: 'success' },
-  pending_id: { label: 'QR ilegível', tone: 'warning' },
-  unknown_code: { label: 'Código não registrado', tone: 'warning' },
-  wrong_exam: { label: 'Prova divergente', tone: 'danger' },
-  conflict: { label: 'Já corrigido', tone: 'warning' },
-  error: { label: 'Falhou', tone: 'danger' },
-};
-
-interface BatchPanelProps {
-  exams: Exam[];
-  selectedExamId: string;
-  onExamChange: (id: string) => void;
-  items: BatchItem[];
-  running: boolean;
-  error: string | null;
-  onFiles: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onStart: () => void;
-  onResolveConflict: (item: BatchItem) => void;
-  onReviewManually: (item: BatchItem, manual?: boolean) => void;
-  onClear: () => void;
-  fileInputRef: React.RefObject<HTMLInputElement>;
-}
-
-function BatchPanel({
-  exams, selectedExamId, onExamChange, items, running,
-  error, onFiles, onStart, onResolveConflict, onReviewManually, onClear, fileInputRef,
-}: BatchPanelProps) {
-  const exam = selectedExamId ? exams.find(e => e.id === selectedExamId) : undefined;
-  const processed = items.filter(i => i.status !== 'pending' && i.status !== 'processing').length;
-  const savedCount = items.filter(i => i.status === 'saved').length;
-  const problemCount = items.filter(i =>
-    ['pending_id', 'unknown_code', 'wrong_exam', 'conflict', 'error'].includes(i.status)
-  ).length;
-
-  return (
-    <div className="space-y-4">
-      <div className="card max-w-3xl space-y-4">
-        <div className="p-3 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 dark:border-brand-700 rounded-lg text-brand-800 dark:text-brand-200 text-sm">
-          <strong>Correção em lote:</strong> cada foto é identificada pelo QR Code do cartão — a ordem
-          das fotos não importa. Fotos com QR válido são corrigidas e salvas automaticamente; problemas
-          ficam na fila abaixo para revisão manual.
-        </div>
-
-        <Field label="Selecione a prova" required>
-          {exams.length === 0 ? (
-            <p className="text-sm text-gray-500 dark:text-gray-400">Nenhuma prova cadastrada.</p>
-          ) : (
-            <Select
-              aria-label="Selecione a prova"
-              value={selectedExamId}
-              onChange={(e) => onExamChange(e.target.value)}
-              disabled={running}
-            >
-              <option value="">Selecione...</option>
-              {exams.map(x => (
-                <option key={x.id} value={x.id}>
-                  {x.name}
-                  {x.answerKey ? '' : ' (sem gabarito!)'}
-                </option>
-              ))}
-            </Select>
-          )}
-          {exam && !exam.answerKey && (
-            <p className="text-xs text-danger-600 dark:text-danger-100 mt-1">
-              O lote exige gabarito cadastrado para corrigir automaticamente.
-            </p>
-          )}
-        </Field>
-
-        <div>
-          <span className="label">Fotos dos cartões *</span>
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={!selectedExamId || running}
-            className="w-full border-2 border-dashed border-line dark:border-gray-600 rounded-lg p-6 text-center hover:border-brand-400 hover:bg-brand-50/30 dark:hover:bg-brand-700/10 transition-colors disabled:opacity-50 min-h-[44px]"
-          >
-            <ImagePlus size={28} strokeWidth={1.5} className="text-gray-500 dark:text-gray-400 mx-auto mb-2" aria-hidden />
-            <span className="text-sm font-medium text-gray-600 dark:text-gray-300">Selecione uma ou várias fotos</span>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">.jpg, .png — quantas quiser</p>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={onFiles}
-          />
-        </div>
-
-        {error && (
-          <div className="p-3 bg-danger-50 dark:bg-danger-700/15 border border-danger-500/30 rounded-lg text-danger-600 dark:text-danger-100 text-sm">{error}</div>
-        )}
-
-        {items.length > 0 && (
-          <div className="flex flex-wrap gap-3 items-center">
-            <span className="text-sm text-gray-600 dark:text-gray-300">{items.length} foto(s) na fila</span>
-            {running && (
-              <span className="inline-flex items-center gap-2 text-sm text-brand-600 dark:text-brand-200">
-                <div className="animate-spin w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full" />
-                {processed}/{items.length} processadas…
-              </span>
-            )}
-            {!running && (
-              <>
-                <Button
-                  onClick={onStart}
-                  disabled={!exam || !exam.answerKey}
-                  icon={<Play size={16} aria-hidden />}
-                  className="ml-auto"
-                >
-                  Corrigir {items.length} foto{items.length > 1 ? 's' : ''}
-                </Button>
-                <Button variant="secondary" onClick={onClear} icon={<Trash2 size={15} aria-hidden />}>Limpar</Button>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
-      {items.length > 0 && !running && (
-        <div className="card max-w-4xl">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-ink dark:text-white">Resultado do Lote</h3>
-            <div className="flex gap-2 text-xs">
-              <Badge tone="success">{savedCount} corrigida(s)</Badge>
-              {problemCount > 0 && (
-                <Badge tone="warning">{problemCount} para revisar</Badge>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            {items.map(item => {
-              const meta = BATCH_STATUS_META[item.status];
-              return (
-                <div
-                  key={item.fileName}
-                  className={`border rounded-lg p-3 flex items-start gap-3 ${
-                    item.status === 'saved' ? 'border-success-500/25'
-                    : ['pending_id', 'unknown_code', 'conflict'].includes(item.status) ? 'border-warning-500/30'
-                    : item.status === 'error' || item.status === 'wrong_exam' ? 'border-danger-500/30'
-                    : 'border-line dark:border-gray-700'
-                  }`}
-                >
-                  <img src={item.dataUrl} alt="" className="w-12 h-12 object-cover rounded-md border border-line dark:border-gray-700" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium text-ink dark:text-white truncate max-w-[240px]">{item.fileName}</span>
-                      <Badge tone={meta.tone}>{meta.label}</Badge>
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      {item.status === 'saved' && (
-                        <>
-                          <strong>{item.studentName}</strong>{' '}
-                          <span className="font-mono text-[11px]">{item.cardId}</span> —{' '}
-                          {item.correct}/{exam?.totalQuestions} acertos • Nota <strong>{item.grade}</strong>
-                        </>
-                      )}
-                      {item.status === 'conflict' && (
-                        <>
-                          {item.studentName} ({item.cardId}) — nota anterior:{' '}
-                          <strong>{item.previousNota ?? '—'}</strong> • nova nota: <strong>{item.grade}</strong>
-                          {item.detail ? ` — ${item.detail}` : ''}
-                        </>
-                      )}
-                      {(item.status === 'pending_id' || item.status === 'unknown_code') && item.detail}
-                      {item.status === 'wrong_exam' && `${item.studentName ?? ''}: ${item.detail}`}
-                      {item.status === 'error' && item.detail}
-                      {item.status === 'pending' && 'Aguardando início'}
-                    </p>
-                  </div>
-                  <div className="flex gap-1 flex-shrink-0">
-                    {item.status === 'conflict' && (
-                      <Button size="sm" onClick={() => onResolveConflict(item)}>
-                        Sobrescrever
-                      </Button>
-                    )}
-                    {(item.status === 'pending_id' || item.status === 'unknown_code') && (
-                      <Button size="sm" variant="secondary" onClick={() => onReviewManually(item)} icon={<Eye size={14} aria-hidden />}>
-                        Revisar
-                      </Button>
-                    )}
-                    {item.status === 'error' && (
-                      <Button size="sm" variant="secondary" onClick={() => onReviewManually(item, true)} disabled={!exam?.answerKey} icon={<PenLine size={14} aria-hidden />}>
-                        Inserir manualmente
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
