@@ -55,6 +55,9 @@ Fonte principal: **Inter**.
 - `DataTable`, `Pagination`
 - `Modal`, `Popover`, `Tabs`, `Toast`, `Tooltip`
 - `ThemeToggle`, `Avatar`
+- `AppShell`, `Sidebar`, `Topbar`, `BottomNav`
+- `EditorTopBar`, `EditorMobilePanels`
+- `CaptureViewport`, `ReaderSettingsPanel`
 
 ## Regras de uso
 

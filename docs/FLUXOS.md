@@ -108,6 +108,15 @@ Regras oficiais:
 5. Depois da revisão confirmação/correção, resultado entra em dashboard e
    relatórios.
 
+Regras de UX do leitor:
+
+- No mobile, a câmera fica em destaque; moldura, alvos das âncoras, captura
+  manual/automática e fallback para galeria têm prioridade.
+- No desktop, a tela organiza seleção da prova, configurações avançadas, fila
+  de cartões e resultado do processamento.
+- A lógica de detecção, QR, classificação e correção continua exclusiva do
+  backend.
+
 ## 5. Regras operacionais
 
 - Backup/restore e usuários ficam na área admin.
