@@ -177,11 +177,44 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
-          <div className="card w-full">
+          <div className="table-shell">
             <DataTable
               rows={data.gabaritos}
               rowKey={(g) => String(g.id)}
+              pageSize={25}
+              minWidth={900}
+              ariaLabel="Tabela de participantes da avaliação"
               empty="Nenhum gabarito gerado para esta avaliação ainda."
+              mobileCard={(g) => {
+                const st = STATUS_TONE[g.status];
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium text-[#172B4D] dark:text-gray-100 truncate">{g.aluno.nome}</p>
+                        <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">
+                          {g.aluno.matricula ?? 'sem matrícula'} · #{g.aluno.id}
+                        </p>
+                        <p className="text-xs text-brand-600 dark:text-brand-200 font-mono mt-1">{g.codigo_unico}</p>
+                      </div>
+                      <Badge tone={st.tone}>{st.label}</Badge>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs text-[#71809A] dark:text-gray-400">Página {g.numero_pagina}</span>
+                      <span className="text-sm font-bold text-[#172B4D] dark:text-white">Nota {g.nota ?? '—'}</span>
+                    </div>
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      onClick={() => handleDeleteAluno(g)}
+                      icon={<Trash2 size={14} aria-hidden />}
+                      className="w-full"
+                    >
+                      Apagar aluno e gabarito
+                    </Button>
+                  </div>
+                );
+              }}
               columns={[
                 { key: 'aluno', header: 'Aluno', render: (g) => <span className="font-medium text-ink dark:text-gray-100">{g.aluno.nome}</span> },
                 { key: 'mat', header: 'Matrícula', render: (g) => <span className="text-gray-500 dark:text-gray-400">{g.aluno.matricula ?? '—'}</span> },

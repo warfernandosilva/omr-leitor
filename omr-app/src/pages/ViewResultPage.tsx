@@ -91,17 +91,18 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
       <h4 className="text-sm font-bold text-gray-600 dark:text-gray-300 mb-2">
         {getSubjectName(exam, sid)} (1–{end - start + 1})
       </h4>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line dark:border-gray-700">
-              <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Questão</th>
-              <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Resposta</th>
-              <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Gabarito</th>
-              <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Resultado</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="table-shell">
+        <div className="table-scroll">
+          <table className="w-full text-sm">
+            <thead className="bg-[#F8FAFF] dark:bg-gray-800/60">
+              <tr>
+                <th className="table-th">Questão</th>
+                <th className="table-th">Resposta</th>
+                <th className="table-th">Gabarito</th>
+                <th className="table-th text-center">Resultado</th>
+              </tr>
+            </thead>
+            <tbody>
             {Array.from({ length: end - start + 1 }, (_, i) => start + i).map((q) => {
               const answer = result.answers[q] || null;
               const correct = exam.answerKey?.[q];
@@ -111,8 +112,8 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
 
               return (
                 <tr key={q} className="border-b border-line/60 dark:border-gray-800">
-                  <td className="py-2 px-3 font-bold text-gray-600 dark:text-gray-300 tabular-nums">{String(q - start + 1).padStart(2, '0')}</td>
-                  <td className="py-2 px-3">
+                  <td className="table-td font-bold text-[#172B4D] dark:text-gray-200 tabular-nums">{String(q - start + 1).padStart(2, '0')}</td>
+                  <td className="table-td">
                     {answer ? (
                       <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-50 text-brand-700 font-bold text-sm dark:bg-brand-700/20 dark:text-brand-200">
                         {answer}
@@ -121,16 +122,16 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
                       <span className="text-gray-300 dark:text-gray-600">—</span>
                     )}
                   </td>
-                  <td className="py-2 px-3">
+                  <td className="table-td">
                     {correct ? (
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-surface text-gray-600 font-bold text-sm dark:bg-gray-800 dark:text-gray-300">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[#F4F7FD] text-[#172B4D] font-bold text-sm dark:bg-gray-800 dark:text-gray-300">
                         {correct}
                       </span>
                     ) : (
                       <span className="text-gray-300 dark:text-gray-600">—</span>
                     )}
                   </td>
-                  <td className="py-2 px-3 text-center">
+                  <td className="table-td text-center">
                     {isCorrect ? (
                       <span className="text-success-600 dark:text-success-100 font-medium">✓ Correta</span>
                     ) : isDupUnresolved ? (
@@ -141,7 +142,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
                         </span>
                       </span>
                     ) : !answer ? (
-                      <span className="text-xs text-gray-500 dark:text-gray-400">Em branco</span>
+                      <span className="text-xs text-[#71809A] dark:text-gray-400">Em branco</span>
                     ) : (
                       <span className="text-danger-600 dark:text-danger-100 font-medium">✗ Incorreta</span>
                     )}
@@ -151,6 +152,7 @@ export default function ViewResultPage({ resultId, onNavigate }: Props) {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );

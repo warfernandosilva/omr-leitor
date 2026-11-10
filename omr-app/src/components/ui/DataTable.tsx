@@ -112,15 +112,15 @@ export default function DataTable<T>({
       {mobileCard ? (
         <div className="md:hidden space-y-2">
           {visible.map((row, i) => (
-            <div key={rowKey(row, i)} className="border border-line dark:border-gray-800 rounded-xl p-3 bg-white dark:bg-gray-900">
+            <div key={rowKey(row, i)} className="panel">
               {mobileCard(row)}
             </div>
           ))}
         </div>
       ) : null}
-      <div className={`overflow-x-auto -mx-6 px-6 ${mobileCard ? 'hidden md:block' : ''}`}>
+      <div className={`overflow-x-auto ${mobileCard ? 'hidden md:block' : ''}`}>
         <table className="w-full text-sm" style={{ minWidth }} aria-label={ariaLabel}>
-          <thead className="sticky top-0 bg-white dark:bg-gray-900 z-10">
+          <thead className="sticky top-0 bg-[#F8FAFF] dark:bg-gray-800 z-10">
             <tr className="border-b border-line dark:border-gray-800">
               {columns.map((c) => (
                 <th key={c.key} className={`table-th ${c.className ?? ''}`}>
@@ -128,7 +128,7 @@ export default function DataTable<T>({
                     <button
                       onClick={() => toggleSort(c)}
                       aria-label={`Ordenar por ${c.header}`}
-                      className="inline-flex items-center font-semibold uppercase tracking-wide hover:text-ink dark:hover:text-white"
+                      className="inline-flex items-center font-semibold uppercase tracking-wide hover:text-brand-600 dark:hover:text-white"
                     >
                       {c.header}
                       {sortIcon(c)}
@@ -147,8 +147,8 @@ export default function DataTable<T>({
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 onKeyDown={onRowClick ? onRowKey(row) : undefined}
                 tabIndex={onRowClick ? 0 : undefined}
-                className={`border-b border-gray-50 dark:border-gray-800 transition-colors ${
-                  onRowClick ? 'cursor-pointer hover:bg-brand-50 dark:hover:bg-gray-800/60' : 'hover:bg-surface dark:hover:bg-gray-800/60'
+                className={`border-b border-line/60 dark:border-gray-800 transition-colors ${
+                  onRowClick ? 'cursor-pointer hover:bg-brand-50 dark:hover:bg-gray-800/60' : 'hover:bg-[#F8FAFF] dark:hover:bg-gray-800/60'
                 }`}
               >
                 {columns.map((c) => (

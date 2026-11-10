@@ -188,8 +188,22 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-100 mb-2">Top candidatos (até 50)</h4>
             <DataTable<LabCandidate>
               minWidth={620}
+              pageSize={15}
+              ariaLabel="Top candidatos de calibração"
               rows={results}
               rowKey={(r, i) => `${r.floor}-${r.margin}-${i}`}
+              mobileCard={r => (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-mono text-[#71809A] dark:text-gray-400">floor {r.floor} · margin {r.margin}</span>
+                    <span className="text-sm font-semibold text-success-600 dark:text-success-100">{pct(r.taxa_acerto)}</span>
+                  </div>
+                  <p className="text-xs text-[#71809A] dark:text-gray-400">
+                    {r.acertos}/{r.com_gabarito} acertos · {r.ambiguas} ambíguas · {r.erros} erros
+                  </p>
+                  <p className="text-xs font-mono text-[#71809A] dark:text-gray-400">[{r.weights.join(', ')}]</p>
+                </div>
+              )}
               columns={[
                 { key: 'floor', header: 'floor', render: r => <span className="font-mono text-xs text-gray-600 dark:text-gray-300">{r.floor}</span> },
                 { key: 'margin', header: 'margin', render: r => <span className="font-mono text-xs text-gray-600 dark:text-gray-300">{r.margin}</span> },
@@ -226,8 +240,28 @@ export default function CalibrationPanel({ session, isAdmin }: Props) {
         ) : (
           <DataTable<LabConfig>
             minWidth={700}
+            pageSize={10}
+            ariaLabel="Configurações publicadas"
             rows={configs.configs}
             rowKey={c => String(c.id)}
+            mobileCard={c => (
+              <div className="space-y-3">
+                <div>
+                  <p className="font-medium text-[#172B4D] dark:text-white truncate">{c.nome}</p>
+                  <p className="text-xs text-[#71809A] dark:text-gray-400">
+                    {c.template ?? 'global'}{c.ativa ? ' · ativa' : ''}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => doPublish(c)} loading={cfgBusy} disabled={c.ativa}>
+                    Publicar
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => doRollback(c)} loading={cfgBusy} disabled={c.ativa}>
+                    Rollback
+                  </Button>
+                </div>
+              </div>
+            )}
             columns={[
               {
                 key: 'nome',

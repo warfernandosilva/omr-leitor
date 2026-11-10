@@ -685,29 +685,31 @@ const HERBY_BLOCK_MSG = 'Provas "Gabarito Herby" exigem geração em lote via Ge
                   {showPreview ? 'Ocultar prévia' : 'Prévia do cartão'}
                 </Button>
               </div>
-              <div className="overflow-y-auto max-h-96 border border-line dark:border-gray-700 rounded-lg">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-white dark:bg-gray-900 shadow-[0_1px_0_0_#E2E8F0]">
-                    <tr>
-                      <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400 w-12">#</th>
-                      {result.identifierColumnLabel && (
-                        <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Identificação</th>
-                      )}
-                      <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Nome</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {students.map((s) => (
-                      <tr key={s.seq} className="border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800">
-                        <td className="py-1.5 px-3 text-gray-500 dark:text-gray-400 tabular-nums">{s.seq}</td>
+              <div className="table-shell">
+                <div className="table-scroll max-h-96 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 z-10 bg-[#F8FAFF] dark:bg-gray-800">
+                      <tr>
+                        <th className="table-th w-12">#</th>
                         {result.identifierColumnLabel && (
-                          <td className="py-1.5 px-3 text-gray-500 dark:text-gray-400">{s.identifier ?? '—'}</td>
+                          <th className="table-th">Identificação</th>
                         )}
-                        <td className="py-1.5 px-3 text-ink dark:text-gray-100">{s.name}</td>
+                        <th className="table-th">Nome</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {students.map((s) => (
+                        <tr key={s.seq} className="border-b border-line/60 dark:border-gray-800 hover:bg-[#F8FAFF] dark:hover:bg-gray-800">
+                          <td className="table-td text-[#71809A] dark:text-gray-400 tabular-nums">{s.seq}</td>
+                          {result.identifierColumnLabel && (
+                            <td className="table-td text-[#71809A] dark:text-gray-400">{s.identifier ?? '—'}</td>
+                          )}
+                          <td className="table-td text-[#172B4D] dark:text-gray-100">{s.name}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                 Os IDs internos e os códigos únicos (QR) são gerados pelo servidor durante a gravação no banco.

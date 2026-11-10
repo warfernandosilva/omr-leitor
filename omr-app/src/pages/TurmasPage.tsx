@@ -21,6 +21,7 @@ import EmptyState from '../components/ui/EmptyState';
 import Card from '../components/ui/Card';
 import StatCard from '../components/ui/StatCard';
 import Tabs from '../components/ui/Tabs';
+import DataTable from '../components/ui/DataTable';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -413,30 +414,31 @@ export default function TurmasPage({ onNavigate }: Props) {
                       description="Importe a planilha ou adicione manualmente para usar esta turma nas provas."
                     />
                   ) : (
-                    <div className="table-shell">
-                      <div className="table-scroll">
-                        <table className="w-full">
-                          <thead className="bg-[#F8FAFF] dark:bg-gray-800/60">
-                            <tr>
-                              <th className="table-th">Nome</th>
-                              <th className="table-th">Matrícula</th>
-                              <th className="table-th text-right">Ações</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-line dark:divide-gray-800">
-                            {detail.alunos.map((a) => (
-                              <tr key={a.id}>
-                                <td className="table-td font-medium text-[#172B4D] dark:text-gray-100">{a.nome}</td>
-                                <td className="table-td text-[#71809A] dark:text-gray-400">{a.matricula || '—'}</td>
-                                <td className="table-td text-right">
-                                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => handleRemoveAluno(a.id, a.nome)}>Remover</Button>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
+                    <DataTable
+                      rows={detail.alunos}
+                      rowKey={(a) => String(a.id)}
+                      pageSize={25}
+                      minWidth={640}
+                      ariaLabel="Alunos da turma"
+                      empty="Nenhum aluno cadastrado."
+                      mobileCard={(a) => (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-[#172B4D] dark:text-gray-100 truncate">{a.nome}</p>
+                            <p className="text-xs text-[#71809A] dark:text-gray-400">{a.matricula || 'sem matrícula'}</p>
+                          </div>
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => handleRemoveAluno(a.id, a.nome)}>Remover</Button>
+                        </div>
+                      )}
+                      columns={[
+                        { key: 'nome', header: 'Nome', render: (a) => <span className="font-medium text-[#172B4D] dark:text-gray-100">{a.nome}</span> },
+                        { key: 'matricula', header: 'Matrícula', render: (a) => <span className="text-[#71809A] dark:text-gray-400">{a.matricula || '—'}</span> },
+                        {
+                          key: 'acoes', header: 'Ações', className: 'text-right',
+                          render: (a) => <Button size="sm" variant="ghost" disabled={busy} onClick={() => handleRemoveAluno(a.id, a.nome)}>Remover</Button>,
+                        },
+                      ]}
+                    />
                   )}
                 </div>
               )}
@@ -476,32 +478,34 @@ export default function TurmasPage({ onNavigate }: Props) {
                     description="Depois de corrigir os cartões desta turma, os resultados aparecem aqui."
                   />
                 ) : (
-                  <div className="table-shell">
-                    <div className="table-scroll">
-                      <table className="w-full">
-                        <thead className="bg-[#F8FAFF] dark:bg-gray-800/60">
-                          <tr>
-                            <th className="table-th">Aluno</th>
-                            <th className="table-th">Prova</th>
-                            <th className="table-th">Nota</th>
-                            <th className="table-th text-right">Ações</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-line dark:divide-gray-800">
-                          {turmaResults.slice(0, 10).map((r) => (
-                            <tr key={r.id}>
-                              <td className="table-td font-medium text-[#172B4D] dark:text-gray-100">{r.studentName || '(sem identificação)'}</td>
-                              <td className="table-td text-[#71809A] dark:text-gray-400">{turmaExams.find(e => e.id === r.examId)?.name ?? 'Prova'}</td>
-                              <td className="table-td font-semibold text-brand-600 dark:text-brand-200">{r.grade.toFixed(1)}</td>
-                              <td className="table-td text-right">
-                                <Button size="sm" variant="ghost" onClick={() => onNavigate('view-result', r.id)}>Ver</Button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                  <DataTable
+                    rows={[...turmaResults].sort((a, b) => b.timestamp.localeCompare(a.timestamp))}
+                    rowKey={(r) => r.id}
+                    pageSize={10}
+                    minWidth={720}
+                    ariaLabel="Resultados da turma"
+                    mobileCard={(r) => (
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[#172B4D] dark:text-gray-100 truncate">{r.studentName || '(sem identificação)'}</p>
+                          <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">{turmaExams.find(e => e.id === r.examId)?.name ?? 'Prova'}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-brand-600 dark:text-brand-200">{r.grade.toFixed(1)}</span>
+                          <Button size="sm" variant="ghost" onClick={() => onNavigate('view-result', r.id)}>Ver</Button>
+                        </div>
+                      </div>
+                    )}
+                    columns={[
+                      { key: 'aluno', header: 'Aluno', render: (r) => <span className="font-medium text-[#172B4D] dark:text-gray-100">{r.studentName || '(sem identificação)'}</span> },
+                      { key: 'prova', header: 'Prova', render: (r) => <span className="text-[#71809A] dark:text-gray-400">{turmaExams.find(e => e.id === r.examId)?.name ?? 'Prova'}</span> },
+                      { key: 'nota', header: 'Nota', render: (r) => <span className="font-semibold text-brand-600 dark:text-brand-200">{r.grade.toFixed(1)}</span> },
+                      {
+                        key: 'acoes', header: 'Ações', className: 'text-right',
+                        render: (r) => <Button size="sm" variant="ghost" onClick={() => onNavigate('view-result', r.id)}>Ver</Button>,
+                      },
+                    ]}
+                  />
                 )
               )}
 

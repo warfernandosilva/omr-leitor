@@ -6,6 +6,7 @@ import PageHeader from '../components/ui/PageHeader';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Select from '../components/ui/Select';
+import DataTable from '../components/ui/DataTable';
 
 interface Props {
   onNavigate: (view: AppView) => void;
@@ -183,86 +184,140 @@ export default function AdminUsersPage({ onNavigate }: Props) {
       )}
 
       {!loading && !error && (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line dark:border-gray-700">
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Nome</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">E-mail</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Papel</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Ativo</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Provas</th>
-                <th className="py-3 px-3 text-left font-medium text-gray-500 dark:text-gray-400 hidden md:table-cell">Criado em</th>
-                <th className="py-3 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(u => {
+        <div className="table-shell">
+          <DataTable<AdminUser>
+            rows={users}
+            rowKey={(u) => String(u.id)}
+            pageSize={20}
+            minWidth={860}
+            ariaLabel="Tabela de usuários"
+            empty="Nenhum usuário cadastrado."
+            mobileCard={(u) => {
+              const isMe = meEmail && u.email === meEmail;
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[#172B4D] dark:text-gray-100 truncate">
+                        {u.nome} {isMe && <Badge tone="info">você</Badge>}
+                      </p>
+                      <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">{u.email}</p>
+                      <p className="text-xs text-[#71809A] dark:text-gray-400 mt-1">
+                        {u.role === 'admin' ? 'Administrador' : 'Professor'} · {u.avaliacoes} prova(s)
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleToggleActive(u)}
+                      disabled={!!isMe}
+                      className="disabled:opacity-50 min-h-[44px]"
+                      title={isMe ? 'Não pode desativar a própria conta' : undefined}
+                    >
+                      <Badge tone={u.is_active ? 'success' : 'neutral'}>{u.is_active ? 'Ativo' : 'Inativo'}</Badge>
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      aria-label={`Papel de ${u.nome}`}
+                      value={u.role}
+                      onChange={e => handleRoleChange(u, e.target.value)}
+                      className="py-1 px-2 text-xs w-32"
+                      disabled={Boolean(isMe) && users.filter(x => x.role === 'admin').length <= 1 && u.role === 'admin'}
+                      title={isMe && u.role === 'admin' ? 'Último admin não pode ser rebaixado' : undefined}
+                    >
+                      <option value="professor">professor</option>
+                      <option value="admin">admin</option>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleResetPassword(u)}
+                      icon={<KeyRound size={14} aria-hidden />}
+                    >
+                      Senha
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => handleDelete(u)}
+                      disabled={!!isMe}
+                      icon={<Trash2 size={14} aria-hidden />}
+                    >
+                      Excluir
+                    </Button>
+                  </div>
+                </div>
+              );
+            }}
+            columns={[
+              { key: 'nome', header: 'Nome', render: (u) => {
                 const isMe = meEmail && u.email === meEmail;
                 return (
-                  <tr key={u.id} className={`border-b border-line/60 dark:border-gray-800 hover:bg-surface dark:hover:bg-gray-800 ${!u.is_active ? 'opacity-50' : ''}`}>
-                    <td className="py-3 px-3 font-medium text-ink dark:text-gray-100">
-                      {u.nome} {isMe && <Badge tone="info" className="ml-1">você</Badge>}
-                    </td>
-                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400">{u.email}</td>
-                    <td className="py-3 px-3">
-                      <Select
-                        aria-label={`Papel de ${u.nome}`}
-                        value={u.role}
-                        onChange={e => handleRoleChange(u, e.target.value)}
-                        className="py-1 px-2 text-xs w-28"
-                        disabled={Boolean(isMe) && users.filter(x => x.role === 'admin').length <= 1 && u.role === 'admin'}
-                        title={isMe && u.role === 'admin' ? 'Último admin não pode ser rebaixado' : undefined}
-                      >
-                        <option value="professor">professor</option>
-                        <option value="admin">admin</option>
-                      </Select>
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <button
-                        onClick={() => handleToggleActive(u)}
-                        disabled={!!isMe}
-                        className="disabled:opacity-50 min-h-[44px]"
-                        title={isMe ? 'Não pode desativar a própria conta' : undefined}
-                      >
-                        <Badge tone={u.is_active ? 'success' : 'neutral'}>{u.is_active ? 'Ativo' : 'Inativo'}</Badge>
-                      </button>
-                    </td>
-                    <td className="py-3 px-3 text-center text-gray-600 dark:text-gray-300 tabular-nums">{u.avaliacoes}</td>
-                    <td className="py-3 px-3 text-gray-500 dark:text-gray-400 text-xs hidden md:table-cell">
-                      {u.created_at ? new Date(u.created_at).toLocaleString('pt-BR') : '—'}
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <div className="flex gap-1 justify-center">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() => handleResetPassword(u)}
-                          icon={<KeyRound size={14} aria-hidden />}
-                          title="Redefinir senha"
-                        >
-                          Senha
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          onClick={() => handleDelete(u)}
-                          disabled={!!isMe}
-                          icon={<Trash2 size={14} aria-hidden />}
-                          title={isMe ? 'Não pode excluir a própria conta' : 'Excluir usuário'}
-                        >
-                          Excluir
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
+                  <span className="font-medium text-[#172B4D] dark:text-gray-100">
+                    {u.nome} {isMe && <Badge tone="info" className="ml-1">você</Badge>}
+                  </span>
                 );
-              })}
-              {users.length === 0 && (
-                <tr><td colSpan={7} className="py-8 text-center text-gray-500 dark:text-gray-400">Nenhum usuário cadastrado.</td></tr>
-              )}
-            </tbody>
-          </table>
+              } },
+              { key: 'email', header: 'E-mail', render: (u) => <span className="text-[#71809A] dark:text-gray-400">{u.email}</span> },
+              { key: 'role', header: 'Papel', render: (u) => (
+                <Select
+                  aria-label={`Papel de ${u.nome}`}
+                  value={u.role}
+                  onChange={e => handleRoleChange(u, e.target.value)}
+                  className="py-1 px-2 text-xs w-28"
+                  disabled={Boolean(meEmail && u.email === meEmail) && users.filter(x => x.role === 'admin').length <= 1 && u.role === 'admin'}
+                  title={meEmail && u.email === meEmail && u.role === 'admin' ? 'Último admin não pode ser rebaixado' : undefined}
+                >
+                  <option value="professor">professor</option>
+                  <option value="admin">admin</option>
+                </Select>
+              ) },
+              { key: 'ativo', header: 'Ativo', className: 'text-center', render: (u) => {
+                const isMe = meEmail && u.email === meEmail;
+                return (
+                  <button
+                    onClick={() => handleToggleActive(u)}
+                    disabled={!!isMe}
+                    className="disabled:opacity-50 min-h-[44px]"
+                    title={isMe ? 'Não pode desativar a própria conta' : undefined}
+                  >
+                    <Badge tone={u.is_active ? 'success' : 'neutral'}>{u.is_active ? 'Ativo' : 'Inativo'}</Badge>
+                  </button>
+                );
+              } },
+              { key: 'provas', header: 'Provas', className: 'text-center', render: (u) => <span className="text-[#71809A] dark:text-gray-300 tabular-nums">{u.avaliacoes}</span> },
+              { key: 'criado', header: 'Criado em', className: 'hidden md:table-cell', render: (u) => (
+                <span className="text-[#71809A] dark:text-gray-400 text-xs">
+                  {u.created_at ? new Date(u.created_at).toLocaleString('pt-BR') : '—'}
+                </span>
+              ) },
+              { key: 'acoes', header: 'Ações', className: 'text-center', render: (u) => {
+                const isMe = meEmail && u.email === meEmail;
+                return (
+                  <div className="flex gap-1 justify-center">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => handleResetPassword(u)}
+                      icon={<KeyRound size={14} aria-hidden />}
+                      title="Redefinir senha"
+                    >
+                      Senha
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => handleDelete(u)}
+                      disabled={!!isMe}
+                      icon={<Trash2 size={14} aria-hidden />}
+                      title={isMe ? 'Não pode excluir a própria conta' : 'Excluir usuário'}
+                    >
+                      Excluir
+                    </Button>
+                  </div>
+                );
+              } },
+            ]}
+          />
         </div>
       )}
     </div>

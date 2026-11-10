@@ -165,8 +165,35 @@ export default function SessionsPanel({ sessions, loading, selectedId, onSelect,
           <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">Sessões</h3>
           <DataTable<LabSessionSummary>
             minWidth={760}
+            pageSize={10}
+            ariaLabel="Sessões do laboratório OMR"
             rows={sessions}
             rowKey={s => String(s.id)}
+            mobileCard={s => (
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-[#172B4D] dark:text-white truncate">{s.nome}</p>
+                    {s.descricao && <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">{s.descricao}</p>}
+                    <p className="text-xs text-[#71809A] dark:text-gray-400 mt-1">
+                      {templateLabel(s.template)} · {labTotalQuestions(s)} questões · {s.n_images} foto(s)
+                    </p>
+                  </div>
+                  {s.n_erro > 0 && <Badge tone="danger">{s.n_erro} erro</Badge>}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant={selectedId === s.id ? 'primary' : 'secondary'}
+                    onClick={() => onSelect(s.id)}
+                    icon={<Play size={14} aria-hidden />}
+                  >
+                    {selectedId === s.id ? 'Selecionada' : 'Abrir'}
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => remove(s)} icon={<Trash2 size={14} aria-hidden />}>Excluir</Button>
+                </div>
+              </div>
+            )}
             columns={[
               {
                 key: 'nome',

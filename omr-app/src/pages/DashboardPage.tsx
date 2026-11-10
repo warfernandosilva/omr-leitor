@@ -153,12 +153,29 @@ export default function DashboardPage({ onNavigate }: Props) {
           </div>
 
           <div className="card card-hover">
-            <h3 className="font-semibold text-ink dark:text-white mb-3">Ranking por aluno</h3>
+            <h3 className="font-semibold text-[#172B4D] dark:text-white mb-3">Ranking por aluno</h3>
             <DataTable
               rows={[...results].sort((a,b)=>b.grade-a.grade)}
               rowKey={(r) => r.id}
+              pageSize={10}
+              minWidth={520}
+              ariaLabel="Ranking por aluno"
+              mobileCard={(r) => (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#172B4D] dark:text-gray-100 truncate">{r.studentName}</p>
+                    <p className="text-xs text-[#71809A] dark:text-gray-400">
+                      {r.correctCount}/{exam.totalQuestions} acertos
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-brand-600 dark:text-brand-200">{r.grade}</span>
+                    <button onClick={()=>onNavigate('view-result', r.id)} className="btn btn-sm btn-secondary min-h-[44px]">Ver</button>
+                  </div>
+                </div>
+              )}
               columns={[
-                { key: 'name', header: 'Aluno', render: (r) => <span className="font-medium text-ink dark:text-white">{r.studentName}</span> },
+                { key: 'name', header: 'Aluno', render: (r) => <span className="font-medium text-[#172B4D] dark:text-white">{r.studentName}</span> },
                 { key: 'hits', header: 'Acertos', className: 'text-center', render: (r) => <span className="text-success-600 dark:text-success-100">{r.correctCount}/{exam.totalQuestions}</span> },
                 { key: 'grade', header: 'Nota', className: 'text-center', render: (r) => <span className="font-bold text-brand-600 dark:text-brand-200">{r.grade}</span> },
                 { key: 'act', header: 'Ação', className: 'text-center', render: (r) => <button onClick={()=>onNavigate('view-result', r.id)} className="btn btn-sm btn-secondary min-h-[44px]">Ver</button> },

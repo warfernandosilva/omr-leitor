@@ -18,6 +18,7 @@ import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
+import DataTable from '../components/ui/DataTable';
 import StatCard from '../components/ui/StatCard';
 
 interface Props {
@@ -182,83 +183,59 @@ export default function StudentsPage({ onNavigate }: Props) {
             />
           </div>
         ) : (
-          <>
-            {/* Tabela em telas maiores */}
-            <Card noPad className="hidden md:block">
-              <div className="table-scroll">
-                <table className="w-full">
-                  <thead className="bg-[#F8FAFF] dark:bg-gray-800/60">
-                    <tr>
-                      <th className="table-th">Aluno</th>
-                      <th className="table-th">Matrícula</th>
-                      <th className="table-th">Turma</th>
-                      <th className="table-th">Situação</th>
-                      <th className="table-th text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-line dark:divide-gray-800">
-                    {filtered.map(a => {
-                      const k = keyOf(a);
-                      return (
-                        <tr
-                          key={k}
-                          onClick={() => setSelectedKey(k)}
-                          className={`cursor-pointer transition-colors ${selectedKey === k
-                            ? 'bg-brand-50/60 dark:bg-brand-700/15'
-                            : 'hover:bg-[#F8FAFF] dark:hover:bg-gray-800/50'}`}
-                        >
-                          <td className="table-td">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <Avatar name={a.nome} size="sm" />
-                              <div className="min-w-0">
-                                <p className="font-medium text-[#172B4D] dark:text-gray-100 truncate">{a.nome}</p>
-                                {a.identificador_externo ? <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">ID externo: {a.identificador_externo}</p> : null}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="table-td text-[#71809A] dark:text-gray-400">{a.matricula || '—'}</td>
-                          <td className="table-td text-[#71809A] dark:text-gray-400">{a.turma_nome ?? 'Sem turma'}</td>
-                          <td className="table-td">
-                            {dupIdSet.has(a.id)
-                              ? <Badge tone="warning">Duplicado?</Badge>
-                              : <Badge tone="success">Ativo</Badge>}
-                          </td>
-                          <td className="table-td text-right">
-                            <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedKey(k); }}>
-                              Ver histórico
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+          <DataTable<AlunoListItem>
+            rows={filtered}
+            rowKey={(a) => keyOf(a)}
+            pageSize={20}
+            minWidth={840}
+            ariaLabel="Catálogo de alunos"
+            onRowClick={(a) => setSelectedKey(keyOf(a))}
+            empty="Nenhum aluno encontrado."
+            mobileCard={(a) => (
+              <div className="flex items-center gap-3">
+                <Avatar name={a.nome} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-[#172B4D] dark:text-white truncate">{a.nome}</p>
+                  <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">
+                    {a.turma_nome ?? 'Sem turma'}{a.matricula ? ` · #${a.matricula}` : ''}
+                  </p>
+                </div>
+                {dupIdSet.has(a.id)
+                  ? <Badge tone="warning">Duplicado?</Badge>
+                  : <Badge tone="success">Ativo</Badge>}
               </div>
-            </Card>
-
-            {/* Cards no mobile */}
-            <div className="grid grid-cols-1 gap-3 md:hidden">
-              {filtered.map(a => {
-                const k = keyOf(a);
-                return (
-                  <button key={k} onClick={() => setSelectedKey(k)} className="panel text-left w-full">
-                    <div className="flex items-center gap-3">
-                      <Avatar name={a.nome} size="sm" />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-[#172B4D] dark:text-white truncate">{a.nome}</p>
-                        <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">
-                          {a.turma_nome ?? 'Sem turma'}{a.matricula ? ` · #${a.matricula}` : ''}
-                        </p>
-                      </div>
-                      {dupIdSet.has(a.id)
-                        ? <Badge tone="warning">Duplicado?</Badge>
-                        : <Badge tone="success">Ativo</Badge>}
+            )}
+            columns={[
+              {
+                key: 'aluno', header: 'Aluno',
+                render: (a) => (
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Avatar name={a.nome} size="sm" />
+                    <div className="min-w-0">
+                      <p className="font-medium text-[#172B4D] dark:text-gray-100 truncate">{a.nome}</p>
+                      {a.identificador_externo ? <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">ID externo: {a.identificador_externo}</p> : null}
                     </div>
-                  </button>
-                );
-              })}
-            </div>
-          </>
+                  </div>
+                ),
+              },
+              { key: 'matricula', header: 'Matrícula', render: (a) => <span className="text-[#71809A] dark:text-gray-400">{a.matricula || '—'}</span> },
+              { key: 'turma', header: 'Turma', render: (a) => <span className="text-[#71809A] dark:text-gray-400">{a.turma_nome ?? 'Sem turma'}</span> },
+              {
+                key: 'situacao', header: 'Situação',
+                render: (a) => dupIdSet.has(a.id)
+                  ? <Badge tone="warning">Duplicado?</Badge>
+                  : <Badge tone="success">Ativo</Badge>,
+              },
+              {
+                key: 'acoes', header: 'Ações', className: 'text-right',
+                render: (a) => (
+                  <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedKey(keyOf(a)); }}>
+                    Ver histórico
+                  </Button>
+                ),
+              },
+            ]}
+          />
         )}
 
         <Card className="space-y-4">

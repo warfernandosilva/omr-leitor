@@ -420,6 +420,29 @@ export default function MetricsPanel({ session, detail }: Props) {
                 rows={changes}
                 rowKey={c => `${c.row.image_id}:${c.row.question}`}
                 empty="Nenhuma questão muda com estes valores."
+                mobileCard={c => {
+                  const o = outcome(c.row);
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-[#71809A] dark:text-gray-400 truncate">{c.image}</span>
+                        <span className="text-sm font-semibold text-[#172B4D] dark:text-white">Q{c.row.question}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge tone={labStatusTone(c.before.status)}>{labelOf(c.before)}</Badge>
+                        <span className="text-xs text-[#71809A] dark:text-gray-400">→</span>
+                        <Badge tone={labStatusTone(c.row.status)}>{labelOf(c.row)}</Badge>
+                        <span className={
+                          o === 'good' ? 'text-xs text-success-600 dark:text-success-100'
+                            : o === 'bad' ? 'text-xs text-danger-600 dark:text-danger-100'
+                              : 'text-xs text-warning-600 dark:text-warning-100'
+                        }>
+                          {o === 'good' ? 'acertou' : o === 'bad' ? 'errou' : 'ambígua'}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }}
                 columns={[
                   {
                     key: 'imagem', header: 'Imagem',
