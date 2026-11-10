@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import {
-  ArrowLeft, ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2, Save,
-  Upload, ShieldCheck, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
+  ZoomIn, ZoomOut, Maximize, Undo2, Redo2, Trash2,
+  Upload, Eye, EyeOff, Printer, FlaskConical, Crosshair, PenSquare,
   Square, Info, QrCode, Boxes, AlertTriangle, CheckCircle2, ImageIcon, ScanSearch, Plus, Move,
   History, Wand2, LayoutTemplate,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
@@ -51,6 +51,8 @@ import type { TemplatePageWarning } from '../utils/template-warnings';
 import StatusBar from '../components/custom/StatusBar';
 import CardGeneratorForm from '../components/custom/CardGeneratorForm';
 import EditorShell from '../components/custom/EditorShell';
+import EditorTopBar from '../components/custom/editor/EditorTopBar';
+import EditorMobilePanels, { type EditorMobileTab } from '../components/custom/editor/EditorMobilePanels';
 
 type RegionType = 'anchor' | 'qr' | 'info' | 'block' | 'element' | 'idgrid';
 type Tool = 'select' | 'anchor' | 'qr' | 'info' | 'place-block' | 'bubble' | 'text' | 'line' | 'idgrid';
@@ -413,6 +415,8 @@ function TemplateEditor({
   const [copying, setCopying] = useState(false);
   // Painel direito: uma aba por vez evita empilhar propriedades + diagnóstico + ações.
   const [rightTab, setRightTab] = useState<'props' | 'diag' | 'actions'>('props');
+  // Em telas pequenas, os painéis laterais viram abas dentro de um bottom sheet.
+  const [mobilePanel, setMobilePanel] = useState<EditorMobileTab | null>(null);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   /** O usuário ajustou o zoom manualmente: não re-ajustar sozinho ao redimensionar. */
   const zoomManualRef = useRef(false);
@@ -1330,47 +1334,9 @@ function TemplateEditor({
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  return (
-    <div className="flex min-h-0 flex-col animate-fade-in">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line pb-2 dark:border-gray-800">
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-bold tracking-tight text-ink dark:text-white">
-            {detail.nome}
-          </h1>
-          <p className="truncate text-[11px] text-gray-500 dark:text-gray-400">
-            Gabarito personalizado · {STATUS_LABEL[status] ?? status}
-            {saving ? ' · salvando…' : dirty ? ' · alterações não salvas' : ' · salvo'}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose}
-                  icon={<ArrowLeft size={15} aria-hidden />}>Modelos</Button>
-          <Button variant="secondary" size="sm" onClick={() => void save()} loading={saving}
-                  disabled={!dirty} icon={<Save size={15} aria-hidden />}>Salvar</Button>
-          <Button variant="secondary" size="sm" onClick={() => void runValidate()}
-                  icon={<CheckCircle2 size={15} aria-hidden />}>Validar</Button>
-          <Button variant="success" size="sm" onClick={() => void activate()}
-                  icon={<ShieldCheck size={15} aria-hidden />}>
-            {status === 'ativo' ? 'Ativar nova versão' : 'Ativar modelo'}
-          </Button>
-        </div>
-      </div>
-
-      {detail.pending_version && (
-        <div className="callout-warning flex items-start gap-2 text-xs">
-          <AlertTriangle size={14} className="mt-0.5 shrink-0" aria-hidden />
-          <p>
-            Há alterações no editor que ainda não foram ativadas. A leitura e a
-            impressão oficiais usam a versão <strong>{detail.version}</strong>.
-            Clique em <strong>Ativar nova versão</strong> antes de gerar cartões
-            com o layout atual.
-          </p>
-        </div>
-      )}
-
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-[250px_minmax(0,1fr)_320px] lg:overflow-hidden">
-        {/* Painel esquerdo */}
-        <div className="card space-y-3 lg:h-full lg:min-h-0 overflow-y-auto">
+  const renderLeftPanel = (visibleOnMobile: boolean) => (
+    <div className={`card flex flex-col space-y-3 lg:h-full lg:min-h-0 overflow-y-auto ${visibleOnMobile ? 'hidden lg:flex' : 'flex'}`}>
+          {/* Multi-página (mesma folha): abas de página */}
           {/* Multi-página (mesma folha): abas de página */}
           <div className="space-y-2">
             <p className="label">Páginas do cartão</p>
@@ -1503,6 +1469,43 @@ function TemplateEditor({
             )}
           </div>
         </div>
+    );
+
+  return (
+    <div className="flex min-h-0 flex-col animate-fade-in pb-24 lg:pb-0">
+      <EditorTopBar
+        title={detail.nome}
+        statusLabel={STATUS_LABEL[status] ?? status}
+        statusDetail={saving ? 'salvando…' : dirty ? 'alterações não salvas' : 'salvo'}
+        pendingVersion={detail.pending_version}
+        version={detail.version}
+        saving={saving}
+        dirty={dirty}
+        onClose={onClose}
+        onSave={() => void save()}
+        onValidate={() => void runValidate()}
+        onActivate={() => void activate()}
+      />
+
+      {/* Disparo dos painéis laterais em telas pequenas */}
+      <div className="sticky bottom-0 z-20 -mx-4 mt-1 flex shrink-0 flex-wrap gap-2 border-t border-line glass px-4 py-2 lg:hidden">
+        <Button size="sm" variant="secondary" onClick={() => setMobilePanel('ferramentas')}>
+          Ferramentas
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setMobilePanel('propriedades')}>
+          Propriedades
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setMobilePanel('diagnostico')}>
+          Diagnóstico{issues.length + warnings.length > 0 ? ` · ${issues.length + warnings.length}` : ''}
+        </Button>
+        <Button size="sm" variant="secondary" onClick={() => setMobilePanel('acoes')}>
+          Ações
+        </Button>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-[250px_minmax(0,1fr)_320px] lg:overflow-hidden">
+        {/* Painel esquerdo */}
+        {renderLeftPanel(true)}
 
         {/* Área central */}
         <div className="card p-2 flex flex-col gap-2 h-[78vh] lg:h-full lg:min-h-0">
@@ -1641,7 +1644,7 @@ function TemplateEditor({
         </div>
 
         {/* Painel direito: uma aba por vez (propriedades, diagnóstico, ações). */}
-        <div className="card flex lg:h-full lg:min-h-0 flex-col overflow-hidden">
+        <div className="hidden lg:flex card flex lg:h-full lg:min-h-0 flex-col overflow-hidden">
           <Tabs
             ariaLabel="Painel do modelo"
             active={rightTab}
@@ -1663,9 +1666,24 @@ function TemplateEditor({
         </div>
       </div>
 
+      <EditorMobilePanels
+        open={mobilePanel !== null}
+        onClose={() => setMobilePanel(null)}
+        tab={mobilePanel ?? 'ferramentas'}
+        onTab={setMobilePanel}
+        issueCount={issues.length + warnings.length}
+        tools={renderLeftPanel(false)}
+        properties={(
+          <PropertiesPanel config={config} selection={selection} updateField={updateField}
+                           onPickAsset={(id) => pickAsset(id)} />
+        )}
+        diagnostics={<ValidationPanel issues={issues} warnings={warnings} onGoTo={setSelection} />}
+        actions={<ActionsPanel detailId={detail.id} onRestore={apply} />}
+      />
+
       <StatusBar
         pendings={issues.length + warnings.length} zoom={zoom} pageIdx={currentPage} nPages={nPages}
-        baseW={baseW} baseH={baseH} onDiagnosticoClick={() => setRightTab('diag')}
+        baseW={baseW} baseH={baseH} onDiagnosticoClick={() => setMobilePanel('diagnostico')}
       />
     </div>
   );
