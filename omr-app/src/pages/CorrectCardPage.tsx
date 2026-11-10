@@ -16,8 +16,7 @@ import {
   checkHealth, loadAdaptiveFlag, saveAdaptiveFlag, getTurma, listAlunos,
 } from '../utils/api';
 import { calculateGrade } from '../utils/grade';
-import { computeSubjectStats, getSubjectName, getSubjectIds, getSubjectRange, scoreAnswers } from '../utils/exam';
-import { useAutoCapture } from '../hooks/useAutoCapture';
+import { scoreAnswers } from '../utils/exam';import { useAutoCapture } from '../hooks/useAutoCapture';
 import { measureSharpness, DEFAULT_THRESHOLDS } from '../utils/frame-guides';
 import {
   guideRectFor, guideRectForAspect, anchorTargetsFor, anchorTargetsForBox, customAnchorBox,
@@ -44,7 +43,7 @@ import { SIMULADO_MAX_QUESTIONS } from '../utils/simulado-template';
 import { gabaritoCropBox } from '../utils/gabarito-crop';
 import { useAuth } from '../context/AuthContext';
 import {
-  ArrowLeft, ArrowRight, Bot, Camera, CheckCircle2, CloudOff, Eye, Flashlight, FlashlightOff, Focus,
+  ArrowLeft, ArrowRight, Camera, CheckCircle2, CloudOff, Eye, Flashlight, FlashlightOff, Focus,
   ImagePlus, ImageUp, Info, PenLine, Play, RefreshCw, RotateCcw, Save,
   SlidersHorizontal, Sun, SwitchCamera, Trash2, X, ZoomIn,
 } from 'lucide-react';
@@ -52,14 +51,16 @@ import PageHeader from '../components/ui/PageHeader';
 import CornerEditor from '../components/CornerEditor';
 import Field from '../components/ui/Field';
 import Select from '../components/ui/Select';
-import Input from '../components/ui/Input';
-import Autocomplete, { AutocompleteOption } from '../components/ui/Autocomplete';
+import type { AutocompleteOption } from '../components/ui/Autocomplete';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
 import ReadStages from '../components/omr/ReadStages';
 import CaptureViewport from '../components/correct/CaptureViewport';
 import ReaderSettingsPanel from '../components/correct/ReaderSettingsPanel';
+import AiAssistPanel from '../components/correct/AiAssistPanel';
+import ResultSummaryPanel from '../components/correct/ResultSummaryPanel';
+import ManualReviewPanel from '../components/correct/ManualReviewPanel';
 import { anchorLabelFor } from '../utils/read-stages';
 import { findStudentMatches, mergeStudentOptions, StudentOption } from '../utils/alunos';
 
@@ -212,7 +213,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
   const [aiEnabled] = useState(() => isAiAssistEnabled());
   const [aiStatus, setAiStatus] = useState<AiStatus | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<Record<number, AiSuggestion>>({});
-  const [aiLoading, setAiLoading] = useState<number | null>(null);
   const [aiProgress, setAiProgress] = useState<{ done: number; total: number } | null>(null);
   const aiStopRef = useRef(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -423,10 +423,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     () => mergeStudentOptions(examOptions, fallbackOptions),
     [examOptions, fallbackOptions],
   );
-  const fallbackLabel = turmaOnlyOptions.length > 0 ? 'da turma' : 'do catálogo';
-  const sourceLabel = examOptions.length > 0
-    ? (fallbackOptions.length > 0 ? `da prova e ${fallbackLabel}` : 'da prova')
-    : fallbackLabel;
   const autoOptions: AutocompleteOption[] = useMemo(
     () => findStudentMatches(nameSource, studentName).map(s => ({
       id: s.key,
@@ -436,16 +432,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     })),
     [nameSource, studentName],
   );
-  const nameHelper = identified?.kind === 'ok'
-    ? 'Identificado pelo banco de dados.'
-    : canMatchByName && studentsLoading
-      ? 'Carregando lista de alunos...'
-      : canMatchByName && nameSource.length > 0
-        ? `Digite para buscar entre os ${nameSource.length} alunos ${sourceLabel} — toque num nome para atribuir o resultado direto a ele. Nomes marcados "turma", "catálogo" ou "sem cartão gerado" são vinculados pelo nome.`
-        : (!studentName.trim()
-          ? 'Informe o nome para salvar — necessário apenas quando o cartão não tem QR Code de lista importada.'
-          : undefined);
-
   const handleStudentNameChange = (v: string) => {
     setStudentName(v);
     setSelectedAlunoId(null);
@@ -1409,7 +1395,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
         : 'Não foi possível localizar as bolhas desta questão neste modelo.');
       return;
     }
-    setAiLoading(q);
     setAiError(null);
     try {
       const crop = await cropRegions(image, boxes);
@@ -1429,8 +1414,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       setAiSuggestions((prev) => ({ ...prev, [q]: suggestion }));
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Falha ao consultar o assistente local.');
-    } finally {
-      setAiLoading(null);
     }
   };
 
@@ -1928,11 +1911,6 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
     setManualInfo(null);
     setError(null);
     setStep('review');
-  };
-
-  const getGradeLabel = (gradeScale: string) => {
-    if (gradeScale === 'count') return 'acertos';
-    return `nota (${gradeScale})`;
   };
 
   return (
@@ -3220,407 +3198,51 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
-          {aiEnabled && !manualEntry && aiStatus && !aiStatus.available && (
-            <div className="callout-warning text-sm" role="status">
-              <strong>Assistente IA ligado, mas o Ollama não está disponível.</strong>{' '}
-              {aiStatus.error || 'Instale/abra o Ollama neste computador para receber sugestões.'}
-            </div>
+          {aiEnabled && !manualEntry && aiStatus?.available && (
+            <AiAssistPanel
+              status={aiStatus}
+              error={aiError}
+              progress={aiProgress}
+              pending={aiPending}
+              targets={aiTargets}
+              suggestions={aiSuggestions}
+              list={aiList}
+              onRunAll={() => void runAiReadAll()}
+              onStop={() => { aiStopRef.current = true; }}
+              onApplyAll={applyAllAiSuggestions}
+              onApply={(q, letter) => applyAiSuggestion(q, letter)}
+              onIgnore={(q) => ignoreAiSuggestion(q)}
+            />
           )}
 
-          {aiEnabled && aiStatus?.available && !manualEntry && (
-            <div className="card space-y-3">
-              <div className="flex items-center gap-2">
-                <Bot size={16} className="text-brand-600 dark:text-brand-200 shrink-0" aria-hidden />
-                <h3 className="text-sm font-semibold text-ink dark:text-white">Assistente IA local</h3>
-                <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Ollama · {aiStatus.model}
-                </span>
-              </div>
-              <p className="text-xs text-gray-500 dark:text-gray-400">
-                Gerado neste computador. <strong>Revise antes de aplicar</strong> — nada é salvo
-                automaticamente.
-              </p>
-              {aiError && (
-                <p className="callout-info text-xs" role="status">{aiError}</p>
-              )}
+          <ManualReviewPanel
+            exam={activeExam}
+            result={omrResult}
+            manualEntry={manualEntry}
+            manualAnswers={manualAnswers}
+            identified={identified}
+            studentName={studentName}
+            studentsLoading={studentsLoading}
+            autoOptions={autoOptions}
+            canMatchByName={canMatchByName}
+            candidates={candidates}
+            selectedAlunoId={selectedAlunoId}
+            selectedFromCatalog={selectedFromCatalog}
+            manualInfo={manualInfo}
+            aiSuggestions={aiSuggestions}
+            onStudentNameChange={handleStudentNameChange}
+            onPickStudent={handlePickStudent}
+            onChooseCandidate={chooseNameCandidate}
+            onCancelCandidates={() => setCandidates(null)}
+            onAnswer={handleManualAnswer}
+            onApplyAi={applyAiSuggestion}
+          />
 
-              <div className="rounded-lg border border-line dark:border-gray-700 p-2 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    loading={aiProgress != null}
-                    disabled={aiProgress != null || aiPending.length === 0}
-                    icon={<Bot size={15} aria-hidden />}
-                    onClick={() => void runAiReadAll()}
-                  >
-                    {aiProgress
-                      ? `Conferindo ${aiProgress.done}/${aiProgress.total}…`
-                      : 'Corrigir tudo com IA'}
-                  </Button>
-                  {aiProgress && (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => { aiStopRef.current = true; }}
-                    >
-                      Parar
-                    </Button>
-                  )}
-                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                    {aiTargets.length} questão(ões) marcadas nesta folha
-                    {Object.keys(aiSuggestions).length > 0
-                      && ` · IA respondeu ${Object.keys(aiSuggestions).length}`}
-                  </span>
-                </div>
-                <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  Uma questão por vez, com o recorte da linha. Marca fraca que o OMR deu como
-                  em branco também é conferida; linha sem nenhuma tinta não é enviada — nela o
-                  modelo inventa uma letra.
-                </p>
-                {Object.keys(aiSuggestions).length > 0 && (
-                  <Button size="sm" onClick={applyAllAiSuggestions}>
-                    Aplicar as {Object.keys(aiSuggestions).length} sugestões
-                  </Button>
-                )}
-              </div>
-
-              {aiList.length > 0 && (
-              <ul className="space-y-2">
-                {aiList.map((q) => {
-                  const low = (omrResult.lowConfidence ?? []).includes(q);
-                  const dup = (omrResult.duplicateQuestions ?? []).includes(q);
-                  const blank = (omrResult.blankQuestions ?? []).includes(q);
-                  const marks = omrResult.duplicateMarks?.[q];
-                  const reasons = [
-                    low ? 'baixa confiança' : '',
-                    dup ? 'duplicada' : '',
-                    blank ? 'em branco' : '',
-                  ].filter(Boolean).join(' · ');
-                  const s = aiSuggestions[q];
-                  return (
-                    <li key={q} className="rounded-lg bg-surface dark:bg-gray-800/60 p-2 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-ink dark:text-gray-100">Q{q}</span>
-                        <span className="text-[11px] text-amber-700 dark:text-amber-300 truncate">
-                          {reasons}
-                          {marks?.length ? ` (${marks.join(' + ')})` : ''}
-                        </span>
-                        <span className="flex-1" />
-                        {!s && (
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            loading={aiLoading === q}
-                            disabled={aiLoading != null && aiLoading !== q}
-                            onClick={() => void runAiSuggestion(q)}
-                          >
-                            Sugerir
-                          </Button>
-                        )}
-                      </div>
-                      {s && (
-                        <div className="rounded-lg border border-line dark:border-gray-700 bg-white dark:bg-gray-900 p-2 space-y-1.5">
-                          <p className="text-sm text-ink dark:text-gray-100">
-                            Sugestão:{' '}
-                            <strong>{s.suggestion === 'VAZIO' ? 'em branco' : (s.suggestion ?? 'sem sugestão')}</strong>
-                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                              {' '}· confiança {Math.round(s.confidence * 100)}%
-                            </span>
-                          </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400">{s.reason}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {s.suggestion && /^[ABCD]$/.test(s.suggestion) && (
-                              <Button size="sm" onClick={() => applyAiSuggestion(q, s.suggestion as string)}>
-                                Aplicar {s.suggestion}
-                              </Button>
-                            )}
-                            <Button size="sm" variant="secondary" onClick={() => ignoreAiSuggestion(q)}>
-                              Ignorar
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-              )}
-            </div>
-          )}
-
-          <div className="card">
-            <h3 className="text-lg font-semibold text-ink dark:text-white mb-4">
-              {manualEntry ? 'Preencha as respostas' : 'Conferência'}
-            </h3>
-            {manualEntry && (
-              <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                Clique na alternativa marcada pelo aluno em cada questão. Clique de novo para desmarcar.
-              </p>
-            )}
-
-            <div className="mb-4">
-              <Field
-                label="Aluno"
-                htmlFor="review-student-name"
-                required={identified?.kind !== 'ok'}
-                helper={nameHelper}
-              >
-                {canMatchByName ? (
-                  <Autocomplete
-                    id="review-student-name"
-                    value={studentName}
-                    onValueChange={handleStudentNameChange}
-                    options={autoOptions}
-                    onPick={handlePickStudent}
-                    invalid={!studentName.trim()}
-                    ariaLabel="Aluno"
-                    placeholder="Digite o nome do aluno (cartão sem QR cadastrado)"
-                    emptyText={studentsLoading
-                      ? 'Carregando lista de alunos...'
-                      : 'Nenhum aluno encontrado — o resultado será criado para o nome digitado.'}
-                  />
-                ) : (
-                  <Input
-                    id="review-student-name"
-                    type="text"
-                    invalid={!studentName.trim()}
-                    placeholder={identified?.kind === 'ok' ? identified.name : 'Digite o nome do aluno (cartão sem QR cadastrado)'}
-                    value={studentName}
-                    onChange={(e) => handleStudentNameChange(e.target.value)}
-                    autoComplete="off"
-                  />
-                )}
-              </Field>
-              {selectedAlunoId != null && !manualInfo && (
-                <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1 mt-2">
-                  Aluno selecionado na lista — o resultado será atribuído direto a ele.
-                </p>
-              )}
-              {selectedAlunoId == null && selectedFromCatalog && studentName.trim() && !manualInfo && (
-                <p className="text-xs text-brand-800 dark:text-brand-200 bg-brand-50 dark:bg-brand-700/15 border border-brand-500/30 rounded-lg px-2 py-1 mt-2">
-                  Nome do catálogo (turma ou global, ainda não importado para a prova) — o resultado será criado por nome.
-                </p>
-              )}
-              {manualInfo && (
-                <p className="text-xs text-success-600 dark:text-success-100 bg-success-50 dark:bg-success-700/15 border border-success-500/30 rounded-lg px-2 py-1 mt-2">
-                  {manualInfo}
-                </p>
-              )}
-              {candidates && candidates.length > 0 && (
-                <div className="mt-3 p-3 bg-warning-50 dark:bg-warning-500/10 border border-warning-500/30 rounded-lg">
-                  <p className="text-sm text-warning-600 dark:text-warning-100 font-medium mb-2">
-                    Mais de um aluno com esse nome — escolha para quem vai o resultado:
-                  </p>
-                  <div className="flex flex-col gap-1.5">
-                    {candidates.map(c => (
-                      <button
-                        key={c.aluno_id}
-                        type="button"
-                        onClick={() => chooseNameCandidate(c)}
-                        className="text-left px-3 py-2 rounded-lg border border-warning-500/40 bg-white dark:bg-gray-900 hover:bg-warning-100 dark:hover:bg-warning-500/20 text-sm min-h-[44px]"
-                      >
-                        <span className="font-medium">{c.nome}</span>
-                        {c.matricula && <span className="text-gray-500 dark:text-gray-400"> · {c.matricula}</span>}
-                        <span className={`ml-2 text-xs ${c.tem_gabarito ? 'text-gray-500 dark:text-gray-400' : 'text-warning-600 dark:text-warning-100 font-medium'}`}>
-                          {c.tem_gabarito ? `cartão ${c.codigo_unico}` : 'sem cartão gerado'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                  <button type="button" onClick={() => setCandidates(null)} className="mt-2 text-xs text-gray-500 dark:text-gray-400 underline">
-                    Cancelar escolha
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-6">
-              {getSubjectIds(activeExam).map((sid) => {
-                const [start, end] = getSubjectRange(sid, activeExam.questionsPerSubject, activeExam.layoutMode);
-                return (
-                  <div key={sid}>
-                    <h4 className="text-sm font-bold text-gray-700 dark:text-gray-300 mb-2">
-                      {getSubjectName(activeExam, sid)} (1–{end - start + 1})
-                    </h4>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-line dark:border-gray-700">
-                            <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Q</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">A</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">B</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">C</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">D</th>
-                            <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Resposta</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">IA</th>
-                            <th className="py-2 px-3 text-left font-medium text-gray-500 dark:text-gray-400">Gabarito</th>
-                            <th className="py-2 px-3 text-center font-medium text-gray-500 dark:text-gray-400">Resultado</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Array.from({ length: activeExam.questionsPerSubject }, (_, i) => start + i).map((q) => {
-                            const selected = manualAnswers[q] || null;
-                            const correctAnswer = activeExam.answerKey?.[q];
-                            const aiS = aiSuggestions[q];
-                            const aiLetter = aiS?.suggestion && /^[ABCD]$/.test(aiS.suggestion)
-                              ? aiS.suggestion : null;
-                            const isBlank = (omrResult.blankQuestions ?? []).includes(q);
-                            const isCorrect = selected && correctAnswer && selected === correctAnswer;
-                            const dupList = omrResult.duplicateQuestions ?? [];
-                            const qMarks = omrResult.duplicateMarks?.[q];
-                            const isDuplicate = dupList.includes(q);
-                            const isLowConf = (omrResult.lowConfidence ?? []).includes(q);
-
-                            return (
-                              <tr key={q} className={`border-b border-line/60 dark:border-gray-800 ${isLowConf ? 'bg-warning-50 dark:bg-warning-500/10' : isDuplicate ? 'bg-warning-50 dark:bg-warning-500/10' : ''}`}>
-                                <td className="py-2 px-3 font-bold text-gray-700 dark:text-gray-300">{String(q - start + 1).padStart(2, '0')}</td>
-                                {['A', 'B', 'C', 'D'].map((opt) => (
-                                  <td key={opt} className="py-2 px-3 text-center">
-                                    <button
-                                      onClick={() => handleManualAnswer(q, opt)}
-                                      className={`bubble-option w-8 h-8 text-xs ${
-                                        selected === opt
-                                          ? 'selected'
-                                          : isDuplicate && !selected && qMarks?.includes(opt)
-                                            ? 'marked'
-                                            : ''
-                                      }`}
-                                      title={
-                                        isDuplicate && !selected && qMarks?.includes(opt)
-                                          ? `Aluno marcou ${opt}`
-                                          : undefined
-                                      }
-                                    >
-                                      {opt}
-                                    </button>
-                                  </td>
-                                ))}
-                                <td className="py-2 px-3 font-medium">
-                                  {!selected && isDuplicate && qMarks?.length ? (
-                                    <span className="text-danger-600 dark:text-danger-100">{qMarks.join(' + ')}</span>
-                                  ) : selected ? (
-                                    selected
-                                  ) : (
-                                    <span className="text-gray-300 dark:text-gray-600">—</span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3 text-center">
-                                  {aiLetter ? (
-                                    <button
-                                      onClick={() => applyAiSuggestion(q, aiLetter)}
-                                      className={`text-xs font-semibold rounded px-2 py-1 border ${
-                                        aiLetter !== selected
-                                          ? 'border-brand-500 text-brand-700 dark:text-brand-200'
-                                          : 'border-line dark:border-gray-700 text-gray-500 dark:text-gray-400'
-                                      }`}
-                                      title={`IA sugeriu ${aiLetter} (${Math.round((aiS?.confidence ?? 0) * 100)}%) — clique para aplicar`}
-                                    >
-                                      {aiLetter}
-                                    </button>
-                                  ) : isBlank ? (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">em branco</span>
-                                  ) : (
-                                    <span className="text-gray-300 dark:text-gray-600">—</span>
-                                  )}
-                                </td>
-                                <td className="py-2 px-3 text-gray-600 dark:text-gray-300">{correctAnswer || '—'}</td>
-                                <td className="py-2 px-3 text-center">
-                                  {selected ? (
-                                    isCorrect ? (
-                                      <span className="text-success-600 dark:text-success-100 font-medium">✓ Correta</span>
-                                    ) : (
-                                      <span className="text-danger-600 dark:text-danger-100 font-medium">✗ Incorreta</span>
-                                    )
-                                  ) : isDuplicate ? (
-                                    <span className="text-danger-600 dark:text-danger-100 font-medium">
-                                      ✗ Incorreta{' '}
-                                      <span className="text-xs">
-                                        (marcou {qMarks?.length ? qMarks.join(' e ') : 'duas alternativas'})
-                                      </span>
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-gray-500 dark:text-gray-400">Em branco</span>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="card">
-            <h3 className="text-lg font-semibold text-ink dark:text-white mb-3">Resumo</h3>
-            {(() => {
-              const dupList = omrResult.duplicateQuestions ?? [];
-              let correct = 0, incorrect = 0, blank = 0;
-              for (let q = 1; q <= activeExam.totalQuestions; q++) {
-                const ans = manualAnswers[q];
-                if (!ans) {
-                  // Política: duplicada não resolvida conta como ERRO
-                  if (dupList.includes(q)) incorrect++;
-                  else blank++;
-                } else if (activeExam.answerKey?.[q] && ans === activeExam.answerKey[q]) correct++;
-                else incorrect++;
-              }
-              const grade = calculateGrade(correct, activeExam.totalQuestions, activeExam.gradeScale);
-              const subjectStats = computeSubjectStats(activeExam, manualAnswers, dupList);
-              return (
-                <>
-                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-                    <div className="bg-success-50 dark:bg-success-700/15 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-success-600 dark:text-success-100">{correct}</p>
-                      <p className="text-xs text-success-600 dark:text-success-100/70">Acertos</p>
-                    </div>
-                    <div className="bg-danger-50 dark:bg-danger-700/15 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-danger-600 dark:text-danger-100">{incorrect}</p>
-                      <p className="text-xs text-danger-600 dark:text-danger-100/70">Erros</p>
-                    </div>
-                    <div className="bg-surface dark:bg-gray-800 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-gray-500 dark:text-gray-400">{blank}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400/70">Em branco</p>
-                    </div>
-                    <div className="bg-warning-50 dark:bg-warning-500/10 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-warning-600 dark:text-warning-100">{(omrResult.duplicateQuestions ?? []).length}</p>
-                      <p className="text-xs text-warning-600 dark:text-warning-100/70">Duplicadas (erros)</p>
-                    </div>
-                    <div className="bg-brand-50 dark:bg-brand-700/15 rounded-lg p-3 text-center">
-                      <p className="text-2xl font-bold text-brand-600 dark:text-brand-200">
-                        {activeExam.gradeScale === 'count' ? correct : grade}
-                      </p>
-                      <p className="text-xs text-brand-600 dark:text-brand-200/70">{getGradeLabel(activeExam.gradeScale)}</p>
-                    </div>
-                  </div>
-                  <div className={`grid gap-4 ${getSubjectIds(activeExam).length > 1 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                    {getSubjectIds(activeExam).map((sid) => {
-                      const st = subjectStats[sid];
-                      const [sStart, sEnd] = getSubjectRange(sid, activeExam.questionsPerSubject, activeExam.layoutMode);
-                      return (
-                        <div key={sid} className="rounded-lg border border-line dark:border-gray-700 p-3">
-                          <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2 truncate">
-                            {getSubjectName(activeExam, sid)}
-                          </p>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-gray-500 dark:text-gray-400">
-                              {st.correctCount}/{sEnd - sStart + 1} acertos
-                            </span>
-                            <span className="text-xl font-bold text-brand-600 dark:text-brand-200">
-                              {activeExam.gradeScale === 'count' ? st.correctCount : st.grade}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
+          <ResultSummaryPanel
+            exam={activeExam}
+            result={omrResult}
+            manualAnswers={manualAnswers}
+          />
 
           <div className="flex gap-2">
             <Button
