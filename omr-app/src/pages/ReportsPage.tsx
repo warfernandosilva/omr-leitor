@@ -7,6 +7,7 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import StatCard from '../components/ui/StatCard';
+import DataTable from '../components/ui/DataTable';
 import { getResults, getExams } from '../utils/storage';
 import { downloadCSV, downloadXLSX } from '../utils/export';
 import { getResultadosFromDB, listTurmas, type DBResultado, type TurmaDTO } from '../utils/api';
@@ -127,7 +128,7 @@ export default function ReportsPage({ onNavigate }: Props) {
       />
 
       {dbError && (
-        <div className="card callout-warning flex flex-wrap items-center gap-2">
+        <div className="callout-warning flex flex-wrap items-center gap-2">
           <span>Resultados do servidor indisponíveis ({dbError}) — mostrando só os salvos neste aparelho.</span>
           <Button size="sm" variant="secondary" onClick={reloadDb} icon={<RefreshCw size={14} aria-hidden />}>Tentar de novo</Button>
         </div>
@@ -170,12 +171,39 @@ export default function ReportsPage({ onNavigate }: Props) {
           action={<Button size="sm" onClick={() => onNavigate('correct-card')}>Nova leitura</Button>}
         />
       ) : stats && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <StatCard label="Cartões no recorte" value={stats.count} tone="info" />
-          <StatCard label="Média do recorte" value={`${fmt(stats.avg)}%`} />
-          <StatCard label="Maior nota" value={`${fmt(stats.max)}%`} tone="success" />
-          <StatCard label="Menor nota" value={`${fmt(stats.min)}%`} tone="danger" />
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <StatCard label="Cartões no recorte" value={stats.count} tone="info" />
+            <StatCard label="Média do recorte" value={`${fmt(stats.avg)}%`} />
+            <StatCard label="Maior nota" value={`${fmt(stats.max)}%`} tone="success" />
+            <StatCard label="Menor nota" value={`${fmt(stats.min)}%`} tone="danger" />
+          </div>
+
+          <div className="table-shell">
+            <DataTable
+              rows={filtered}
+              rowKey={(r) => r.id}
+              pageSize={10}
+              minWidth={760}
+              ariaLabel="Resultados do recorte"
+              mobileCard={(r) => (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[#172B4D] dark:text-gray-100 truncate">{r.studentName}</p>
+                    <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">{examById.get(r.examId)?.name ?? 'Prova'}</p>
+                  </div>
+                  <span className="font-bold text-brand-600 dark:text-brand-200">{r.grade}</span>
+                </div>
+              )}
+              columns={[
+                { key: 'aluno', header: 'Aluno', render: (r) => <span className="font-medium text-[#172B4D] dark:text-gray-100">{r.studentName}</span> },
+                { key: 'prova', header: 'Prova', render: (r) => <span className="text-[#71809A] dark:text-gray-400">{examById.get(r.examId)?.name ?? '—'}</span> },
+                { key: 'nota', header: 'Nota', className: 'text-center', render: (r) => <span className="font-bold text-brand-600 dark:text-brand-200">{r.grade}</span> },
+                { key: 'data', header: 'Data', className: 'text-right', render: (r) => <span className="text-xs text-[#71809A] dark:text-gray-400">{new Date(r.timestamp).toLocaleDateString('pt-BR')}</span> },
+              ]}
+            />
+          </div>
+        </>
       )}
     </div>
   );

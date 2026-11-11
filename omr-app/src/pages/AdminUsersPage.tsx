@@ -135,10 +135,14 @@ export default function AdminUsersPage({ onNavigate }: Props) {
         }
       />
 
-      {loading && <div className="card text-center py-12"><p className="text-gray-500 dark:text-gray-400" role="status">Carregando usuários...</p></div>}
+      {loading && (
+        <div className="card text-center py-12">
+          <p className="text-[#71809A] dark:text-gray-400" role="status">Carregando usuários...</p>
+        </div>
+      )}
 
       {error && (
-        <div className="card callout-danger mb-4">
+        <div className="callout-danger">
           {error}
           {error.includes('403') && <p className="mt-2 text-xs">Você precisa ser administrador para acessar esta página.</p>}
           <Button variant="secondary" size="sm" onClick={() => onNavigate('home')} className="mt-3">Voltar ao início</Button>
@@ -146,10 +150,18 @@ export default function AdminUsersPage({ onNavigate }: Props) {
       )}
 
       {!loading && !error && (
-        <div className="card overflow-x-auto mb-4">
-          <h3 className="text-lg font-semibold text-ink dark:text-white mb-1">Backup do banco</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Dump portátil (provas, alunos, gabaritos, usuários). O arquivo contém hashes de senha — guarde em local seguro, nunca no Git.
+        <div className="card card-glass">
+          <div className="section-header mb-3">
+            <div>
+              <h3 className="text-lg font-semibold text-[#172B4D] dark:text-white">Backup do banco</h3>
+              <p className="text-xs text-[#71809A] dark:text-gray-400">
+                Dump portátil (provas, alunos, gabaritos, usuários).
+              </p>
+            </div>
+            <Badge tone="warning">Contém hashes de senha</Badge>
+          </div>
+          <p className="text-xs text-[#71809A] dark:text-gray-400 mb-3">
+            O arquivo contém dados sensíveis — guarde em local seguro e nunca no Git.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" onClick={handleDownloadBackup} loading={bkBusy} icon={<Download size={15} aria-hidden />}>

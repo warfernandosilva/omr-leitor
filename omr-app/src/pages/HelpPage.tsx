@@ -49,7 +49,7 @@ export default function HelpPage({ onNavigate }: Props) {
         crumbs={[{ label: 'Sistema' }, { label: 'Ajuda e suporte' }]}
       />
 
-      <div className="card card-pad-none divide-y divide-line dark:divide-gray-800">
+      <div className="card card-glass card-pad-none divide-y divide-line dark:divide-gray-800">
         {ITEMS.map(item => {
           const expanded = open === item.title;
           return (
@@ -59,20 +59,20 @@ export default function HelpPage({ onNavigate }: Props) {
                 aria-expanded={expanded}
                 className="w-full flex items-center gap-3 px-4 py-3.5 min-h-[64px] text-left"
               >
-                <span className="w-9 h-9 rounded-xl bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center text-brand-600 dark:text-brand-200 shrink-0" aria-hidden>
+                <span className="w-9 h-9 rounded-[10px] bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center text-brand-600 dark:text-brand-200 shrink-0" aria-hidden>
                   <item.icon size={18} strokeWidth={2} />
                 </span>
-                <span className="flex-1 min-w-0 text-sm font-medium text-ink dark:text-gray-100">
+                <span className="flex-1 min-w-0 text-sm font-medium text-[#172B4D] dark:text-gray-100">
                   {item.title}
                 </span>
                 <ChevronDown
                   size={16}
                   aria-hidden
-                  className={`text-gray-400 shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                  className={`text-[#71809A] shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
                 />
               </button>
               {expanded && (
-                <p className="px-4 pb-4 pl-[68px] text-sm text-gray-600 dark:text-gray-300 leading-relaxed">
+                <p className="px-4 pb-4 pl-[68px] text-sm text-[#71809A] dark:text-gray-300 leading-relaxed">
                   {item.body}
                 </p>
               )}
@@ -81,12 +81,12 @@ export default function HelpPage({ onNavigate }: Props) {
         })}
       </div>
 
-      <div className="card text-center">
+      <div className="card card-glass text-center">
         <span className="mx-auto mb-3 w-12 h-12 rounded-2xl bg-brand-500 flex items-center justify-center text-white" aria-hidden>
           <LifeBuoy size={24} strokeWidth={2} />
         </span>
-        <h2 className="text-base font-semibold text-ink dark:text-white">Precisa de ajuda?</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">
+        <h2 className="text-base font-semibold text-[#172B4D] dark:text-white">Precisa de ajuda?</h2>
+        <p className="text-sm text-[#71809A] dark:text-gray-400 mt-1 max-w-sm mx-auto">
           Fale com a nossa equipe — os canais de atendimento serão divulgados aqui.
         </p>
         <div className="flex flex-col sm:flex-row justify-center gap-2 mt-4">
