@@ -60,6 +60,7 @@ Fonte principal: **Inter**.
 - `CaptureViewport`, `ReaderSettingsPanel`
 - `AiAssistPanel`, `ManualReviewPanel`, `ResultSummaryPanel`
 - `BatchQueuePanel`, `MultiPageBatchModal`
+- `AlunoEditModal` (edição de aluno do catálogo)
 
 ## Regras de uso
 

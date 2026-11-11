@@ -118,3 +118,27 @@ export function findStudentMatches(
   }
   return [...prefix, ...rest].slice(0, limit);
 }
+
+// ─── Edição de aluno: matrícula não pode repetir dentro da mesma turma ───
+// Espelho da validação do backend (PATCH /api/turmas/{id}/alunos/{aluno_id}),
+// para o formulário avisar antes do envio. `ignoraAlunoId` é o próprio aluno
+// editado — manter a matrícula dele nunca é conflito.
+
+/**
+ * Aluno que já ocupa a matrícula na turma, ou null quando está livre.
+ * Matrícula vazia nunca conflita (o campo é opcional).
+ */
+export function findMatriculaConflict(
+  alunos: AlunoListItem[],
+  matricula: string,
+  turmaId: number,
+  ignoraAlunoId: number,
+): AlunoListItem | null {
+  const mat = (matricula ?? '').trim();
+  if (!mat) return null;
+  return alunos.find(a =>
+    a.id !== ignoraAlunoId &&
+    a.turma_id === turmaId &&
+    (a.matricula ?? '').trim() === mat
+  ) ?? null;
+}

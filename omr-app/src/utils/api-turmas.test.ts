@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   syncExam, listTurmas, createTurma, getTurma, renameTurma,
   deleteTurma, importTurmaAlunos, materializeFromTurma,
-  generateGabaritos, generateGabaritosPDF, fetchGabaritos,
+  generateGabaritos, generateGabaritosPDF, fetchGabaritos, updateTurmaAluno,
 } from './api';
 
 interface Captured {
@@ -134,6 +134,43 @@ describe('cliente de turmas', () => {
     nextStatus = 400;
     nextPayload = { detail: 'Turma sem alunos no catálogo' };
     await expect(materializeFromTurma('ex-1', 2)).rejects.toThrow('Turma sem alunos no catálogo');
+  });
+
+  it('updateTurmaAluno faz PATCH em /api/turmas/{id}/alunos/{alunoId}', async () => {
+    stubFetch();
+    nextPayload = { id: 7, turma_id: 1, nome: 'Ana Souza', matricula: '0099', identificador_externo: 'EXT-9' };
+    const salvo = await updateTurmaAluno(1, 7, {
+      nome: 'Ana Souza',
+      matricula: '0099',
+      identificador_externo: 'EXT-9',
+    });
+    expect(captured[0].url).toMatch(/\/api\/turmas\/1\/alunos\/7$/);
+    expect(captured[0].init.method).toBe('PATCH');
+    expect(body()).toEqual({
+      nome: 'Ana Souza',
+      matricula: '0099',
+      identificador_externo: 'EXT-9',
+      // sem nova_turma_id quando o aluno continua na mesma turma
+    });
+    expect(body().nova_turma_id).toBeUndefined();
+    expect(salvo.nome).toBe('Ana Souza');
+
+    // troca de turma é o único campo opcional enviado
+    await updateTurmaAluno(1, 7, { nova_turma_id: 3 });
+    expect(captured[1].url).toMatch(/\/api\/turmas\/1\/alunos\/7$/);
+    expect(body(1)).toEqual({ nova_turma_id: 3 });
+
+    // matrícula vazia vai como null (backend limpa o campo)
+    await updateTurmaAluno(1, 7, { matricula: null });
+    expect(body(2)).toEqual({ matricula: null });
+  });
+
+  it('updateTurmaAluno repassa a mensagem de erro do backend', async () => {
+    stubFetch();
+    nextStatus = 400;
+    nextPayload = { detail: 'Já existe outro aluno com esta matrícula na turma de destino' };
+    await expect(updateTurmaAluno(1, 7, { matricula: '1' }))
+      .rejects.toThrow('Já existe outro aluno com esta matrícula na turma de destino');
   });
 
   it('gerar/PDF/listar por turma enviam turma_id (não mistura outras turmas)', async () => {

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ClipboardList, GraduationCap, History, Plus, Search, TriangleAlert, Users,
+  ClipboardList, GraduationCap, History, Pencil, Plus, Search, TriangleAlert, Users,
 } from 'lucide-react';
 import type { AppView } from '../types';
 import {
-  getTurma, listAlunos, listTurmas,
+  getTurma, listAlunos, listTurmas, updateTurmaAluno,
   type AlunoListItem, type TurmaDTO,
 } from '../utils/api';
 import { getExams, getResults } from '../utils/storage';
@@ -20,6 +20,8 @@ import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
 import DataTable from '../components/ui/DataTable';
 import StatCard from '../components/ui/StatCard';
+import { useToast } from '../components/ui/Toast';
+import AlunoEditModal, { type AlunoDraft } from '../components/alunos/AlunoEditModal';
 
 interface Props {
   onNavigate: (view: AppView, examId?: string, resultId?: string) => void;
@@ -37,6 +39,12 @@ export default function StudentsPage({ onNavigate }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // Edição de aluno (modal): `editing` guarda o registro de origem para casar
+  // a linha na lista, já que a chave inclui a turma e a troca de turma a muda.
+  const [editing, setEditing] = useState<AlunoListItem | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const { notify } = useToast();
 
   useEffect(() => {
     let alive = true;
@@ -100,6 +108,46 @@ export default function StudentsPage({ onNavigate }: Props) {
   const avg = selectedHistory.length
     ? (selectedHistory.reduce((acc, r) => acc + r.grade, 0) / selectedHistory.length).toFixed(1)
     : '—';
+
+  const handleSaveAluno = async (draft: AlunoDraft) => {
+    if (!editing) return;
+    setSaving(true);
+    setEditError(null);
+    try {
+      const salvo = await updateTurmaAluno(editing.turma_id, editing.id, {
+        nome: draft.nome,
+        matricula: draft.matricula || null,
+        identificador_externo: draft.identificador_externo || null,
+        // Só envia a troca quando ela realmente acontece (evita 400 à toa).
+        ...(draft.turmaId !== editing.turma_id ? { nova_turma_id: draft.turmaId } : {}),
+      });
+      const turmaNome = salvo.turma_nome
+        ?? turmas.find(t => t.id === (salvo.turma_id ?? draft.turmaId))?.nome
+        ?? editing.turma_nome;
+      const merged: AlunoListItem = {
+        id: salvo.id ?? editing.id,
+        nome: salvo.nome ?? draft.nome,
+        matricula: salvo.matricula ?? null,
+        identificador_externo: salvo.identificador_externo ?? null,
+        turma_id: salvo.turma_id ?? draft.turmaId,
+        turma_nome: turmaNome,
+      };
+      setAlunos(prev => prev.map(a => (keyOf(a) === keyOf(editing) ? merged : a)));
+      // Saindo do filtro de turma aplicado, a linha desaparece: limpa a seleção.
+      if (turmaFilter && merged.turma_id !== Number(turmaFilter)) setSelectedKey(null);
+      else if (selectedKey === keyOf(editing)) setSelectedKey(keyOf(merged));
+      setEditing(null);
+      const mudouTurma = merged.turma_id !== editing.turma_id;
+      notify(
+        `Aluno "${merged.nome}" atualizado.` + (mudouTurma ? ` Movido para ${merged.turma_nome ?? 'outra turma'}.` : ''),
+        'success',
+      );
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Falha ao salvar as alterações.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="app-section animate-fade-in">
@@ -200,9 +248,20 @@ export default function StudentsPage({ onNavigate }: Props) {
                     {a.turma_nome ?? 'Sem turma'}{a.matricula ? ` · #${a.matricula}` : ''}
                   </p>
                 </div>
-                {dupIdSet.has(a.id)
-                  ? <Badge tone="warning">Duplicado?</Badge>
-                  : <Badge tone="success">Ativo</Badge>}
+                <div className="flex shrink-0 items-center gap-1">
+                  {dupIdSet.has(a.id)
+                    ? <Badge tone="warning">Duplicado?</Badge>
+                    : <Badge tone="success">Ativo</Badge>}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => { setEditError(null); setEditing(a); }}
+                    icon={<Pencil size={14} aria-hidden />}
+                    aria-label={`Editar ${a.nome}`}
+                  >
+                    Editar
+                  </Button>
+                </div>
               </div>
             )}
             columns={[
@@ -229,9 +288,20 @@ export default function StudentsPage({ onNavigate }: Props) {
               {
                 key: 'acoes', header: 'Ações', className: 'text-right',
                 render: (a) => (
-                  <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedKey(keyOf(a)); }}>
-                    Ver histórico
-                  </Button>
+                  <div className="flex justify-end gap-1">
+                    <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setSelectedKey(keyOf(a)); }}>
+                      Ver histórico
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => { e.stopPropagation(); setEditError(null); setEditing(a); }}
+                      icon={<Pencil size={14} aria-hidden />}
+                      aria-label={`Editar ${a.nome}`}
+                    >
+                      Editar
+                    </Button>
+                  </div>
                 ),
               },
             ]}
@@ -291,6 +361,12 @@ export default function StudentsPage({ onNavigate }: Props) {
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
+                <Button
+                  onClick={() => { setEditError(null); setEditing(selected); }}
+                  icon={<Pencil size={16} aria-hidden />}
+                >
+                  Editar aluno
+                </Button>
                 <Button variant="secondary" onClick={() => onNavigate('turmas')} icon={<GraduationCap size={16} aria-hidden />}>
                   Abrir turma
                 </Button>
@@ -300,6 +376,16 @@ export default function StudentsPage({ onNavigate }: Props) {
           )}
         </Card>
       </div>
+
+      <AlunoEditModal
+        aluno={editing}
+        turmas={turmas}
+        alunos={alunos}
+        saving={saving}
+        error={editError}
+        onClose={() => { setEditing(null); setEditError(null); }}
+        onSave={(draft) => void handleSaveAluno(draft)}
+      />
     </div>
   );
 }

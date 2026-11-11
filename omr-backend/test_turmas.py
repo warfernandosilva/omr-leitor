@@ -253,6 +253,132 @@ def test_sync_turma_id_de_outro_usuario_403(isolated, client):
     assert r.status_code == 403, f"materializar turma alheia → 403: {r.text}"
 
 
+def test_patch_aluno_edita_campos(isolated, client):
+    c = _authed(client)
+    t = _cria_turma(c, "9º A")
+    c.post(f"/api/turmas/{t['id']}/alunos/import", json={"alunos": [
+        {"nome": "Ana Beatriz Lima", "matricula": "0012", "identificador_externo": "EXT-1"},
+        {"nome": "Beto", "matricula": "0013"},
+    ]})
+    ana = c.get(f"/api/turmas/{t['id']}").json()["alunos"][0]
+
+    r = c.patch(f"/api/turmas/{t['id']}/alunos/{ana['id']}", json={
+        "nome": "  Ana Beatriz Lima Souza  ",
+        "matricula": " 0099 ",
+        "identificador_externo": "  EXT-9  ",
+    })
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert (j["nome"], j["matricula"], j["identificador_externo"]) == (
+        "Ana Beatriz Lima Souza", "0099", "EXT-9"), j
+    assert j["turma_id"] == t["id"] and j["turma_nome"] == "9º A", j
+
+    # matrícula/identificador vazios limpam (voltam a NULL) sem apagar o aluno
+    r2 = c.patch(f"/api/turmas/{t['id']}/alunos/{ana['id']}",
+                 json={"matricula": "   ", "identificador_externo": ""})
+    assert r2.status_code == 200, r2.text
+    j2 = r2.json()
+    assert j2["matricula"] is None and j2["identificador_externo"] is None, j2
+    assert j2["nome"] == "Ana Beatriz Lima Souza", "nome mantido quando omisso"
+
+    alunos = c.get(f"/api/turmas/{t['id']}").json()["alunos"]
+    assert len(alunos) == 2, "editar não duplica nem remove"
+
+
+def test_patch_aluno_move_de_turma(isolated, client):
+    c = _authed(client)
+    ta = _cria_turma(c, "8º A")
+    tb = _cria_turma(c, "8º B")
+    c.post(f"/api/turmas/{ta['id']}/alunos/import", json={"alunos": [{"nome": "Caio"}]})
+    caio = c.get(f"/api/turmas/{ta['id']}").json()["alunos"][0]
+
+    r = c.patch(f"/api/turmas/{ta['id']}/alunos/{caio['id']}", json={"nova_turma_id": tb["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["turma_id"] == tb["id"] and r.json()["turma_nome"] == "8º B", r.text
+
+    assert c.get(f"/api/turmas/{ta['id']}").json()["alunos"] == [], "saiu da origem"
+    nomes = [a["nome"] for a in c.get(f"/api/turmas/{tb['id']}").json()["alunos"]]
+    assert nomes == ["Caio"], "entrou no destino"
+
+    # listagem global reflete a mudança
+    glob = {a["id"]: a for a in c.get("/api/alunos").json()["alunos"]}
+    assert glob[caio["id"]]["turma_id"] == tb["id"], "catálogo global acompanha"
+
+
+def test_patch_aluno_validacoes(isolated, client):
+    c = _authed(client)
+    t = _cria_turma(c, "7º A")
+    t2 = _cria_turma(c, "7º B")
+    c.post(f"/api/turmas/{t['id']}/alunos/import", json={"alunos": [
+        {"nome": "Ana", "matricula": "1"}]})
+    c.post(f"/api/turmas/{t2['id']}/alunos/import", json={"alunos": [
+        {"nome": "Beto", "matricula": "1"}]})
+    ana = c.get(f"/api/turmas/{t['id']}").json()["alunos"][0]
+
+    assert c.patch(f"/api/turmas/{t['id']}/alunos/{ana['id']}",
+                   json={"nome": "   "}).status_code == 400, "nome vazio → 400"
+
+    r = c.patch(f"/api/turmas/{t['id']}/alunos/{ana['id']}",
+                json={"nova_turma_id": t2["id"], "matricula": "1"})
+    assert r.status_code == 400, "matrícula já usada por outro aluno do destino → 400"
+    assert "matr" in r.json()["detail"].lower(), r.text
+
+    # a própria matrícula do aluno não é choque (pode renomear sem tirar a matrícula)
+    r2 = c.patch(f"/api/turmas/{t['id']}/alunos/{ana['id']}", json={"nome": "Ana Paula"})
+    assert r2.status_code == 200 and r2.json()["matricula"] == "1", r2.text
+
+    # aluno não existe / está em outra turma
+    assert c.patch(f"/api/turmas/{t['id']}/alunos/999999",
+                   json={"nome": "X"}).status_code == 404, "inexistente → 404"
+    assert c.patch(f"/api/turmas/{t2['id']}/alunos/{ana['id']}",
+                   json={"nome": "X"}).status_code == 404, "turma errada → 404"
+
+
+def test_patch_aluno_turma_de_outro_dono_403(isolated, client):
+    """Professor não move aluno para turma que não é dele."""
+    c = _authed(client)  # admin do módulo (vê tudo) — usado só para conferir
+    dono = _outro_usuario()
+    intruso = TestClient(main_module.app)
+    r = intruso.post("/api/auth/register", json={
+        "email": "intruso@example.com", "nome": "Intruso", "password": TEST_PASSWORD})
+    assert r.status_code in (200, 400), r.text
+    intruso.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+
+    t_dono = dono.post("/api/turmas", json={"nome": "Do Professor"}).json()
+    dono.post(f"/api/turmas/{t_dono['id']}/alunos/import", json={"alunos": [{"nome": "Ana"}]})
+    ana = dono.get(f"/api/turmas/{t_dono['id']}").json()["alunos"][0]
+    t_intruso = intruso.post("/api/turmas", json={"nome": "Do Intruso"}).json()
+
+    ruim = intruso.patch(f"/api/turmas/{t_dono['id']}/alunos/{ana['id']}",
+                         json={"nova_turma_id": t_intruso["id"]})
+    assert ruim.status_code == 403, f"turma alheia → 403: {ruim.text}"
+
+    # o dono continua com o aluno na turma original
+    ainda = [a["id"] for a in c.get(f"/api/turmas/{t_dono['id']}").json()["alunos"]]
+    assert ainda == [ana["id"]], "aluno não saiu da turma"
+
+
+def test_patch_aluno_nao_altera_prova_materializada(isolated, client):
+    """A materialização é cópia: editar o catálogo não reescreve a prova/QR."""
+    c = _authed(client)
+    t = _cria_turma(c, "9º A")
+    c.post(f"/api/turmas/{t['id']}/alunos/import", json={"alunos": [{"nome": "Dani", "matricula": "7"}]})
+    dani = c.get(f"/api/turmas/{t['id']}").json()["alunos"][0]
+    c.post("/api/exams/sync", json={"external_id": "ex-turma-edit", "titulo": "P"})
+    c.post("/api/exams/ex-turma-edit/students/from-turma", json={"turma_id": t["id"]})
+    c.post("/api/exams/ex-turma-edit/gabaritos/generate")
+    antes = c.get("/api/exams/ex-turma-edit/gabaritos").json()["gabaritos"][0]
+
+    c.patch(f"/api/turmas/{t['id']}/alunos/{dani['id']}",
+            json={"nome": "Daniela", "matricula": "70"})
+
+    depois = c.get("/api/exams/ex-turma-edit/gabaritos").json()["gabaritos"][0]
+    assert depois["aluno"]["nome"] == "Dani", "nome da prova intacto"
+    assert depois["codigo_unico"] == antes["codigo_unico"], "QR inalterado"
+    catalogo = c.get("/api/alunos", params={"turma_id": t["id"]}).json()["alunos"]
+    assert [a["nome"] for a in catalogo] == ["Daniela"], "catálogo mudou"
+
+
 def test_backup_inclui_turmas(isolated, client, db_session):
     c = _authed(client)
     t = _cria_turma(c, "3º A")

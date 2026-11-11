@@ -130,3 +130,19 @@ Regras de UX do leitor:
   grava nada, mas exige sessão porque usa o mesmo desenhista oficial.
 - Impressão por lista manual gera códigos temporários e não substitui o lote
   oficial vinculado à prova.
+
+### 5.1 Edição de aluno (catálogo de turmas)
+
+- Endpoint: `PATCH /api/turmas/{turma_id}/alunos/{aluno_id}` — mesmo caminho do
+  DELETE, porque o aluno vive no catálogo da turma.
+- Campos: `nome` (obrigatório; vazio → 400), `matricula` e
+  `identificador_externo` (string vazia limpa o campo) e `nova_turma_id`
+  (opcional, move o aluno; só aceita turma visível ao usuário).
+- Matrícula não pode repetir dentro da turma de destino: outra pessoa já usando
+  ela → 400. A matrícula do próprio aluno nunca é conflito.
+- A materialização é cópia: editar o catálogo **não** altera alunos já
+  importados em provas, nem cartões/QR emitidos. O nome impresso permanece o da
+  época da geração.
+- Tela **Alunos**: ação "Editar" na linha da tabela (e no card do mobile) e
+  "Editar aluno" no painel de detalhes. O formulário avisa sobre matrícula já
+  usada antes de enviar e mostra o erro do backend quando ele ocorre.

@@ -37,6 +37,19 @@ class TurmaAlunosImport(BaseModel):
     alunos: list[TurmaAlunoIn]
 
 
+class TurmaAlunoUpdate(BaseModel):
+    """Edição de um aluno do catálogo.
+
+    Campo ausente (None) mantém o valor atual; campo com string vazia limpa
+    (matrícula/identificador voltam a NULL). `nova_turma_id` move o aluno.
+    """
+
+    nome: str | None = None
+    matricula: str | None = None
+    identificador_externo: str | None = None
+    nova_turma_id: int | None = None
+
+
 def _turma_to_dict(t: Turma, total_alunos: int | None = None) -> dict:
     d = {
         "id": t.id,
@@ -222,3 +235,57 @@ def delete_turma_aluno(
     db.delete(aluno)
     db.commit()
     return {"deleted": aluno_id}
+
+
+@router.patch("/api/turmas/{turma_id}/alunos/{aluno_id}")
+def update_turma_aluno(
+    turma_id: int, aluno_id: int, req: TurmaAlunoUpdate,
+    db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user),
+):
+    """Edita nome/matrícula/identificador e, opcionalmente, move de turma.
+
+    Regras (espelham o import):
+    - nome vazio → 400 (não existe aluno sem nome).
+    - matrícula vazia limpa o campo; matrícula já usada por OUTRO aluno da
+      turma de destino → 400 (evita duplicidade silenciosa no catálogo).
+    - `nova_turma_id` aceita só turma visível ao usuário (dono ou admin).
+
+    A materialização é cópia: alunos já importados em provas NÃO são alterados
+    aqui — apenas o catálogo muda (ver students/from-turma).
+    """
+    turma = _get_turma(db, turma_id, current_user)
+    aluno = db.get(TurmaAluno, aluno_id)
+    if aluno is None or aluno.turma_id != turma.id:
+        raise HTTPException(status_code=404, detail="Aluno não encontrado nesta turma")
+
+    destino = turma
+    if req.nova_turma_id is not None and req.nova_turma_id != turma.id:
+        destino = _get_turma(db, req.nova_turma_id, current_user)
+
+    nome = aluno.nome if req.nome is None else (req.nome or "").strip()
+    if not nome:
+        raise HTTPException(status_code=400, detail="Nome do aluno é obrigatório")
+    matricula = aluno.matricula if req.matricula is None else ((req.matricula or "").strip() or None)
+
+    if matricula:
+        choque = db.scalar(
+            select(TurmaAluno.id).where(
+                TurmaAluno.turma_id == destino.id,
+                TurmaAluno.matricula == matricula,
+                TurmaAluno.id != aluno.id,
+            )
+        )
+        if choque is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Já existe outro aluno com esta matrícula na turma de destino",
+            )
+
+    aluno.nome = nome[:200]
+    aluno.matricula = matricula
+    if req.identificador_externo is not None:
+        aluno.identificador_externo = (req.identificador_externo or "").strip() or None
+    aluno.turma_id = destino.id
+    db.commit()
+    db.refresh(aluno)
+    return {**_aluno_to_dict(aluno), "turma_nome": destino.nome}

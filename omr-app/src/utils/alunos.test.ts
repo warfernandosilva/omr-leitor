@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { duplicateIds, findDuplicateGroups, findStudentMatches, mergeStudentOptions, normalizeName } from './alunos';
+import {
+  duplicateIds, findDuplicateGroups, findMatriculaConflict, findStudentMatches,
+  mergeStudentOptions, normalizeName,
+} from './alunos';
 import type { StudentOption } from './alunos';
 import type { AlunoListItem } from './api';
 
@@ -100,5 +103,36 @@ describe('mergeStudentOptions', () => {
   it('sem fallback devolve a própria lista da prova', () => {
     const primary = [option({ key: '1', nome: 'Ana Lima', alunoId: 1 })];
     expect(mergeStudentOptions(primary, [])).toBe(primary);
+  });
+});
+
+describe('findMatriculaConflict (edição de aluno)', () => {
+  const list = [
+    aluno({ id: 1, nome: 'Ana Lima', matricula: '0012', turma_id: 1, turma_nome: '9º A' }),
+    aluno({ id: 2, nome: 'Beto Souza', matricula: '0013', turma_id: 1, turma_nome: '9º A' }),
+    aluno({ id: 3, nome: 'Caio Prado', matricula: '0012', turma_id: 2, turma_nome: '9º B' }),
+  ];
+
+  it('aponta quem já usa a matrícula na MESMA turma', () => {
+    const c = findMatriculaConflict(list, '0013', 1, 1);
+    expect(c?.id).toBe(2);
+  });
+
+  it('a própria matrícula do aluno não é conflito', () => {
+    expect(findMatriculaConflict(list, '0012', 1, 1)).toBeNull();
+  });
+
+  it('matrícula de outra turma não bloqueia', () => {
+    expect(findMatriculaConflict(list, '0012', 2, 1)?.id).toBe(3);
+    expect(findMatriculaConflict(list, '0012', 3, 1)).toBeNull();
+  });
+
+  it('matrícula livre ou vazia não conflita', () => {
+    expect(findMatriculaConflict(list, '9999', 1, 1)).toBeNull();
+    expect(findMatriculaConflict(list, '   ', 1, 1)).toBeNull();
+  });
+
+  it('ignora espaços em volta da matrícula', () => {
+    expect(findMatriculaConflict(list, ' 0013 ', 1, 9)?.id).toBe(2);
   });
 });

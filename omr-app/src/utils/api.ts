@@ -616,6 +616,32 @@ export async function removeTurmaAluno(id: number, alunoId: number): Promise<{ d
   return turmaFetch(`/api/turmas/${id}/alunos/${alunoId}`, { method: 'DELETE' });
 }
 
+export interface TurmaAlunoDraft {
+  nome?: string;
+  matricula?: string | null;
+  identificador_externo?: string | null;
+  /** Turma de destino — informar só quando o aluno troca de turma. */
+  nova_turma_id?: number;
+}
+
+/**
+ * Edita um aluno do catálogo (nome, matrícula, ID externo e turma).
+ *
+ * A edição vale para o catálogo: alunos já materializados em provas mantêm
+ * nome/matrícula da importação — a materialização é cópia (ver
+ * `materializeFromTurma`), então cartões e QR já emitidos não mudam.
+ */
+export async function updateTurmaAluno(
+  id: number,
+  alunoId: number,
+  draft: TurmaAlunoDraft,
+): Promise<TurmaAlunoDTO & { turma_nome?: string | null }> {
+  return turmaFetch<TurmaAlunoDTO & { turma_nome?: string | null }>(
+    `/api/turmas/${id}/alunos/${alunoId}`,
+    { method: 'PATCH', body: JSON.stringify(draft) },
+  );
+}
+
 /** Materializa o catálogo da turma em alunos da prova (idempotente). */
 export async function materializeFromTurma(examExternalId: string, turmaId: number): Promise<FromTurmaResult> {
   const res = await fetchTimeout(`${API_BASE}/api/exams/${encodeURIComponent(examExternalId)}/students/from-turma`, {
