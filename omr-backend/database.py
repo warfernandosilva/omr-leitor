@@ -108,6 +108,64 @@ def init_db() -> None:
     _ensure_column("alunos", "origem_turma_aluno_id", "INTEGER")
     _ensure_column("avaliacoes", "custom_template_id", "INTEGER")
 
+    # ─── Ciclo de vida da avaliação (Fase 1 da reestruturação) ───
+    # Colunas novas em tabelas existentes (aditivas, sem backfill obrigatório).
+    _ensure_column("avaliacoes", "prova_id", "INTEGER")
+    _ensure_column("avaliacoes", "status", "VARCHAR(30) NOT NULL DEFAULT 'rascunho'")
+    _ensure_column("avaliacoes", "ano_letivo", "VARCHAR(10)")
+    _ensure_column("avaliacoes", "descricao", "TEXT")
+    _ensure_column("avaliacoes", "resultados_publicados_em", "TIMESTAMP")
+    _ensure_column("avaliacoes", "publicado_por", "VARCHAR(120)")
+    _ensure_column("turmas", "ano_letivo", "VARCHAR(10)")
+    _ensure_column("turmas", "arquivada", "BOOLEAN DEFAULT 0")
+    _ensure_column("alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
+    _ensure_column("turma_alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
+    _backfill_provas(engine)
+
+
+def _backfill_provas(engine) -> dict:
+    """Cria uma `provas` para cada avaliação ainda sem prova_id (idempotente).
+
+    Separação Prova × Avaliação: a estrutura que hoje vive em `avaliacoes`
+    ganha a sua própria linha em `provas`, e a avaliação passa a apontar para
+    ela. Nada é movido nem removido — `external_id`, alunos, gabaritos, QR e
+    resultados continuam exatamente onde estavam; só ganham o ponteiro.
+    """
+    from models import Avaliacao, Prova  # import local evita dependência na importação
+
+    criadas = 0
+    with engine.begin() as conn:
+        from sqlalchemy import text
+        pendentes = conn.execute(
+            text("SELECT id FROM avaliacoes WHERE prova_id IS NULL")
+        ).scalars().all()
+        for aid in pendentes:
+            import uuid as _uuid
+            ext = f"prova-{_uuid.uuid4()}"
+            conn.execute(
+                text(
+                    "INSERT INTO provas "
+                    "(external_id, titulo, descricao, disciplina, subject_lp, subject_mat,"
+                    " questions_per_subject, layout_mode, template, sae_spec, herby_spec,"
+                    " grade_scale, owner_id, created_at, updated_at) "
+                    "SELECT :ext, titulo, descricao, subject_lp, subject_lp, subject_mat,"
+                    " questions_per_subject, layout_mode, template, sae_spec, herby_spec,"
+                    " grade_scale, owner_id, created_at, created_at FROM avaliacoes WHERE id = :id"
+                ),
+                {"ext": ext, "id": aid},
+            )
+            nova_id = conn.execute(
+                text("SELECT id FROM provas WHERE external_id = :ext"), {"ext": ext}
+            ).scalar()
+            conn.execute(
+                text("UPDATE avaliacoes SET prova_id = :prova WHERE id = :id"),
+                {"prova": nova_id, "id": aid},
+            )
+            criadas += 1
+    if criadas:
+        print(f"[migração] {criadas} prova(s) criada(s) a partir de avaliações existentes")
+    return {"criadas": criadas}
+
 
 def _ensure_column(table: str, column: str, ddl_type: str) -> None:
     is_postgres = engine.dialect.name != "sqlite"

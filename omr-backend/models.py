@@ -43,12 +43,51 @@ class TimestampMixin:
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, nullable=False)
 
 
+class Prova(Base, TimestampMixin):
+    """Estrutura da avaliação — reutilizável em quantas avaliações quisermos.
+
+    Separação pedida pelo fluxo operacional: a PROVA guarda a estrutura
+    (disciplinas, quantidade de questões, layout, escala de pontuação, tipo de
+    cartão) e a AVALIAÇÃO guarda a aplicação (quem participa, quando, cartões,
+    leituras e resultados). Uma prova reutilizada em duas avaliações não
+    duplica participantes, cartões nem código de barras.
+    """
+
+    __tablename__ = "provas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    titulo: Mapped[str] = mapped_column(String(200), nullable=False)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disciplina: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    subject_lp: Mapped[str] = mapped_column(String(120), nullable=False, default="PORTUGUÊS")
+    subject_mat: Mapped[str] = mapped_column(String(120), nullable=False, default="MATEMÁTICA")
+    questions_per_subject: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
+    layout_mode: Mapped[str] = mapped_column(String(10), nullable=False, default="dual")
+    template: Mapped[str] = mapped_column(String(10), nullable=False, default="padrao")
+    sae_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    herby_spec: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    grade_scale: Mapped[str] = mapped_column(String(10), nullable=False, default="0-10")
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+
+    owner: Mapped["User | None"] = relationship()
+
+
 class Avaliacao(Base, TimestampMixin):
     __tablename__ = "avaliacoes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     external_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)  # id da prova no frontend
     titulo: Mapped[str] = mapped_column(String(200), nullable=False)
+    # ─── Ciclo de vida (workflow.status) ───
+    # Preenchido/ajustado pelas transições manuais autorizadas; a verdade de
+    # cada etapa continua sendo derivada dos dados (ver workflow/status.py).
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="rascunho", index=True)
+    ano_letivo: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resultados_publicados_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    publicado_por: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # ─── Fim do ciclo de vida ───
     turma: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # vínculo com o catálogo (turmas.id); inteiro simples (sem FK) para a
     # migração aditiva funcionar igual no SQLite (ALTER TABLE) e no Postgres
@@ -66,6 +105,8 @@ class Avaliacao(Base, TimestampMixin):
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     # Gabarito Personalizado vinculado (quando template == 'custom')
     custom_template_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # Prova (estrutura reutilizável) desta avaliação
+    prova_id: Mapped[int | None] = mapped_column(ForeignKey("provas.id"), nullable=True, index=True)
 
     owner: Mapped["User | None"] = relationship()
 
@@ -75,6 +116,10 @@ class Avaliacao(Base, TimestampMixin):
     gabaritos: Mapped[list["GabaritoNomeado"]] = relationship(
         back_populates="avaliacao", cascade="all, delete-orphan"
     )
+    turmas: Mapped[list["AvaliacaoTurma"]] = relationship(
+        back_populates="avaliacao", cascade="all, delete-orphan"
+    )
+    prova: Mapped["Prova | None"] = relationship()
 
 
 class Aluno(Base, TimestampMixin):
@@ -89,6 +134,8 @@ class Aluno(Base, TimestampMixin):
     # por XLSX). Garante idempotência exata da materialização, inclusive para
     # alunos sem matrícula. Inteiro simples (sem FK) pela migração aditiva.
     origem_turma_aluno_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    # situação do aluno nesta avaliação: ativo, inativo ou transferido
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo", index=True)
 
     avaliacao: Mapped["Avaliacao"] = relationship(back_populates="alunos")
     gabaritos: Mapped[list["GabaritoNomeado"]] = relationship(back_populates="aluno")
@@ -108,6 +155,8 @@ class Turma(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
+    ano_letivo: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
+    arquivada: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
 
     owner: Mapped["User | None"] = relationship()
@@ -126,6 +175,8 @@ class TurmaAluno(Base, TimestampMixin):
     nome: Mapped[str] = mapped_column(String(200), nullable=False)
     matricula: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
     identificador_externo: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # situação no catálogo: ativo, inativo ou transferido
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo", index=True)
 
     turma: Mapped["Turma"] = relationship(back_populates="alunos")
 
@@ -197,6 +248,118 @@ class GabaritoNomeado(Base, TimestampMixin):
                 "matricula": self.aluno.matricula,
             },
         }
+
+
+class AvaliacaoTurma(Base):
+    """Junção avaliação ↔ turma (uma avaliação atende uma ou várias turmas)."""
+
+    __tablename__ = "avaliacao_turmas"
+    __table_args__ = (
+        UniqueConstraint("avaliacao_id", "turma_id", name="uq_avaliacao_turma"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), index=True)
+    turma_id: Mapped[int] = mapped_column(Integer, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    avaliacao: Mapped["Avaliacao"] = relationship(back_populates="turmas")
+
+
+class GabaritoVersao(Base):
+    """Histórico do gabarito OFICIAL de uma avaliação.
+
+    Alterar o gabarito gera uma nova versão ativa e marca a anterior como
+    inativa — permitindo saber quais resultados foram calculados com qual
+    gabarito (regra de versionamento do enunciado).
+    """
+
+    __tablename__ = "gabarito_versoes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), index=True)
+    versao: Mapped[int] = mapped_column(Integer, nullable=False)
+    answer_key: Mapped[dict] = mapped_column(JSON, nullable=False)
+    autor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    autor_nome: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    observacao: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ativa: Mapped[bool] = mapped_column(default=True, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
+class Leitura(Base):
+    """Cada leitura de cartão (OMR) como registro próprio e auditável.
+
+    Características pedidas pelo fluxo:
+    - uma leitura pertence a exatamente uma avaliação e a um cartão/aluno;
+    - reprocessar cria uma NOVA leitura com `parent_id` apontando para a
+      anterior (histórico preservado, sem sobrescrever);
+    - `status` cobre pendente → revisada → publicada.
+    """
+
+    STATUS_PENDENTE = "pendente"
+    STATUS_REVISADA = "revisada"
+    STATUS_PUBLICADA = "publicada"
+
+    __tablename__ = "leituras"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    avaliacao_id: Mapped[int] = mapped_column(ForeignKey("avaliacoes.id"), index=True)
+    aluno_id: Mapped[int | None] = mapped_column(ForeignKey("alunos.id"), nullable=True, index=True)
+    gabarito_id: Mapped[int | None] = mapped_column(ForeignKey("gabaritos_nomeados.id"), nullable=True, index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+    codigo_unico: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    respostas: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    baixa_confianca: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    duplicadas: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    duplas_marcacoes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    acertos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    erros: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    brancos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    nota: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gabarito_versao: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=STATUS_PENDENTE, index=True)
+    operador_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    operador_nome: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    imagem_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    revisada_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class RevisaoManual(Base):
+    """Auditoria de correção manual (nunca muda uma resposta em silêncio)."""
+
+    __tablename__ = "revisoes_manuais"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    leitura_id: Mapped[int] = mapped_column(ForeignKey("leituras.id"), index=True)
+    questao: Mapped[int] = mapped_column(Integer, nullable=False)
+    resposta_anterior: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    resposta_corrigida: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    autor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    autor_nome: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    observacao: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
+class Auditoria(Base):
+    """Log append-only das operações importantes (transições, gabarito, publicações)."""
+
+    __tablename__ = "auditoria"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    entidade: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    entidade_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    acao: Mapped[str] = mapped_column(String(50), nullable=False)
+    resumo: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    antes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    depois: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    autor_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    autor_nome: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
 
 class DeletedExam(Base):

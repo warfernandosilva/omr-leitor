@@ -479,6 +479,10 @@ app.include_router(_alunos_router)
 from routers.custom_templates import router as _custom_router
 app.include_router(_custom_router)
 
+# Ciclo de vida das avaliações (prova/avaliação, etapas, status, auditoria)
+from routers.avaliacoes import router as _avaliacoes_router
+app.include_router(_avaliacoes_router)
+
 
 def _decode_image_bytes(contents: bytes) -> np.ndarray | None:
     """Decodifica bytes de imagem com correção de orientação EXIF (celular)
