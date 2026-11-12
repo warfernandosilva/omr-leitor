@@ -117,7 +117,7 @@ Regras de UX do leitor:
 - A lógica de detecção, QR, classificação e correção continua exclusiva do
   backend.
 
-## 5. Regras operacionais
+## 6. Regras operacionais
 
 - Backup/restore e usuários ficam na área admin.
 - Exclusão de prova cria lápide por 30 dias para não ressuscitar em outro
@@ -131,7 +131,73 @@ Regras de UX do leitor:
 - Impressão por lista manual gera códigos temporários e não substitui o lote
   oficial vinculado à prova.
 
-### 5.1 Edição de aluno (catálogo de turmas)
+## 5. Ciclo de vida da avaliação (reestruturação)
+
+A **avaliação** é o núcleo do sistema: liga prova, turmas, alunos, cartões,
+leituras e resultados. A **prova** guarda apenas a estrutura reutilizável
+(questões, disciplinas, layout, escala de nota) e pode servir N avaliações sem
+duplicar participantes nem identificadores.
+
+### 5.1 Modelo
+
+| Tabela | Papel |
+|---|---|
+| `provas` | estrutura reutilizável (`avaliacoes.prova_id`) |
+| `avaliacoes` | aplicação da prova: status, ano letivo, publicação |
+| `avaliacao_turmas` | junção N:N (avaliação atende 1..N turmas) |
+| `gabarito_versoes` | histórico do gabarito oficial (versão ativa) |
+| `leituras` | cada leitura de cartão, com `parent_id` no reprocessamento |
+| `revisoes_manuais` | auditoria de cada resposta corrigida à mão |
+| `auditoria` | log append-only das operações importantes |
+
+O backfill (`database._backfill_provas`) cria uma `provas` para cada avaliação
+antiga — `external_id`, alunos, gabaritos e QR permanecem intactos.
+
+### 5.2 Estados e etapas
+
+Estados (ordem do fluxo): `rascunho → em_preparacao → pronta_impressao →
+impressa → em_aplicacao → aguardando_correcao → em_correcao →
+aguardando_revisao → corrigida → publicados → arquivada`.
+
+Etapas visuais (6): Preparação → Impressão → Aplicação → Leitura → Revisão →
+Resultados. Cada uma tem status próprio e ação contextual; a regra vive em
+`workflow/status.py` no backend e é espelhada em `src/utils/workflow.ts`.
+
+- O status derivado sai dos dados (cartões gerados/recebidos/corrigidos e
+  revisões pendentes); o registrado cobre o que os dados não provam (impressa,
+  em aplicação, arquivada).
+- Transição manual só avança (`PATCH /api/avaliacoes/{id}/status`) e fica
+  registrada na auditoria.
+- Publicar exige zero leituras pendentes e ao menos um cartão corrigido.
+
+### 5.3 Identidade e integridade
+
+- Cada cartão tem QR/`codigo_unico` único ligado a aluno, avaliação e prova; o
+  nome do aluno nunca é identificador.
+- Uma leitura nunca gera resultado duplicado: reenviar o mesmo cartão atualiza
+  o mesmo `gabaritos_nomeados` e cria uma NOVA `leituras` com `parent_id`.
+- Reaproveitar prova/modelo em avaliação nova é explícito; participantes,
+  cartões e resultados das avaliações anteriores nunca se misturam.
+- Editar o catálogo de turmas não altera alunos já materializados nas provas
+  (a materialização é cópia).
+
+### 5.4 Edição e situação do aluno (catálogo de turmas)
+
+- Endpoint: `PATCH /api/turmas/{turma_id}/alunos/{aluno_id}` — mesmo caminho do
+  DELETE, porque o aluno vive no catálogo da turma.
+- Campos: `nome` (obrigatório; vazio → 400), `matricula` e
+  `identificador_externo` (string vazia limpa o campo) e `nova_turma_id`
+  (opcional, move o aluno; só aceita turma visível ao usuário).
+- Matrícula não pode repetir dentro da turma de destino: outra pessoa já usando
+  ela → 400. A matrícula do próprio aluno nunca é conflito.
+- A materialização é cópia: editar o catálogo **não** altera alunos já
+  importados em provas, nem cartões/QR emitidos. O nome impresso permanece o da
+  época da geração.
+- Situação do aluno no catálogo: `ativo`, `inativo` ou `transferido`
+  (`PATCH /api/turmas/{id}/alunos/{alunoId}/situacao`). A tela **Alunos**
+  mostra a situação e o histórico do aluno em avaliações (notas por avaliação).
+- Turmas têm ano letivo e arquivamento (`PATCH /api/turmas/{id}`); arquivadas
+  somem da listagem padrão e voltam com `?arquivadas=all`.
 
 - Endpoint: `PATCH /api/turmas/{turma_id}/alunos/{aluno_id}` — mesmo caminho do
   DELETE, porque o aluno vive no catálogo da turma.

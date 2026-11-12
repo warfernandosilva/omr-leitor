@@ -6,9 +6,10 @@ import {
 import type { AppView } from '../types';
 import {
   getAvaliacao, mudarStatus, publicarResultados, vincularTurma,
-  desvincularTurma, timelineAvaliacao, listLeituras,
+  desvincularTurma, timelineAvaliacao, listLeituras, revisarLeitura,
   type AvaliacaoDTO, type EventoDTO, type EtapaDTO, type LeituraDTO,
 } from '../utils/api-avaliacoes';
+
 import { AVALIACAO_STATUS_TONE, transicaoInvalida, type EtapaId, type StatusAvaliacao } from '../utils/workflow';
 import { listTurmas, type TurmaDTO } from '../utils/api';
 import PageHeader from '../components/ui/PageHeader';
@@ -16,7 +17,10 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
-import { ConfirmModal } from '../components/ui/Modal';
+import Modal, { ConfirmModal } from '../components/ui/Modal';
+import Field from '../components/ui/Field';
+import Input from '../components/ui/Input';
+import Select from '../components/ui/Select';
 import { useToast } from '../components/ui/Toast';
 
 interface Props {
@@ -71,6 +75,10 @@ export default function AvaliacaoDetailPage({ examId, onNavigate }: Props) {
   const [confirmarArquivar, setConfirmarArquivar] = useState(false);
   const [leituras, setLeituras] = useState<LeituraDTO[]>([]);
   const [eventos, setEventos] = useState<EventoDTO[]>([]);
+  const [revisando, setRevisando] = useState<LeituraDTO | null>(null);
+  const [respostasRevisao, setRespostasRevisao] = useState<Record<string, string>>({});
+  const [obsRevisao, setObsRevisao] = useState('');
+  const [salvandoRevisao, setSalvandoRevisao] = useState(false);
 
   const carregar = useCallback(async (id: string) => {
     setLoading(true);
@@ -103,6 +111,34 @@ export default function AvaliacaoDetailPage({ examId, onNavigate }: Props) {
   const irPara = (view: AppView) => {
     if (!dados) return;
     onNavigate(view, dados.external_id);
+  };
+
+  const abrirRevisao = (l: LeituraDTO) => {
+    setRevisando(l);
+    const r: Record<string, string> = {};
+    for (const [q, v] of Object.entries(l.respostas ?? {})) r[q] = v;
+    setRespostasRevisao(r);
+    setObsRevisao('');
+  };
+
+  const salvarRevisao = async () => {
+    if (!revisando) return;
+    setSalvandoRevisao(true);
+    try {
+      const numericas: Record<number, string> = {};
+      for (const [q, v] of Object.entries(respostasRevisao)) {
+        if (v && v.trim()) numericas[Number(q)] = v.trim().toUpperCase();
+      }
+      await revisarLeitura(revisando.id, numericas, obsRevisao.trim() || undefined);
+      notify('Leitura revisada — alterações registradas no histórico.', 'success');
+      setRevisando(null);
+      if (dados) await carregar(dados.external_id);
+    } catch (err) {
+      setErro(err instanceof Error ? err.message : 'Falha ao registrar a revisão.');
+      notify('Não foi possível salvar a revisão.', 'error');
+    } finally {
+      setSalvandoRevisao(false);
+    }
   };
 
   const acaoDaEtapa = (e: EtapaDTO) => {
@@ -459,9 +495,22 @@ export default function AvaliacaoDetailPage({ examId, onNavigate }: Props) {
                   </Badge>
                   {l.nota != null && <span className="text-sm font-semibold text-brand-600 dark:text-brand-200">Nota {l.nota}</span>}
                   {l.parent_id != null && <span className="text-xs text-[#71809A] dark:text-gray-400">reprocessada</span>}
-                  <span className="ml-auto text-xs text-[#71809A] dark:text-gray-400">
-                    {l.criada_em ? new Date(l.criada_em).toLocaleString('pt-BR') : ''}
-                  </span>
+                  {(l.baixa_confianca?.length || l.duplicadas?.length) ? (
+                    <span className="text-xs text-warning-600 dark:text-warning-100">
+                      {l.duplicadas?.length ? `${l.duplicadas.length} duplicada(s) ` : ''}
+                      {l.baixa_confianca?.length ? `${l.baixa_confianca.length} incerta(s)` : ''}
+                    </span>
+                  ) : null}
+                  <div className="ml-auto flex items-center gap-2">
+                    {l.status === 'pendente' && (
+                      <Button size="sm" variant="secondary" onClick={() => abrirRevisao(l)}>
+                        Revisar
+                      </Button>
+                    )}
+                    <span className="text-xs text-[#71809A] dark:text-gray-400">
+                      {l.criada_em ? new Date(l.criada_em).toLocaleString('pt-BR') : ''}
+                    </span>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -523,6 +572,70 @@ export default function AvaliacaoDetailPage({ examId, onNavigate }: Props) {
         loading={ocupado}
         message="A avaliação sai do fluxo ativo e passa para o histórico. Os resultados permanecem consultáveis."
       />
+
+      <Modal
+        open={revisando !== null}
+        onClose={() => setRevisando(null)}
+        title="Revisar leitura"
+        wide
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRevisando(null)} disabled={salvandoRevisao}>
+              Cancelar
+            </Button>
+            <Button onClick={() => void salvarRevisao()} loading={salvandoRevisao}>
+              Confirmar revisão
+            </Button>
+          </>
+        }
+      >
+        {revisando && (
+          <div className="space-y-4">
+            <p className="text-sm text-[#71809A] dark:text-gray-400">
+              Confirme as respostas do cartão <strong className="font-mono">{revisando.codigo_unico ?? '—'}</strong>.
+              Cada alteração fica registrada com autor e data.
+            </p>
+
+            {(revisando.duplicadas?.length || revisando.baixa_confianca?.length) ? (
+              <div className="callout-warning text-xs">
+                {revisando.duplicadas?.length ? `Duplicadas: Q${revisando.duplicadas.join(', Q')}. ` : ''}
+                {revisando.baixa_confianca?.length ? `Baixa confiança: Q${revisando.baixa_confianca.join(', Q')}.` : ''}
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {Object.keys(respostasRevisao)
+                .map(Number)
+                .sort((a, b) => a - b)
+                .map(q => (
+                  <Field key={q} label={`Q${q}`} htmlFor={`rev-${q}`}>
+                    <Select
+                      id={`rev-${q}`}
+                      value={respostasRevisao[q]}
+                      onChange={e => setRespostasRevisao(v => ({ ...v, [q]: e.target.value }))}
+                    >
+                      <option value="">Em branco</option>
+                      {['A', 'B', 'C', 'D'].map(l => (
+                        <option key={l} value={l}>{l}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ))}
+            </div>
+
+            <Field label="Observação (opcional)" htmlFor="rev-obs">
+              <Input
+                id="rev-obs"
+                type="text"
+                value={obsRevisao}
+                onChange={e => setObsRevisao(e.target.value)}
+                placeholder="Ex: marcação fraca corrigida na foto original"
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

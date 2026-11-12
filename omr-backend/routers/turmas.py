@@ -72,6 +72,7 @@ def _aluno_to_dict(a: TurmaAluno) -> dict:
         "nome": a.nome,
         "matricula": a.matricula,
         "identificador_externo": a.identificador_externo,
+        "situacao": a.situacao,
     }
 
 
@@ -84,13 +85,15 @@ def _get_turma(db: Session, turma_id: int, current_user: User) -> Turma:
 
 
 @router.get("/api/turmas")
-def list_turmas(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+def list_turmas(
+    arquivadas: str = Query(default="false", max_length=5),
+    db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user),
+):
     """Lista as turmas visíveis ao usuário (dono ou admin) com contagem de alunos.
 
     `arquivadas=false` (padrão) esconde as arquivadas; `arquivadas=true` lista
     só as arquivadas; `arquivadas=all` traz as duas coisas.
     """
-    arquivadas = Query(default="false", max_length=5)
     q = select(Turma).where(auth.owner_clause(Turma, current_user)).order_by(Turma.nome)
     if arquivadas == "true":
         q = q.where(Turma.arquivada.is_(True))

@@ -534,12 +534,15 @@ export interface TurmaAlunoDTO {
   nome: string;
   matricula: string | null;
   identificador_externo: string | null;
+  situacao?: string;
 }
 
 export interface TurmaDTO {
   id: number;
   nome: string;
   total_alunos: number;
+  ano_letivo?: string | null;
+  arquivada?: boolean;
 }
 
 export interface TurmaDetail extends TurmaDTO {
@@ -627,6 +630,37 @@ export async function removeTurmaAluno(id: number, alunoId: number): Promise<{ d
   return turmaFetch(`/api/turmas/${id}/alunos/${alunoId}`, { method: 'DELETE' });
 }
 
+/** Edita a turma: nome, ano letivo e arquivamento (campos opcionais). */
+export async function updateTurma(
+  id: number,
+  dados: { nome?: string; ano_letivo?: string | null; arquivada?: boolean },
+): Promise<TurmaDTO> {
+  return turmaFetch<TurmaDTO>(`/api/turmas/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(dados),
+  });
+}
+
+/** Lista turmas por estado de arquivamento (padrão: só as ativas). */
+export async function listTurmasPorArquivo(
+  arquivadas: 'true' | 'false' | 'all' = 'false',
+): Promise<TurmaDTO[]> {
+  const j = await turmaFetch<{ turmas: TurmaDTO[] }>(`/api/turmas?arquivadas=${arquivadas}`);
+  return j.turmas;
+}
+
+/** Marca a situação do aluno no catálogo (ativo, inativo, transferido). */
+export async function setAlunoSituacao(
+  id: number,
+  alunoId: number,
+  situacao: 'ativo' | 'inativo' | 'transferido',
+): Promise<TurmaAlunoDTO> {
+  return turmaFetch<TurmaAlunoDTO>(`/api/turmas/${id}/alunos/${alunoId}/situacao`, {
+    method: 'PATCH',
+    body: JSON.stringify({ situacao }),
+  });
+}
+
 export interface TurmaAlunoDraft {
   nome?: string;
   matricula?: string | null;
@@ -675,6 +709,8 @@ export interface AlunoListItem {
   identificador_externo: string | null;
   turma_id: number;
   turma_nome: string | null;
+  /** Situação no catálogo: ativo, inativo ou transferido. */
+  situacao?: string;
 }
 
 /** Lista global de alunos do catálogo (somente leitura — base da tela Alunos). */
@@ -781,6 +817,15 @@ export interface ResultadoPayload {
   brancos?: number;
   nota?: number;
   observacoes?: string;
+  photo_status?: string;
+  /** Ciclo de vida: dúvidas da leitura alimentam a fila de revisão no servidor. */
+  baixa_confianca?: number[];
+  duplicadas?: number[];
+  duplas_marcacoes?: Record<number, string[]>;
+  qr_ok?: boolean;
+  /** Correções manuais do professor (auditadas: anterior → corrigida). */
+  corrections?: Record<number, string>;
+  observacao_revisao?: string;
 }
 
 export async function saveGabaritoResultado(

@@ -101,6 +101,20 @@ interface BatchItem {
   previousNota?: number | null;
 }
 
+/** Respostas em que a conferência manual divergiu da leitura do OMR. */
+function correcoesVsOrm(
+  manual: Record<number, string>,
+  omr: Record<number, string> | undefined,
+): Record<number, string> {
+  if (!omr) return {};
+  const out: Record<number, string> = {};
+  for (const [q, letra] of Object.entries(manual)) {
+    const antes = omr[Number(q)];
+    if (antes && antes !== letra) out[Number(q)] = letra;
+  }
+  return out;
+}
+
 function countResults(
   exam: Exam,
   answers: Record<number, string>,
@@ -1459,6 +1473,15 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
           return `Q${q}${m?.length ? ` (${m.join(', ')})` : ''}`;
         }).join(', ')}`
       : undefined;
+    // ─── Ciclo de vida: o servidor registra a leitura e a fila de revisão ───
+    // Dúvidas do OMR e correções manuais viajam junto do resultado, para a
+    // central de revisões e a auditoria terem a mesma verdade do cartão.
+    const correcoesManuais = correcoesVsOrm(manualAnswers, omrResult?.answers);
+    const marcacoesDuplas: Record<number, string[]> = {};
+    for (const q of dupList) {
+      const marcas = dupMarks[q];
+      if (marcas?.length) marcacoesDuplas[q] = marcas;
+    }
     const basePayload = {
       respostas: Object.fromEntries(Object.entries(manualAnswers).map(([q, a]) => [q, a])),
       acertos: correctCount,
@@ -1466,6 +1489,14 @@ export default function CorrectCardPage({ examId, onNavigate }: Props) {
       brancos: blankCount,
       nota: grade,
       observacoes,
+      baixa_confianca: omrResult?.lowConfidence ?? [],
+      duplicadas: dupList,
+      duplas_marcacoes: marcacoesDuplas,
+      qr_ok: identified?.kind === 'ok' || identified?.kind === 'wrong_exam',
+      corrections: correcoesManuais,
+      observacao_revisao: correcoesManuais
+        ? 'Ajuste do professor na conferência manual'
+        : undefined,
     };
     return { basePayload, correctCount, incorrectCount, blankCount, grade, dupList, dupMarks, observacoes };
   };

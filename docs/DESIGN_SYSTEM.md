@@ -61,6 +61,15 @@ Fonte principal: **Inter**.
 - `AiAssistPanel`, `ManualReviewPanel`, `ResultSummaryPanel`
 - `BatchQueuePanel`, `MultiPageBatchModal`
 - `AlunoEditModal` (edição de aluno do catálogo)
+  
+### Ciclo de vida da avaliação (telas novas)
+
+- `AvaliacoesPage` — central com status, progresso e próxima ação por
+  avaliação, filtros e criação a partir de prova existente.
+- `AvaliacaoDetailPage` — as 6 etapas com ação contextual, bloqueios
+  explicados, mudança manual autorizada, turmas participantes, leituras
+  registradas e auditoria.
+- `ProvasPage` — catálogo de provas (estrutura reutilizável).
 
 ## Regras de uso
 

@@ -4,9 +4,10 @@ import {
 } from 'lucide-react';
 import type { AppView } from '../types';
 import {
-  getTurma, listAlunos, listTurmas, updateTurmaAluno,
+  getTurma, listAlunos, listTurmas, updateTurmaAluno, setAlunoSituacao,
   type AlunoListItem, type TurmaDTO,
 } from '../utils/api';
+import { alunoHistorico } from '../utils/api-avaliacoes';
 import { getExams, getResults } from '../utils/storage';
 import { duplicateIds, findDuplicateGroups } from '../utils/alunos';
 import { useAuth } from '../context/AuthContext';
@@ -29,6 +30,12 @@ interface Props {
 
 const keyOf = (a: AlunoListItem) => `${a.turma_id}-${a.id}`;
 
+const SITUACOES: { valor: 'ativo' | 'inativo' | 'transferido'; label: string }[] = [
+  { valor: 'ativo', label: 'Ativo' },
+  { valor: 'inativo', label: 'Inativo' },
+  { valor: 'transferido', label: 'Transferido' },
+];
+
 /** Catálogo global de alunos (agrega os catálogos das turmas). */
 export default function StudentsPage({ onNavigate }: Props) {
   const { user } = useAuth();
@@ -44,6 +51,11 @@ export default function StudentsPage({ onNavigate }: Props) {
   const [editing, setEditing] = useState<AlunoListItem | null>(null);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [historico, setHistorico] = useState<{
+    avaliacao_id: number; external_id: string; titulo: string; ano_letivo: string | null;
+    status: string; status_label: string; ultima_nota: number | null; melhor_nota: number | null;
+  }[] | null>(null);
+  const [historicLoading, setHistoricLoading] = useState(false);
   const { notify } = useToast();
 
   useEffect(() => {
@@ -108,6 +120,42 @@ export default function StudentsPage({ onNavigate }: Props) {
   const avg = selectedHistory.length
     ? (selectedHistory.reduce((acc, r) => acc + r.grade, 0) / selectedHistory.length).toFixed(1)
     : '—';
+
+  // Historico do aluno: avaliacoes em que ele aparece, com as notas.
+  useEffect(() => {
+    if (!selected) {
+      setHistorico(null);
+      return;
+    }
+    let vivo = true;
+    setHistoricLoading(true);
+    setHistorico(null);
+    (async () => {
+      try {
+        const h = await alunoHistorico(selected.id);
+        if (vivo) setHistorico(h.avaliacoes);
+      } catch {
+        if (vivo) setHistorico([]);   // servidor fora do ar: esconde a secao
+      } finally {
+        if (vivo) setHistoricLoading(false);
+      }
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
+  const trocarSituacao = async (situacao: 'ativo' | 'inativo' | 'transferido') => {
+    if (!selected) return;
+    try {
+      await setAlunoSituacao(selected.turma_id, selected.id, situacao);
+      setAlunos(prev => prev.map(a => (keyOf(a) === keyOf(selected) ? { ...a, situacao } : a)));
+      notify(`Situação de "${selected.nome}" alterada para ${situacao}.`, 'success');
+      // Recarrega o catálogo para o contador e a lista refletirem a mudança.
+      setAlunos(await listAlunos());
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Falha ao alterar a situação.');
+    }
+  };
 
   const handleSaveAluno = async (draft: AlunoDraft) => {
     if (!editing) return;
@@ -281,9 +329,12 @@ export default function StudentsPage({ onNavigate }: Props) {
               { key: 'turma', header: 'Turma', render: (a) => <span className="text-[#71809A] dark:text-gray-400">{a.turma_nome ?? 'Sem turma'}</span> },
               {
                 key: 'situacao', header: 'Situação',
-                render: (a) => dupIdSet.has(a.id)
-                  ? <Badge tone="warning">Duplicado?</Badge>
-                  : <Badge tone="success">Ativo</Badge>,
+                render: (a) => {
+                  if (dupIdSet.has(a.id)) return <Badge tone="warning">Duplicado?</Badge>;
+                  if (a.situacao === 'inativo') return <Badge tone="neutral">Inativo</Badge>;
+                  if (a.situacao === 'transferido') return <Badge tone="warning">Transferido</Badge>;
+                  return <Badge tone="success">Ativo</Badge>;
+                },
               },
               {
                 key: 'acoes', header: 'Ações', className: 'text-right',
@@ -360,6 +411,56 @@ export default function StudentsPage({ onNavigate }: Props) {
                   </ul>
                 )}
               </div>
+              <div>
+                <p className="label">Situação no catálogo</p>
+                <div className="flex flex-wrap gap-2">
+                  {SITUACOES.map(op => (
+                    <Button
+                      key={op.valor}
+                      size="sm"
+                      variant={(selected.situacao ?? 'ativo') === op.valor ? 'primary' : 'secondary'}
+                      onClick={() => trocarSituacao(op.valor)}
+                    >
+                      {op.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="label">Histórico em avaliações</p>
+                {historicLoading ? (
+                  <p className="text-sm text-[#71809A] dark:text-gray-400" role="status">Consultando avaliações...</p>
+                ) : historico && historico.length > 0 ? (
+                  <ul className="divide-y divide-line rounded-[10px] border border-line dark:divide-gray-800 dark:border-gray-800">
+                    {historico.map(h => (
+                      <li key={h.avaliacao_id} className="flex items-center justify-between gap-2 px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[#172B4D] dark:text-gray-100 truncate">{h.titulo}</p>
+                          <p className="text-xs text-[#71809A] dark:text-gray-400">
+                            {h.status_label}{h.ano_letivo ? ` · ${h.ano_letivo}` : ''}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {h.ultima_nota != null && (
+                            <Badge tone={h.ultima_nota >= 6 ? 'success' : h.ultima_nota >= 4 ? 'warning' : 'danger'}>
+                              Nota {h.ultima_nota.toFixed(1)}
+                            </Badge>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => onNavigate('avaliacao-detalhe', h.external_id)}>
+                            Abrir
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : historico && historico.length === 0 ? (
+                  <p className="text-sm text-[#71809A] dark:text-gray-400">
+                    Este aluno ainda não aparece em nenhuma avaliação.
+                  </p>
+                ) : null}
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <Button
                   onClick={() => { setEditError(null); setEditing(selected); }}
@@ -376,6 +477,10 @@ export default function StudentsPage({ onNavigate }: Props) {
           )}
         </Card>
       </div>
+
+      {editError && (
+        <div className="callout-danger" role="alert">{editError}</div>
+      )}
 
       <AlunoEditModal
         aluno={editing}

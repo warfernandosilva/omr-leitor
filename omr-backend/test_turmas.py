@@ -379,6 +379,67 @@ def test_patch_aluno_nao_altera_prova_materializada(isolated, client):
     assert [a["nome"] for a in catalogo] == ["Daniela"], "catálogo mudou"
 
 
+def _importa(c, turma_id, alunos):
+    r = c.post(f"/api/turmas/{turma_id}/alunos/import", json={"alunos": alunos})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_arquivar_turma_e_filtrar_na_listagem(isolated, client):
+    """Arquivar turma: some da listagem padrao, volta com arquivadas=all."""
+    c = _authed(client, "turma-arquiva@example.com")
+    t = _cria_turma(c, "9º Z")
+    _importa(c, t["id"], [{"nome": "Ana", "matricula": "1"}])
+    t2 = _cria_turma(c, "9º W")
+
+    padrao = {x["nome"] for x in c.get("/api/turmas").json()["turmas"]}
+    assert "9º Z" in padrao and "9º W" in padrao, "ambas ativas no início"
+
+    arq = c.patch(f"/api/turmas/{t['id']}", json={"arquivada": True})
+    assert arq.status_code == 200, arq.text
+    assert arq.json()["arquivada"] is True, "resposta informa o estado"
+
+    so_ativas = {x["nome"] for x in c.get("/api/turmas").json()["turmas"]}
+    assert "9º Z" not in so_ativas, "arquivada some da listagem padrão"
+    assert "9º W" in so_ativas
+
+    so_arquivadas = {x["nome"] for x in
+                     c.get("/api/turmas", params={"arquivadas": "true"}).json()["turmas"]}
+    assert so_arquivadas == {"9º Z"}, "arquivadas=true traz só as arquivadas"
+
+    todas = {x["nome"] for x in
+             c.get("/api/turmas", params={"arquivadas": "all"}).json()["turmas"]}
+    assert todas == {"9º W", "9º Z"}, "all traz as duas coisas"
+
+    # reativar devolve a turma à listagem padrão
+    re = c.patch(f"/api/turmas/{t['id']}", json={"arquivada": False})
+    assert re.status_code == 200 and re.json()["arquivada"] is False
+    assert "9º Z" in {x["nome"] for x in c.get("/api/turmas").json()["turmas"]}
+
+
+def test_patch_turma_aceita_ano_letivo_e_situacao_aluno(isolated, client):
+    c = _authed(client, "turma-ano@example.com")
+    t = _cria_turma(c, "8º Y")
+    _importa(c, t["id"], [{"nome": "Beto", "matricula": "7"}])
+    aluno = c.get(f"/api/turmas/{t['id']}").json()["alunos"][0]
+
+    # ano letivo (texto grava, vazio limpa)
+    assert c.patch(f"/api/turmas/{t['id']}", json={"ano_letivo": "2026"}).json()["ano_letivo"] == "2026"
+    assert c.patch(f"/api/turmas/{t['id']}", json={"ano_letivo": ""}).json()["ano_letivo"] is None
+    # nome vazio continua recusado
+    assert c.patch(f"/api/turmas/{t['id']}", json={"nome": "  "}).status_code == 400
+
+    # situação do aluno no catálogo
+    for situacao in ("inativo", "transferido", "ativo"):
+        r = c.patch(f"/api/turmas/{t['id']}/alunos/{aluno['id']}/situacao",
+                    json={"situacao": situacao})
+        assert r.status_code == 200, r.text
+        assert r.json()["situacao"] == situacao
+    ruim = c.patch(f"/api/turmas/{t['id']}/alunos/{aluno['id']}/situacao",
+                   json={"situacao": "sumido"})
+    assert ruim.status_code == 400, "situação inventada não existe"
+
+
 def test_backup_inclui_turmas(isolated, client, db_session):
     c = _authed(client)
     t = _cria_turma(c, "3º A")

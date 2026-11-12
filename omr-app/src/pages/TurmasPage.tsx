@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  BarChart3, ClipboardList, Download, FilePlus2, GraduationCap, Pencil, Plus,
+  Archive, BarChart3, ClipboardList, Download, FilePlus2, GraduationCap, Pencil, Plus,
   RefreshCw, Search, Trash2, Upload, UserPlus, Users,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -8,7 +8,8 @@ import type { AppView } from '../types';
 import { getExams, getResults } from '../utils/storage';
 import { importStudents } from '../utils/students';
 import {
-  listTurmas, createTurma, getTurma, renameTurma, deleteTurma,
+  listTurmas, createTurma, getTurma, renameTurma, deleteTurma, updateTurma,
+  listTurmasPorArquivo,
   importTurmaAlunos, addTurmaAluno, removeTurmaAluno, saveBlob,
   type TurmaDTO, type TurmaDetail,
 } from '../utils/api';
@@ -62,18 +63,19 @@ export default function TurmasPage({ onNavigate }: Props) {
   const [msgError, setMsgError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [tab, setTab] = useState<DetailTab>('visao');
+  const [mostrarArquivadas, setMostrarArquivadas] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      setTurmas(await listTurmas());
+      setTurmas(await listTurmasPorArquivo(mostrarArquivadas ? 'all' : 'false'));
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Falha ao listar turmas.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [mostrarArquivadas]);
 
   useEffect(() => {
     refresh().catch(() => {});
@@ -128,6 +130,40 @@ export default function TurmasPage({ onNavigate }: Props) {
       await refreshDetail(selectedId);
     } catch (err) {
       setMsgError(err instanceof Error ? err.message : 'Falha ao renomear.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveAnoLetivo = async (ano: string) => {
+    if (selectedId == null) return;
+    setBusy(true);
+    setMsgError(null);
+    try {
+      await updateTurma(selectedId, { ano_letivo: ano.trim() || null });
+      await refreshDetail(selectedId);
+      setMsg(`Ano letivo ${ano.trim() || 'removido'} salvo.`);
+    } catch (err) {
+      setMsgError(err instanceof Error ? err.message : 'Falha ao salvar o ano letivo.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleArquivar = async (arquivar: boolean) => {
+    if (selectedId == null) return;
+    const acao = arquivar ? 'arquivar' : 'reativar';
+    if (!confirm(`${arquivar ? 'Arquivar' : 'Reativar'} a turma "${detail?.nome}"? As provas e resultados já gerados permanecem consultáveis.`)) return;
+    setBusy(true);
+    setMsgError(null);
+    try {
+      await updateTurma(selectedId, { arquivada: arquivar });
+      setSelectedId(null);
+      setDetail(null);
+      await refresh();
+      setMsg(`Turma ${acao === 'arquivar' ? 'arquivada' : 'reativada'}.`);
+    } catch (err) {
+      setMsgError(err instanceof Error ? err.message : `Falha ao ${acao} a turma.`);
     } finally {
       setBusy(false);
     }
@@ -252,7 +288,17 @@ export default function TurmasPage({ onNavigate }: Props) {
                 className="!pl-9"
               />
             </div>
-            <span className="text-xs text-[#71809A] dark:text-gray-400">{filtered.length} turma(s)</span>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-[#71809A] dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mostrarArquivadas}
+                  onChange={e => setMostrarArquivadas(e.target.checked)}
+                />
+                Ver arquivadas
+              </label>
+              <span className="text-xs text-[#71809A] dark:text-gray-400">{filtered.length} turma(s)</span>
+            </div>
           </div>
 
           {loading ? (
@@ -286,7 +332,9 @@ export default function TurmasPage({ onNavigate }: Props) {
                         <p className="font-semibold text-[#172B4D] dark:text-white truncate">{t.nome}</p>
                         <p className="text-sm text-[#71809A] dark:text-gray-400 mt-0.5">
                           {t.total_alunos} aluno{t.total_alunos === 1 ? '' : 's'}
+                          {t.ano_letivo ? ` · ${t.ano_letivo}` : ''}
                         </p>
+                        {t.arquivada && <Badge tone="neutral">Arquivada</Badge>}
                       </div>
                       <span className="w-9 h-9 rounded-[10px] bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center text-brand-600 dark:text-brand-200 shrink-0" aria-hidden>
                         <GraduationCap size={18} />
@@ -349,6 +397,15 @@ export default function TurmasPage({ onNavigate }: Props) {
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button size="sm" variant="secondary" onClick={() => setRenaming(true)} icon={<Pencil size={14} aria-hidden />}>Renomear</Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={busy}
+                        onClick={() => handleArquivar(true)}
+                        icon={<Archive size={14} aria-hidden />}
+                      >
+                        Arquivar
+                      </Button>
                       <Button size="sm" variant="danger" onClick={handleDelete} loading={busy} icon={<Trash2 size={14} aria-hidden />}>Apagar turma</Button>
                     </div>
                   </>
@@ -522,6 +579,31 @@ export default function TurmasPage({ onNavigate }: Props) {
 
           <Card className="space-y-4">
             <h3 className="font-semibold text-[#172B4D] dark:text-white">Ações da turma</h3>
+            <Field
+              label="Ano letivo"
+              htmlFor="turma-ano-letivo"
+              helper="Usado no histórico do aluno e nos relatórios consolidados."
+            >
+              <div className="flex gap-2">
+                <Input
+                  id="turma-ano-letivo"
+                  type="text"
+                  placeholder="2026"
+                  defaultValue={detail?.ano_letivo ?? ''}
+                  className="sm:w-28"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  loading={busy}
+                  onClick={() => handleSaveAnoLetivo(
+                    (document.getElementById('turma-ano-letivo') as HTMLInputElement | null)?.value ?? '',
+                  )}
+                >
+                  Salvar
+                </Button>
+              </div>
+            </Field>
             <div className="flex flex-col gap-2">
               <Button variant="secondary" onClick={() => setTab('alunos')} icon={<Users size={16} aria-hidden />}>
                 Gerenciar alunos

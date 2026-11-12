@@ -11,6 +11,7 @@ import { initPwa, applyPwaUpdate, PWA_UPDATE_EVENT } from './pwa';
 import HomePage from './pages/HomePage';
 import AvaliacoesPage from './pages/AvaliacoesPage';
 import AvaliacaoDetailPage from './pages/AvaliacaoDetailPage';
+import ProvasPage from './pages/ProvasPage';
 import NewExamPage from './pages/NewExamPage';
 import TurmasPage from './pages/TurmasPage';
 import StudentsPage from './pages/StudentsPage';
@@ -171,6 +172,8 @@ function AppInner() {
         return <AvaliacoesPage onNavigate={navigate} />;
       case 'avaliacao-detalhe':
         return <AvaliacaoDetailPage examId={selectedExamId} onNavigate={navigate} />;
+      case 'provas':
+        return <ProvasPage onNavigate={navigate} />;
       case 'new-exam':
         return <NewExamPage onNavigate={navigate} />;
       case 'turmas':
