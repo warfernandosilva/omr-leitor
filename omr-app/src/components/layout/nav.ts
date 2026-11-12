@@ -86,8 +86,9 @@ export interface BottomNavItem {
 
 export const BOTTOM_NAV: BottomNavItem[] = [
   { view: 'home', label: 'Início', icon: LayoutDashboard },
-  { view: 'correct-card', label: 'Nova leitura', icon: ScanLine },
   { view: 'avaliacoes', label: 'Avaliações', icon: ListChecks },
+  { view: 'correct-card', label: 'Nova leitura', icon: ScanLine },
+  { view: 'pending', label: 'Revisões', icon: ClipboardCheck },
   { view: 'dashboard', label: 'Resultados', icon: BarChart3 },
 ];
 

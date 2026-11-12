@@ -2496,6 +2496,7 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
     else:
         leitura.revisada_em = agora
     db.add(leitura)
+    db.flush()  # garante leitura.id ANTES das revisões manuais
 
     # Correções manuais chegam auditadas: anterior → corrigida, por questão.
     for q, letra in (req.corrections or {}).items():
@@ -2508,7 +2509,7 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
         if resp_anterior == letra_corrigida:
             continue
         db.add(RevisaoManual(
-            leitura_id=None,  # preenchido após o flush
+            leitura_id=leitura.id,
             questao=questao,
             resposta_anterior=resp_anterior,
             resposta_corrigida=letra_corrigida,
@@ -2516,10 +2517,6 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
             autor_nome=current_user.nome or current_user.email,
             observacao=req.observacao_revisao,
         ))
-    db.flush()
-    for rm in db.new:
-        if isinstance(rm, RevisaoManual) and rm.leitura_id is None:
-            rm.leitura_id = leitura.id
     if req.corrections:
         db.add(Auditoria(
             entidade="leitura",

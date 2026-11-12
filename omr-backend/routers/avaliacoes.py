@@ -171,6 +171,27 @@ def _turmas_da_avaliacao(db: Session, av: Avaliacao) -> list[dict]:
             for t in turmas]
 
 
+def _revisoes_pendentes(db: Session, avaliacao_id: int) -> int:
+    """Leituras pendentes que ainda importam: a MAIS RECENTE de cada cartão.
+
+    Regra: reprocessar um cartão cria uma leitura nova (com `parent_id`) que
+    substitui a anterior — a leitura antiga, mesmo pendente, não conta mais.
+    `id` autoincremento é a ordem confiável: `created_at` pode repetir no
+    mesmo segundo entre duas leituras do mesmo cartão.
+    """
+    linhas = db.execute(
+        select(Leitura.id, Leitura.gabarito_id, Leitura.status)
+        .where(Leitura.avaliacao_id == avaliacao_id)
+        .order_by(Leitura.id)
+    ).all()
+    ultima_por_cartao: dict[str, str] = {}
+    for leitura_id, gabarito_id, status in linhas:
+        # cartão sem gabarito (leitura avulsa) conta individualmente
+        chave = str(gabarito_id) if gabarito_id is not None else f"solto-{leitura_id}"
+        ultima_por_cartao[chave] = status          # id crescente: o último vence
+    return sum(1 for st in ultima_por_cartao.values() if st == Leitura.STATUS_PENDENTE)
+
+
 def _contadores(db: Session, av: Avaliacao) -> wf.Contadores:
     turmas = _turmas_da_avaliacao(db, av)
     probe = db.get(Prova, av.prova_id) if av.prova_id else None
@@ -188,11 +209,10 @@ def _contadores(db: Session, av: Avaliacao) -> wf.Contadores:
         GabaritoNomeado.avaliacao_id == av.id,
         GabaritoNomeado.data_leitura.is_not(None),
     )) or 0
-    # Leituras registradas pelo fluxo novo (preenchido a partir da Fase 3);
-    # revisão derivada = leitura que ainda não foi confirmada.
-    revisoes = db.scalar(select(func.count()).select_from(Leitura).where(
-        Leitura.avaliacao_id == av.id, Leitura.status == Leitura.STATUS_PENDENTE,
-    )) or 0
+    # Leituras registradas pelo fluxo novo. A pendencia e da leitura MAIS
+    # RECENTE de cada cartao: reprocessar um cartao nao pode deixar pendencia
+    # fantasma da leitura anterior (a nova e a vigente).
+    revisoes = _revisoes_pendentes(db, av.id)
     versao = db.scalar(select(func.max(GabaritoVersao.versao))
                        .where(GabaritoVersao.avaliacao_id == av.id))
     return wf.Contadores(
@@ -521,6 +541,41 @@ def avaliacao_timeline(
             "depois": a.depois,
             "data": a.created_at.isoformat(),
         })
+
+    # Auditoria das leituras desta avaliacao (correcao manual e revisao):
+    # sem isso a timeline so mostrava eventos da propria avaliacao.
+    leitura_ids = db.scalars(
+        select(Leitura.id).where(Leitura.avaliacao_id == av.id)
+    ).all()
+    if leitura_ids:
+        textos = [str(x) for x in leitura_ids]
+        for a in db.scalars(
+            select(Auditoria).where(
+                Auditoria.entidade == "leitura",
+                Auditoria.entidade_id.in_(textos),
+            ).order_by(Auditoria.created_at.desc())
+        ).all():
+            eventos.append({
+                "tipo": a.acao,
+                "resumo": a.resumo,
+                "autor": a.autor_nome,
+                "antes": a.antes,
+                "depois": a.depois,
+                "data": a.created_at.isoformat(),
+            })
+        for rm in db.scalars(
+            select(RevisaoManual).where(RevisaoManual.leitura_id.in_(leitura_ids))
+            .order_by(RevisaoManual.created_at.desc())
+        ).all():
+            antes_txt = rm.resposta_anterior or "—"
+            depois_txt = rm.resposta_corrigida or "—"
+            obs = f" ({rm.observacao})" if rm.observacao else ""
+            eventos.append({
+                "tipo": "revisao_manual",
+                "resumo": f"Q{rm.questao}: {antes_txt} → {depois_txt}{obs}",
+                "autor": rm.autor_nome,
+                "data": rm.created_at.isoformat(),
+            })
     for gv in db.scalars(
         select(GabaritoVersao).where(GabaritoVersao.avaliacao_id == av.id)
         .order_by(GabaritoVersao.created_at.desc())
@@ -585,7 +640,7 @@ def publicar_resultados(
     if av.status not in (wf.PUBLICADOS, wf.ARQUIVADA):
         av.status = wf.PUBLICADOS
     _auditar(db, current_user, "avaliacao", av.external_id, "resultados_publicados",
-             resumo=f"{contadores.cartoes_corrigidos} cartão(ões)", autor_nome=av.publicado_por)
+             resumo=f"{contadores.cartoes_corrigidos} cartao(es) publicados por {av.publicado_por}")
     db.commit()
     db.refresh(av)
     return _avaliacao_to_dict(db, av)
