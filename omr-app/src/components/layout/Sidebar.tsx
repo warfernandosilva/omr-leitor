@@ -101,9 +101,9 @@ export default function Sidebar({
                         <span className={`flex-1 text-left truncate ${collapsed ? 'lg:hidden' : ''}`}>
                           {item.label}
                         </span>
-                        {item.soon && (
-                          <span className={`badge-neutral badge !px-1.5 !py-0 text-[10px] ${collapsed ? 'lg:hidden' : ''}`}>
-                            Em breve
+                        {item.adminOnly && (
+                          <span className={`badge-info badge !px-1.5 !py-0 text-[10px] ${collapsed ? 'lg:hidden' : ''}`}>
+                            Admin
                           </span>
                         )}
                       </button>

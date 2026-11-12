@@ -1,12 +1,14 @@
 import {
   BarChart3, ClipboardCheck, ClipboardList, FlaskConical, GraduationCap,
-  KeyRound, Plus, Printer, ScanLine, ShieldCheck, TriangleAlert, Upload, Users,
+  KeyRound, ListChecks, Plus, Printer, ScanLine, ShieldCheck, TriangleAlert, Upload, Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { AppView } from '../types';
 import { getExams, getResults } from '../utils/storage';
 import { listAlunos, listTurmas } from '../utils/api';
+import { resumoOperacao, type OperacaoResumo } from '../utils/api-avaliacoes';
+import { STATUS_LABEL } from '../utils/workflow';
 import { pendingFromResults } from '../utils/pending';
 import { useAuth } from '../context/AuthContext';
 import Card from '../components/ui/Card';
@@ -44,20 +46,19 @@ export default function HomePage({ onNavigate }: Props) {
   const results = getResults(undefined, user?.id);
   const pending = pendingFromResults(results);
   const examName = (id: string) => exams.find((e) => e.id === id)?.name ?? 'Prova';
-  const avgGrade = results.length
-    ? nf(results.reduce((acc, r) => acc + r.grade, 0) / results.length)
-    : '—';
   const [turmaCount, setTurmaCount] = useState<number | null>(null);
   const [alunoCount, setAlunoCount] = useState<number | null>(null);
+  const [resumo, setResumo] = useState<OperacaoResumo | null>(null);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [ts, as] = await Promise.all([listTurmas(), listAlunos()]);
+        const [ts, as, res] = await Promise.all([listTurmas(), listAlunos(), resumoOperacao()]);
         if (alive) {
           setTurmaCount(ts.length);
           setAlunoCount(as.length);
+          setResumo(res);
         }
       } catch {
         if (alive) {
@@ -78,12 +79,13 @@ export default function HomePage({ onNavigate }: Props) {
           icon: ShieldCheck,
         }]
       : []),
+    { title: 'Nova avaliação', desc: 'Escolha a prova e as turmas participantes', view: 'avaliacoes', icon: Plus },
     { title: 'Nova prova', desc: 'Crie uma prova com questões por disciplina', view: 'new-exam', icon: Plus },
     { title: 'Corrigir cartão', desc: 'Capture ou envie a foto do cartão preenchido', view: 'correct-card', icon: ScanLine },
     { title: 'Cadastrar gabarito', desc: 'Defina as respostas corretas da prova', view: 'register-key', icon: KeyRound },
     { title: 'Gerar cartões', desc: 'Cartão-resposta em formato A4 para impressão', view: 'generate-card', icon: Printer },
     { title: 'Importar alunos', desc: 'Planilha XLSX/CSV na tela Turmas', view: 'turmas', icon: Upload },
-    { title: 'Gerenciar avaliação', desc: 'Alunos, gabaritos e status de correção', view: 'manage-exam', icon: ClipboardList },
+    { title: 'Gerenciar avaliações', desc: 'Acompanhe cada etapa até publicar resultados', view: 'avaliacoes', icon: ListChecks },
     { title: 'Turmas', desc: 'Catálogo de alunos reutilizável entre provas', view: 'turmas', icon: GraduationCap },
     { title: 'Resultados', desc: 'Veja todas as correções realizadas', view: 'results', icon: BarChart3 },
     { title: 'Laboratório OMR', desc: 'Valide a leitura e calibre thresholds', view: 'lab', icon: FlaskConical },
@@ -170,77 +172,98 @@ export default function HomePage({ onNavigate }: Props) {
       </Card>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-        <StatCard label="Total de turmas" value={turmaCount ?? '—'} tone="info" icon={<GraduationCap size={18} aria-hidden />} />
-        <StatCard label="Total de alunos" value={alunoCount ?? '—'} tone="info" icon={<Users size={18} aria-hidden />} />
-        <StatCard label="Provas cadastradas" value={exams.length} tone="info" icon={<ClipboardList size={18} aria-hidden />} />
-        <StatCard label="Cartões corrigidos" value={results.length} tone="success" icon={<ScanLine size={18} aria-hidden />} />
+        <StatCard label="Total de turmas" value={resumo ? resumo.turmas : (turmaCount ?? '—')} tone="info" icon={<GraduationCap size={18} aria-hidden />} />
+        <StatCard label="Total de alunos" value={resumo ? resumo.alunos : (alunoCount ?? '—')} tone="info" icon={<Users size={18} aria-hidden />} />
+        <StatCard label="Avaliações" value={resumo ? resumo.avaliacoes : exams.length} tone="info" icon={<ListChecks size={18} aria-hidden />} />
+        <StatCard
+          label="Aguardando correção"
+          value={resumo ? (resumo.por_status['aguardando_correcao'] ?? 0) + (resumo.por_status['em_correcao'] ?? 0) : '—'}
+          tone="warning"
+          icon={<ClipboardList size={18} aria-hidden />}
+          hint="leituras para corrigir"
+        />
         <StatCard
           label="Revisões pendentes"
-          value={pending.length}
-          tone={pending.length > 0 ? 'warning' : 'default'}
+          value={resumo ? resumo.por_status['aguardando_revisao'] ?? 0 : pending.length}
+          tone={resumo ? (resumo.por_status['aguardando_revisao'] ? 'warning' : 'default') : (pending.length > 0 ? 'warning' : 'default')}
           icon={<ClipboardCheck size={18} aria-hidden />}
-          hint={pending.length > 0 ? 'exigem revisão' : 'tudo revisado'}
+          hint={resumo?.por_status['aguardando_revisao'] ? 'exigem revisão' : 'tudo revisado'}
         />
-        <StatCard label="Média geral" value={avgGrade} icon={<BarChart3 size={18} aria-hidden />} hint={results.length > 0 ? `${results.length} cartão(ões)` : 'sem correções ainda'} />
+        <StatCard
+          label="Resultados publicados"
+          value={resumo ? resumo.por_status['publicados'] ?? 0 : results.length}
+          tone="success"
+          icon={<BarChart3 size={18} aria-hidden />}
+          hint={results.length > 0 ? `${results.length} cartão(ões) corrigido(s)` : 'sem correções ainda'}
+        />
       </div>
 
-      {pending.length > 0 && (
+      {(resumo?.alertas.length ?? 0) > 0 || pending.length > 0 ? (
         <Card className="border-warning-500/40 bg-warning-50/60 dark:bg-warning-500/5">
           <div className="flex items-start gap-3 mb-3">
             <span className="mt-0.5 w-9 h-9 rounded-[10px] bg-warning-100 dark:bg-warning-500/15 flex items-center justify-center text-warning-600 dark:text-warning-100 shrink-0" aria-hidden>
               <TriangleAlert size={18} />
             </span>
             <div>
-              <h2 className="text-lg font-semibold text-[#172B4D] dark:text-white">
-                Pendências de revisão ({pending.length})
-              </h2>
+              <h2 className="text-lg font-semibold text-[#172B4D] dark:text-white">Alertas importantes</h2>
               <p className="text-sm text-[#71809A] dark:text-gray-400">
-                Cartões com dupla marcação, leitura incerta ou QR ilegível — revise antes de fechar a prova.
+                O que precisa de atenção nas avaliações em andamento.
               </p>
             </div>
           </div>
-          <div className="space-y-2">
-            {pending.slice(0, 4).map((item) => (
-              <div key={item.resultId} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-warning-500/25 bg-white p-3 dark:border-warning-500/30 dark:bg-gray-900">
+          <ul className="space-y-2">
+            {(resumo?.alertas ?? []).map((a, i) => (
+              <li key={`${a.external_id}-${i}`} className="flex flex-wrap items-center gap-2 rounded-[10px] border border-warning-500/25 bg-white p-3 dark:border-warning-500/30 dark:bg-gray-900">
                 <div className="flex-1 min-w-[160px]">
-                  <p className="font-medium text-[#172B4D] dark:text-gray-100 text-sm">
-                    {item.studentName || '(sem identificação)'}
-                  </p>
-                  <p className="text-xs text-[#71809A] dark:text-gray-400">{examName(item.examId)}</p>
+                  <p className="font-medium text-[#172B4D] dark:text-gray-100 text-sm">{a.titulo}</p>
+                  <p className="text-xs text-[#71809A] dark:text-gray-400">{a.mensagem}</p>
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {item.duplicateQuestions.length > 0 && (
-                    <Badge tone="warning">{item.duplicateQuestions.length} duplicada(s)</Badge>
-                  )}
-                  {item.lowConfidence.length > 0 && (
-                    <Badge tone="warning">{item.lowConfidence.length} incerta(s)</Badge>
-                  )}
-                  {item.qrIssue && <Badge tone="danger">QR ilegível</Badge>}
-                </div>
-                <div className="flex gap-1">
-                  <Button size="sm" variant="secondary" className="min-h-[44px]" onClick={() => onNavigate('view-result', item.resultId)}>
-                    Ver
-                  </Button>
-                  <Button size="sm" className="min-h-[44px]" onClick={() => onNavigate('correct-card', item.examId)}>
-                    Recorrigir
-                  </Button>
-                </div>
-              </div>
+                <Button size="sm" variant="secondary" className="min-h-[44px]" onClick={() => onNavigate('avaliacao-detalhe', a.external_id)}>
+                  Resolver
+                </Button>
+              </li>
             ))}
-          </div>
+          </ul>
         </Card>
-      )}
+      ) : null}
 
       <section className="app-section" aria-label="Continue de onde parou">
         <div className="section-header">
           <h2 className="section-title">Continue de onde parou</h2>
-          {nextSteps.length > 0 && <span className="text-xs text-[#71809A] dark:text-gray-400">{nextSteps.length} ação(ões) sugerida(s)</span>}
+          {resumo?.pendencias.length
+            ? <span className="text-xs text-[#71809A] dark:text-gray-400">{resumo.pendencias.length} ação(ões) sugerida(s)</span>
+            : nextSteps.length > 0 && <span className="text-xs text-[#71809A] dark:text-gray-400">{nextSteps.length} ação(ões) sugerida(s)</span>}
         </div>
-        {nextSteps.length === 0 ? (
+        {resumo && resumo.pendencias.length > 0 ? (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {resumo.pendencias.map(p => (
+              <Card key={p.external_id} className="card-hover flex flex-col gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">{STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status_label}</p>
+                  <h3 className="font-semibold text-[#172B4D] dark:text-white mt-0.5 truncate">{p.titulo}</h3>
+                  <p className="text-sm text-[#71809A] dark:text-gray-400 mt-1">
+                    Etapa {p.etapa} · {p.progresso}% do fluxo
+                  </p>
+                </div>
+                <div className="mt-auto flex items-center gap-2">
+                  <Badge tone="info">{p.acao}</Badge>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="ml-auto"
+                    onClick={() => onNavigate('avaliacao-detalhe', p.external_id)}
+                  >
+                    {p.acao}
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        ) : nextSteps.length === 0 ? (
           <EmptyState
             title="Nenhuma ação pendente"
             description="Suas provas estão com gabarito definido e leituras revisadas."
-            action={<Button onClick={() => onNavigate('new-exam')}>Criar nova avaliação</Button>}
+            action={<Button onClick={() => onNavigate('avaliacoes')}>Nova avaliação</Button>}
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">

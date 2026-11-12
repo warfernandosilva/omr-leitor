@@ -31,6 +31,17 @@ function authHeaders(): Record<string, string> {
   return h;
 }
 
+/** Base da API resolvida (mesma origem em deploy). Exportada p/ clientes novos. */
+export const API_BASE_URL = API_BASE;
+/** Cabeçalhos de autenticação — exportados p/ clientes novos. */
+export function apiAuthHeaders(): Record<string, string> {
+  return authHeaders();
+}
+/** Fetch com timeout — exportado p/ clientes novos (nunca usar fetch cru). */
+export async function apiFetchTimeout(input: string, init: RequestInit, ms = 15000): Promise<Response> {
+  return fetchTimeout(input, init, ms);
+}
+
 /** Base resolvida (para exibir/diagnosticar). '' = mesma origem (proxy /api do Vite ou ngrok). */
 export function getApiBase(): string {
   if (API_BASE) return API_BASE;

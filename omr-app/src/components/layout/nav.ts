@@ -10,8 +10,6 @@ export interface NavItem {
   view: AppView;
   label: string;
   icon: LucideIcon;
-  /** Página ainda não construída — leva ao placeholder "Em breve". */
-  soon?: boolean;
   adminOnly?: boolean;
 }
 
@@ -24,10 +22,16 @@ export interface NavGroup {
 /** Fonte única da navegação (sidebar + breadcrumbs + títulos). */
 export const NAV_GROUPS: NavGroup[] = [
   {
-    id: 'gerenciamento',
-    label: 'Gerenciamento',
+    id: 'painel',
+    label: 'Painel',
     items: [
       { view: 'home', label: 'Painel inicial', icon: LayoutDashboard },
+    ],
+  },
+  {
+    id: 'gestao',
+    label: 'Gestão escolar',
+    items: [
       { view: 'turmas', label: 'Turmas', icon: GraduationCap },
       { view: 'alunos', label: 'Alunos', icon: Users },
     ],
@@ -36,11 +40,11 @@ export const NAV_GROUPS: NavGroup[] = [
     id: 'avaliacoes',
     label: 'Avaliações',
     items: [
+      { view: 'avaliacoes', label: 'Gerenciar avaliações', icon: ListChecks },
       { view: 'new-exam', label: 'Provas e avaliações', icon: ClipboardList },
-      { view: 'register-key', label: 'Gabaritos', icon: KeyRound },
+      { view: 'provas', label: 'Gabaritos', icon: KeyRound },
+      { view: 'custom-template', label: 'Gabaritos personalizados', icon: PenSquare },
       { view: 'generate-card', label: 'Gerar cartões-resposta', icon: Printer },
-      { view: 'custom-template', label: 'Gabarito personalizado', icon: PenSquare },
-      { view: 'manage-exam', label: 'Gerenciar avaliação', icon: ListChecks },
     ],
   },
   {
@@ -48,13 +52,13 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Correção OMR',
     items: [
       { view: 'correct-card', label: 'Nova leitura', icon: ScanLine },
-      { view: 'results', label: 'Histórico de correções', icon: History },
       { view: 'pending', label: 'Revisões pendentes', icon: ClipboardCheck },
+      { view: 'results', label: 'Histórico de correções', icon: History },
     ],
   },
   {
     id: 'analises',
-    label: 'Análises',
+    label: 'Análises e desempenho',
     items: [
       { view: 'dashboard', label: 'Resultados', icon: BarChart3 },
       { view: 'reports', label: 'Relatórios', icon: FileText },
@@ -62,13 +66,13 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    id: 'sistema',
-    label: 'Sistema',
+    id: 'admin',
+    label: 'Administração',
     items: [
       { view: 'settings', label: 'Configurações', icon: Settings },
-      { view: 'help', label: 'Ajuda e suporte', icon: LifeBuoy },
-      { view: 'profile', label: 'Perfil do usuário', icon: UserRound },
       { view: 'admin-users', label: 'Usuários', icon: ShieldCheck, adminOnly: true },
+      { view: 'profile', label: 'Perfil do usuário', icon: UserRound },
+      { view: 'help', label: 'Ajuda e suporte', icon: LifeBuoy },
     ],
   },
 ];
@@ -83,37 +87,41 @@ export interface BottomNavItem {
 export const BOTTOM_NAV: BottomNavItem[] = [
   { view: 'home', label: 'Início', icon: LayoutDashboard },
   { view: 'correct-card', label: 'Nova leitura', icon: ScanLine },
+  { view: 'avaliacoes', label: 'Avaliações', icon: ListChecks },
   { view: 'dashboard', label: 'Resultados', icon: BarChart3 },
-  { view: 'turmas', label: 'Turmas', icon: GraduationCap },
 ];
 
 /** Título + grupo para TODAS as views (inclusive as fora da sidebar). */
 export const VIEW_META: Record<AppView, { title: string; group: string }> = {
-  home: { title: 'Painel inicial', group: 'Gerenciamento' },
+  home: { title: 'Painel inicial', group: 'Painel' },
+  avaliacoes: { title: 'Gerenciar avaliações', group: 'Avaliações' },
+  'avaliacao-detalhe': { title: 'Detalhe da avaliação', group: 'Avaliações' },
   'new-exam': { title: 'Provas e avaliações', group: 'Avaliações' },
-  turmas: { title: 'Turmas', group: 'Gerenciamento' },
-  alunos: { title: 'Alunos', group: 'Gerenciamento' },
+  provas: { title: 'Gabaritos', group: 'Avaliações' },
+  turmas: { title: 'Turmas', group: 'Gestão escolar' },
+  alunos: { title: 'Alunos', group: 'Gestão escolar' },
   'generate-card': { title: 'Gerar cartões-resposta', group: 'Avaliações' },
-  'custom-template': { title: 'Gabarito personalizado', group: 'Avaliações' },
+  'custom-template': { title: 'Gabaritos personalizados', group: 'Avaliações' },
   'import-students': { title: 'Cartões por lista da prova', group: 'Avaliações' },
-  'manage-exam': { title: 'Gerenciar avaliação', group: 'Avaliações' },
+  'manage-exam': { title: 'Detalhe da avaliação', group: 'Avaliações' },
   'register-key': { title: 'Gabaritos', group: 'Avaliações' },
   'correct-card': { title: 'Nova leitura', group: 'Correção OMR' },
   results: { title: 'Histórico de correções', group: 'Correção OMR' },
   pending: { title: 'Revisões pendentes', group: 'Correção OMR' },
-  dashboard: { title: 'Resultados', group: 'Análises' },
-  reports: { title: 'Relatórios', group: 'Análises' },
-  lab: { title: 'Banco de testes OMR', group: 'Análises' },
+  dashboard: { title: 'Resultados', group: 'Análises e desempenho' },
+  reports: { title: 'Relatórios', group: 'Análises e desempenho' },
+  lab: { title: 'Banco de testes OMR', group: 'Análises e desempenho' },
   'view-result': { title: 'Detalhe da correção', group: 'Correção OMR' },
-  settings: { title: 'Configurações', group: 'Sistema' },
-  help: { title: 'Ajuda e suporte', group: 'Sistema' },
-  profile: { title: 'Perfil do usuário', group: 'Sistema' },
-  'admin-users': { title: 'Usuários', group: 'Sistema' },
+  settings: { title: 'Configurações', group: 'Administração' },
+  help: { title: 'Ajuda e suporte', group: 'Administração' },
+  profile: { title: 'Perfil do usuário', group: 'Administração' },
+  'admin-users': { title: 'Usuários', group: 'Administração' },
 };
 
 /** Páginas de trabalho intensivo usam a largura total do monitor. */
 export const WIDE_VIEWS: AppView[] = [
-  'correct-card', 'manage-exam', 'results', 'dashboard', 'lab', 'view-result', 'custom-template',
+  'correct-card', 'avaliacoes', 'avaliacao-detalhe', 'manage-exam', 'results', 'dashboard',
+  'lab', 'view-result', 'custom-template', 'reports',
 ];
 
 export function viewMeta(view: AppView): { title: string; group: string } {

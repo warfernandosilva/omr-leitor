@@ -9,6 +9,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { saveNav, loadNav, saveSidebarCollapsed, loadSidebarCollapsed } from './utils/nav-persist';
 import { initPwa, applyPwaUpdate, PWA_UPDATE_EVENT } from './pwa';
 import HomePage from './pages/HomePage';
+import AvaliacoesPage from './pages/AvaliacoesPage';
+import AvaliacaoDetailPage from './pages/AvaliacaoDetailPage';
 import NewExamPage from './pages/NewExamPage';
 import TurmasPage from './pages/TurmasPage';
 import StudentsPage from './pages/StudentsPage';
@@ -165,6 +167,10 @@ function AppInner() {
     switch (view) {
       case 'home':
         return <HomePage onNavigate={navigate} />;
+      case 'avaliacoes':
+        return <AvaliacoesPage onNavigate={navigate} />;
+      case 'avaliacao-detalhe':
+        return <AvaliacaoDetailPage examId={selectedExamId} onNavigate={navigate} />;
       case 'new-exam':
         return <NewExamPage onNavigate={navigate} />;
       case 'turmas':

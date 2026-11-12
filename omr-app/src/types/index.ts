@@ -175,6 +175,8 @@ export interface Turma {
 
 export type AppView =
   | 'home'
+  | 'avaliacoes'
+  | 'avaliacao-detalhe'
   | 'new-exam'
   | 'generate-card'
   | 'turmas'
@@ -193,7 +195,8 @@ export type AppView =
   | 'help'
   | 'profile'
   | 'admin-users'
-  | 'custom-template';
+  | 'custom-template'
+  | 'provas';
 
 export const SUBJECT_IDS = ['lp', 'mat'] as const;
 export type SubjectId = (typeof SUBJECT_IDS)[number];
