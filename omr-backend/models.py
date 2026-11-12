@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -82,7 +82,8 @@ class Avaliacao(Base, TimestampMixin):
     # ─── Ciclo de vida (workflow.status) ───
     # Preenchido/ajustado pelas transições manuais autorizadas; a verdade de
     # cada etapa continua sendo derivada dos dados (ver workflow/status.py).
-    status: Mapped[str] = mapped_column(String(30), nullable=False, default="rascunho", index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="rascunho",
+                                        server_default="rascunho", index=True)
     ano_letivo: Mapped[str | None] = mapped_column(String(10), nullable=True)
     descricao: Mapped[str | None] = mapped_column(Text, nullable=True)
     resultados_publicados_em: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -135,7 +136,8 @@ class Aluno(Base, TimestampMixin):
     # alunos sem matrícula. Inteiro simples (sem FK) pela migração aditiva.
     origem_turma_aluno_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     # situação do aluno nesta avaliação: ativo, inativo ou transferido
-    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo", index=True)
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo",
+                                               server_default="ativo", index=True)
 
     avaliacao: Mapped["Avaliacao"] = relationship(back_populates="alunos")
     gabaritos: Mapped[list["GabaritoNomeado"]] = relationship(back_populates="aluno")
@@ -156,7 +158,7 @@ class Turma(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     nome: Mapped[str] = mapped_column(String(120), nullable=False)
     ano_letivo: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
-    arquivada: Mapped[bool] = mapped_column(default=False, nullable=False, index=True)
+    arquivada: Mapped[bool] = mapped_column(default=False, server_default=false(), nullable=False, index=True)
     owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
 
     owner: Mapped["User | None"] = relationship()
@@ -176,7 +178,8 @@ class TurmaAluno(Base, TimestampMixin):
     matricula: Mapped[str | None] = mapped_column(String(60), nullable=True, index=True)
     identificador_externo: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # situação no catálogo: ativo, inativo ou transferido
-    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo", index=True)
+    situacao: Mapped[str] = mapped_column(String(20), nullable=False, default="ativo",
+                                               server_default="ativo", index=True)
 
     turma: Mapped["Turma"] = relationship(back_populates="alunos")
 

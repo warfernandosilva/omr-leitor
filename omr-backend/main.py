@@ -266,6 +266,14 @@ class ResultadoRequest(BaseModel):
     nota: float | None = None
     observacoes: str | None = None
     photo_status: str | None = None  # Herby: estado da foto (Successful/QrNotRead/...)
+    # ---- Ciclo de vida (opcionais, retrocompativeis) ----
+    baixa_confianca: list[int] | None = None
+    duplicadas: list[int] | None = None
+    duplas_marcacoes: dict[str, list[str]] | None = None
+    qr_ok: bool | None = None
+    # corrections: {questao: letra} - correcao manual do professor (auditada)
+    corrections: dict[str, str] | None = None
+    observacao_revisao: str | None = None
 
 
 def _next_codigo(db: Session) -> str:
@@ -2449,9 +2457,79 @@ def post_resultado(codigo: str, req: ResultadoRequest, overwrite: bool = False, 
     if g.data_leitura is None:
         g.data_leitura = agora
     g.data_correcao = agora
+
+    # ─── Ciclo de vida: registra a leitura (histórico + revisão manual) ───
+    from models import Auditoria, Leitura, RevisaoManual  # import local: ciclo importa main
+    reg_baixa = [int(q) for q in (req.baixa_confianca or [])]
+    reg_duplas = [int(q) for q in (req.duplicadas or [])]
+    # Reprocessamento: a leitura anterior deste cartão vira o pai do registro novo.
+    anterior = db.scalar(
+        select(Leitura.id).where(
+            Leitura.gabarito_id == g.id,
+        ).order_by(Leitura.created_at.desc())
+    )
+    precisa_revisao = bool(reg_baixa) or bool(reg_duplas) or (req.qr_ok is False)
+    leitura = Leitura(
+        avaliacao_id=g.avaliacao_id,
+        aluno_id=g.aluno_id,
+        gabarito_id=g.id,
+        parent_id=anterior,
+        codigo_unico=g.codigo_unico,
+        respostas={str(k): v for k, v in (req.respostas or {}).items()},
+        baixa_confianca=reg_baixa,
+        duplicadas=reg_duplas,
+        duplas_marcacoes={str(k): v for k, v in (req.duplas_marcacoes or {}).items()},
+        acertos=req.acertos,
+        erros=req.erros,
+        brancos=req.brancos,
+        nota=req.nota,
+        status=Leitura.STATUS_PENDENTE if precisa_revisao else Leitura.STATUS_REVISADA,
+        operador_id=current_user.id,
+        operador_nome=current_user.nome or current_user.email,
+    )
+    if precisa_revisao:
+        leitura.revisada_em = None
+    else:
+        leitura.revisada_em = agora
+    db.add(leitura)
+
+    # Correções manuais chegam auditadas: anterior → corrigida, por questão.
+    for q, letra in (req.corrections or {}).items():
+        try:
+            questao = int(q)
+        except (TypeError, ValueError):
+            continue
+        letra_corrigida = str(letra).strip().upper() or None
+        resp_anterior = (req.respostas or {}).get(str(q)) or (req.respostas or {}).get(q)
+        if resp_anterior == letra_corrigida:
+            continue
+        db.add(RevisaoManual(
+            leitura_id=None,  # preenchido após o flush
+            questao=questao,
+            resposta_anterior=resp_anterior,
+            resposta_corrigida=letra_corrigida,
+            autor_id=current_user.id,
+            autor_nome=current_user.nome or current_user.email,
+            observacao=req.observacao_revisao,
+        ))
+    db.flush()
+    for rm in db.new:
+        if isinstance(rm, RevisaoManual) and rm.leitura_id is None:
+            rm.leitura_id = leitura.id
+    if req.corrections:
+        db.add(Auditoria(
+            entidade="leitura",
+            entidade_id=str(leitura.id),
+            acao="correcao_manual",
+            resumo=req.observacao_revisao or f"{len(req.corrections)} questão(ões) corrigida(s) à mão",
+            autor_id=current_user.id,
+            autor_nome=current_user.nome or current_user.email,
+        ))
+
     db.commit()
     db.refresh(g)
-    return {"found": True, "saved": True, "gabarito": g.to_dict()}
+    return {"found": True, "saved": True, "gabarito": g.to_dict(), "leitura_id": leitura.id,
+            "leitura_status": leitura.status}
 
 
 if __name__ == "__main__":

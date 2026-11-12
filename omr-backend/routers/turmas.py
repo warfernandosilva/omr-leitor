@@ -7,7 +7,7 @@ A materialização (turma → alunos da prova) vive em main.py
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
@@ -24,7 +24,9 @@ class TurmaCreate(BaseModel):
 
 
 class TurmaUpdate(BaseModel):
-    nome: str
+    nome: str | None = None
+    ano_letivo: str | None = None
+    arquivada: bool | None = None
 
 
 class TurmaAlunoIn(BaseModel):
@@ -83,8 +85,17 @@ def _get_turma(db: Session, turma_id: int, current_user: User) -> Turma:
 
 @router.get("/api/turmas")
 def list_turmas(db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    """Lista as turmas visíveis ao usuário (dono ou admin) com contagem de alunos."""
+    """Lista as turmas visíveis ao usuário (dono ou admin) com contagem de alunos.
+
+    `arquivadas=false` (padrão) esconde as arquivadas; `arquivadas=true` lista
+    só as arquivadas; `arquivadas=all` traz as duas coisas.
+    """
+    arquivadas = Query(default="false", max_length=5)
     q = select(Turma).where(auth.owner_clause(Turma, current_user)).order_by(Turma.nome)
+    if arquivadas == "true":
+        q = q.where(Turma.arquivada.is_(True))
+    elif arquivadas == "false":
+        q = q.where(Turma.arquivada.is_(False))
     turmas = db.scalars(q).all()
     counts = dict(
         db.execute(
@@ -93,7 +104,13 @@ def list_turmas(db: Session = Depends(get_db), current_user: User = Depends(auth
             .group_by(TurmaAluno.turma_id)
         ).all()
     )
-    return {"turmas": [_turma_to_dict(t, counts.get(t.id, 0)) for t in turmas]}
+    saida = []
+    for t in turmas:
+        d = _turma_to_dict(t, counts.get(t.id, 0))
+        d["ano_letivo"] = t.ano_letivo
+        d["arquivada"] = t.arquivada
+        saida.append(d)
+    return {"turmas": saida}
 
 
 @router.post("/api/turmas", status_code=201)
@@ -121,14 +138,23 @@ def get_turma(turma_id: int, db: Session = Depends(get_db), current_user: User =
 
 @router.patch("/api/turmas/{turma_id}")
 def rename_turma(turma_id: int, req: TurmaUpdate, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
+    """Edita a turma: nome, ano letivo e arquivamento (um ou vários campos)."""
     turma = _get_turma(db, turma_id, current_user)
-    nome = (req.nome or "").strip()
-    if not nome:
-        raise HTTPException(status_code=400, detail="Nome da turma é obrigatório")
-    turma.nome = nome[:120]
+    if req.nome is not None:
+        nome = (req.nome or "").strip()
+        if not nome:
+            raise HTTPException(status_code=400, detail="Nome da turma é obrigatório")
+        turma.nome = nome[:120]
+    if req.ano_letivo is not None:
+        turma.ano_letivo = (req.ano_letivo or "").strip() or None
+    if req.arquivada is not None:
+        turma.arquivada = req.arquivada
     db.commit()
     db.refresh(turma)
-    return _turma_to_dict(turma)
+    d = _turma_to_dict(turma)
+    d["ano_letivo"] = turma.ano_letivo
+    d["arquivada"] = turma.arquivada
+    return d
 
 
 @router.delete("/api/turmas/{turma_id}")
@@ -220,6 +246,29 @@ def import_turma_alunos(
         "ignorados": ignorados,
         "total_alunos": total,
     }
+
+
+class TurmaAlunoSituacao(BaseModel):
+    situacao: str  # ativo | inativo | transferido
+
+
+@router.patch("/api/turmas/{turma_id}/alunos/{aluno_id}/situacao")
+def set_turma_aluno_situacao(
+    turma_id: int, aluno_id: int, req: TurmaAlunoSituacao,
+    db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user),
+):
+    """Marca a situação do aluno no catálogo (ativo, inativo ou transferido)."""
+    turma = _get_turma(db, turma_id, current_user)
+    aluno = db.get(TurmaAluno, aluno_id)
+    if aluno is None or aluno.turma_id != turma.id:
+        raise HTTPException(status_code=404, detail="Aluno não encontrado nesta turma")
+    situacao = (req.situacao or "").strip().lower()
+    if situacao not in ("ativo", "inativo", "transferido"):
+        raise HTTPException(status_code=400, detail="Situação deve ser ativo, inativo ou transferido")
+    aluno.situacao = situacao
+    db.commit()
+    db.refresh(aluno)
+    return _aluno_to_dict(aluno)
 
 
 @router.delete("/api/turmas/{turma_id}/alunos/{aluno_id}")

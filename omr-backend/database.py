@@ -87,55 +87,68 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    """Cria as tabelas se não existirem + migrações leves de colunas."""
-    import models  # noqa: F401  (registra os models no Base.metadata)
+    """Cria as tabelas se nao existirem + migracoes leves de colunas."""
+    import models  # noqa: F401 - registra os models no Base.metadata
 
     Base.metadata.create_all(bind=engine)
 
-    # Migração: colunas adicionadas após a primeira versão do banco
-    _ensure_column("avaliacoes", "questions_per_subject", "INTEGER NOT NULL DEFAULT 22")
-    _ensure_column("avaliacoes", "layout_mode", "VARCHAR(10) NOT NULL DEFAULT 'dual'")
-    _ensure_column("avaliacoes", "template", "VARCHAR(10) NOT NULL DEFAULT 'padrao'")
-    _ensure_column("avaliacoes", "sae_spec", "JSON")
-    _ensure_column("avaliacoes", "grade_scale", "VARCHAR(10) NOT NULL DEFAULT '0-10'")
-    _ensure_column("avaliacoes", "answer_key", "JSON")
-    _ensure_column("avaliacoes", "owner_id", "INTEGER REFERENCES users(id)")
-    _ensure_column("avaliacoes", "herby_spec", "JSON")
-    _ensure_column("avaliacoes", "turma_id", "INTEGER")
-    _ensure_column("gabaritos_nomeados", "magic_link", "VARCHAR(255)")
-    _ensure_column("gabaritos_nomeados", "photo_status", "VARCHAR(30)")
-    _ensure_column("gabaritos_nomeados", "custom_template_version_id", "INTEGER")
-    _ensure_column("alunos", "origem_turma_aluno_id", "INTEGER")
-    _ensure_column("avaliacoes", "custom_template_id", "INTEGER")
+    # Migracao: colunas adicionadas apos a primeira versao do banco.
+    # `_bool_default` existe porque Postgres rejeita `DEFAULT 0` em coluna
+    # BOOLEAN (exige `false`), enquanto SQLite aceita os dois.
+    is_pg = engine.dialect.name != "sqlite"
+    _bool_default = "false" if is_pg else "0"
 
-    # ─── Ciclo de vida da avaliação (Fase 1 da reestruturação) ───
-    # Colunas novas em tabelas existentes (aditivas, sem backfill obrigatório).
-    _ensure_column("avaliacoes", "prova_id", "INTEGER")
-    _ensure_column("avaliacoes", "status", "VARCHAR(30) NOT NULL DEFAULT 'rascunho'")
-    _ensure_column("avaliacoes", "ano_letivo", "VARCHAR(10)")
-    _ensure_column("avaliacoes", "descricao", "TEXT")
-    _ensure_column("avaliacoes", "resultados_publicados_em", "TIMESTAMP")
-    _ensure_column("avaliacoes", "publicado_por", "VARCHAR(120)")
-    _ensure_column("turmas", "ano_letivo", "VARCHAR(10)")
-    _ensure_column("turmas", "arquivada", "BOOLEAN DEFAULT 0")
-    _ensure_column("alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
-    _ensure_column("turma_alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
+    # Cada coluna e uma migracao independente e tolerante a falha: um banco ja
+    # modificado (ou um DDL especifico do dialeto) nao pode impedir o boot.
+    _ensure_coluna("avaliacoes", "questions_per_subject", "INTEGER NOT NULL DEFAULT 22")
+    _ensure_coluna("avaliacoes", "layout_mode", "VARCHAR(10) NOT NULL DEFAULT 'dual'")
+    _ensure_coluna("avaliacoes", "template", "VARCHAR(10) NOT NULL DEFAULT 'padrao'")
+    _ensure_coluna("avaliacoes", "sae_spec", "JSON")
+    _ensure_coluna("avaliacoes", "grade_scale", "VARCHAR(10) NOT NULL DEFAULT '0-10'")
+    _ensure_coluna("avaliacoes", "answer_key", "JSON")
+    _ensure_coluna("avaliacoes", "owner_id", "INTEGER REFERENCES users(id)")
+    _ensure_coluna("avaliacoes", "herby_spec", "JSON")
+    _ensure_coluna("avaliacoes", "turma_id", "INTEGER")
+    _ensure_coluna("gabaritos_nomeados", "magic_link", "VARCHAR(255)")
+    _ensure_coluna("gabaritos_nomeados", "photo_status", "VARCHAR(30)")
+    _ensure_coluna("gabaritos_nomeados", "custom_template_version_id", "INTEGER")
+    _ensure_coluna("alunos", "origem_turma_aluno_id", "INTEGER")
+    _ensure_coluna("avaliacoes", "custom_template_id", "INTEGER")
+
+    # ─── Ciclo de vida da avaliacao (Fase 1 da reestruturacao) ───
+    _ensure_coluna("avaliacoes", "prova_id", "INTEGER")
+    _ensure_coluna("avaliacoes", "status", "VARCHAR(30) NOT NULL DEFAULT 'rascunho'")
+    _ensure_coluna("avaliacoes", "ano_letivo", "VARCHAR(10)")
+    _ensure_coluna("avaliacoes", "descricao", "TEXT")
+    _ensure_coluna("avaliacoes", "resultados_publicados_em", "TIMESTAMP")
+    _ensure_coluna("avaliacoes", "publicado_por", "VARCHAR(120)")
+    _ensure_coluna("turmas", "ano_letivo", "VARCHAR(10)")
+    _ensure_coluna("turmas", "arquivada", f"BOOLEAN DEFAULT {_bool_default}")
+    _ensure_coluna("alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
+    _ensure_coluna("turma_alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
     _backfill_provas(engine)
 
 
-def _backfill_provas(engine) -> dict:
-    """Cria uma `provas` para cada avaliação ainda sem prova_id (idempotente).
+def _ensure_coluna(table: str, column: str, ddl_type: str) -> None:
+    """Aplica UMA migracao aditiva sem derrubar o boot se ela falhar."""
+    try:
+        _ensure_column(table, column, ddl_type)
+    except Exception as e:  # pragma: no cover - so em banco ja modificado
+        print(f"[migracao] falha ao adicionar {table}.{column}: {e}")
 
-    Separação Prova × Avaliação: a estrutura que hoje vive em `avaliacoes`
-    ganha a sua própria linha em `provas`, e a avaliação passa a apontar para
-    ela. Nada é movido nem removido — `external_id`, alunos, gabaritos, QR e
-    resultados continuam exatamente onde estavam; só ganham o ponteiro.
+
+def _backfill_provas(engine) -> dict:
+    """Cria uma `provas` para cada avaliacao ainda sem prova_id (idempotente).
+
+    Separacao Prova x Avaliacao: a estrutura que hoje vive em `avaliacoes`
+    ganha a sua propria linha em `provas`, e a avaliacao passa a apontar para
+    ela. Nada e movido nem removido - `external_id`, alunos, gabaritos, QR e
+    resultados continuam exatamente onde estavam; so ganham o ponteiro.
     """
-    from models import Avaliacao, Prova  # import local evita dependência na importação
+    from sqlalchemy import text
 
     criadas = 0
     with engine.begin() as conn:
-        from sqlalchemy import text
         pendentes = conn.execute(
             text("SELECT id FROM avaliacoes WHERE prova_id IS NULL")
         ).scalars().all()
@@ -163,7 +176,7 @@ def _backfill_provas(engine) -> dict:
             )
             criadas += 1
     if criadas:
-        print(f"[migração] {criadas} prova(s) criada(s) a partir de avaliações existentes")
+        print(f"[migracao] {criadas} prova(s) criada(s) a partir de avaliacoes existentes")
     return {"criadas": criadas}
 
 
