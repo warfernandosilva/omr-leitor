@@ -8,7 +8,7 @@ import type { AppView } from '../types';
 import { getExams, getResults } from '../utils/storage';
 import { listAlunos, listTurmas } from '../utils/api';
 import { resumoOperacao, type OperacaoResumo } from '../utils/api-avaliacoes';
-import { STATUS_LABEL } from '../utils/workflow';
+import { ETAPA_LABEL, STATUS_LABEL } from '../utils/workflow';
 import { pendingFromResults } from '../utils/pending';
 import { useAuth } from '../context/AuthContext';
 import Card from '../components/ui/Card';
@@ -242,7 +242,8 @@ export default function HomePage({ onNavigate }: Props) {
                   <p className="text-xs text-[#71809A] dark:text-gray-400 truncate">{STATUS_LABEL[p.status as keyof typeof STATUS_LABEL] ?? p.status_label}</p>
                   <h3 className="font-semibold text-[#172B4D] dark:text-white mt-0.5 truncate">{p.titulo}</h3>
                   <p className="text-sm text-[#71809A] dark:text-gray-400 mt-1">
-                    Etapa {p.etapa} · {p.progresso}% do fluxo
+                    {ETAPA_LABEL[p.etapa as keyof typeof ETAPA_LABEL] ?? 'Próxima etapa'}
+                    {' · '}{p.progresso}% do fluxo
                   </p>
                 </div>
                 <div className="mt-auto flex items-center gap-2">
