@@ -265,6 +265,51 @@ export async function resumoOperacao(): Promise<OperacaoResumo> {
   return parse<OperacaoResumo>('/operacao/resumo');
 }
 
+/** Gera o PDF do relatório (turma/avaliação) ou o boletim do aluno. */
+export async function gerarRelatorioPDF(payload: {
+  avaliacao_external_id: string;
+  turma_id?: number;
+  aluno_id?: number;
+  tipo?: 'turma' | 'aluno';
+}): Promise<{ blob: Blob; nome: string }> {
+  const res = await fetchTimeout(`${BASE}/relatorios/pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ tipo: 'turma', ...payload }),
+  }, 120000);
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      if (j?.detail) detail = String(j.detail);
+    } catch { /* resposta sem JSON */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const dispo = res.headers.get('Content-Disposition') ?? '';
+  const nome = /filename="([^"]+)"/.exec(dispo)?.[1]
+    ?? (payload.tipo === 'aluno' ? 'boletim.pdf' : 'relatorio.pdf');
+  return { blob, nome };
+}
+
+/** Dispara o download do PDF no navegador. */
+export async function baixarRelatorioPDF(payload: {
+  avaliacao_external_id: string;
+  turma_id?: number;
+  aluno_id?: number;
+  tipo?: 'turma' | 'aluno';
+}): Promise<void> {
+  const { blob, nome } = await gerarRelatorioPDF(payload);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nome;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
 export async function alunoHistorico(alunoId: number): Promise<{
   aluno: { id: number; nome: string; matricula: string | null; situacao: string };
   avaliacoes: {

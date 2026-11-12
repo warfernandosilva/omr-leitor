@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Download, RefreshCw } from 'lucide-react';
+import { Download, FileText, RefreshCw } from 'lucide-react';
 import type { AppView } from '../types';
 import PageHeader from '../components/ui/PageHeader';
 import EmptyState from '../components/ui/EmptyState';
@@ -11,6 +11,7 @@ import DataTable from '../components/ui/DataTable';
 import { getResults, getExams } from '../utils/storage';
 import { downloadCSV, downloadXLSX } from '../utils/export';
 import { getResultadosFromDB, listTurmas, type DBResultado, type TurmaDTO } from '../utils/api';
+import { baixarRelatorioPDF } from '../utils/api-avaliacoes';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -51,6 +52,8 @@ export default function ReportsPage({ onNavigate }: Props) {
   const [examFilter, setExamFilter] = useState('');
   const [studentSearch, setStudentSearch] = useState('');
   const [period, setPeriod] = useState<Period>('30');
+  const [gerandoPdf, setGerandoPdf] = useState(false);
+  const [pdfErro, setPdfErro] = useState<string | null>(null);
 
   const reloadDb = () => {
     setDbError(null);
@@ -111,6 +114,29 @@ export default function ReportsPage({ onNavigate }: Props) {
 
   const fmt = (v: number) => v.toFixed(1).replace('.', ',');
 
+  // PDF: relatorio da prova filtrada (ou da mais recente do recorte).
+  const provaAlvo = examFilter
+    || (filtered[0] && [...filtered].sort((a, b) => b.timestamp.localeCompare(a.timestamp))[0].examId)
+    || null;
+
+  const exportarPdf = async (tipo: 'turma' | 'aluno' = 'turma') => {
+    if (!provaAlvo) return;
+    setGerandoPdf(true);
+    setPdfErro(null);
+    try {
+      const turmaId = turmaFilter ? Number(turmaFilter) : undefined;
+      await baixarRelatorioPDF({
+        avaliacao_external_id: provaAlvo,
+        turma_id: turmaId,
+        tipo,
+      });
+    } catch (err) {
+      setPdfErro(err instanceof Error ? err.message : 'Falha ao gerar o PDF.');
+    } finally {
+      setGerandoPdf(false);
+    }
+  };
+
   return (
     <div className="app-section animate-fade-in">
       <PageHeader
@@ -124,8 +150,26 @@ export default function ReportsPage({ onNavigate }: Props) {
           <Button size="sm" onClick={() => downloadXLSX(filtered, exams)} disabled={filtered.length === 0} icon={<Download size={15} aria-hidden />} className="min-h-[44px]">
             Exportar XLSX
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            loading={gerandoPdf}
+            disabled={!provaAlvo}
+            onClick={() => void exportarPdf('turma')}
+            icon={<FileText size={15} aria-hidden />}
+            className="min-h-[44px]"
+            title={provaAlvo ? `PDF de ${examById.get(provaAlvo)?.name ?? 'prova'}` : 'Selecione uma prova'}
+          >
+            Exportar PDF
+          </Button>
         </>}
       />
+
+      {pdfErro && (
+        <div className="callout-danger" role="alert">
+          {pdfErro}
+        </div>
+      )}
 
       {dbError && (
         <div className="callout-warning flex flex-wrap items-center gap-2">
