@@ -117,20 +117,6 @@ Regras de UX do leitor:
 - A lógica de detecção, QR, classificação e correção continua exclusiva do
   backend.
 
-## 6. Regras operacionais
-
-- Backup/restore e usuários ficam na área admin.
-- Exclusão de prova cria lápide por 30 dias para não ressuscitar em outro
-  aparelho.
-- Banco de testes OMR usa os mesmos leitores de produção para calibrar
-  thresholds.
-- Fontes do editor de criação usam `pt`; a conversão para px depende do DPI do
-  cartão.
-- A prévia do gerador de cartão (`/api/custom-templates/generate-preview`) não
-  grava nada, mas exige sessão porque usa o mesmo desenhista oficial.
-- Impressão por lista manual gera códigos temporários e não substitui o lote
-  oficial vinculado à prova.
-
 ## 5. Ciclo de vida da avaliação (reestruturação)
 
 A **avaliação** é o núcleo do sistema: liga prova, turmas, alunos, cartões,
@@ -181,7 +167,24 @@ Resultados. Cada uma tem status próprio e ação contextual; a regra vive em
 - Editar o catálogo de turmas não altera alunos já materializados nas provas
   (a materialização é cópia).
 
-### 5.4 Edição e situação do aluno (catálogo de turmas)
+### 5.4 Turma de um resultado corrigido
+
+Regra: a turma de um cartão corrigido é a turma do **aluno** (catálogo de
+origem), nunca a turma legada da avaliação.
+
+- Uma avaliação pode atender várias turmas (`avaliacao_turmas`);
+  `avaliacoes.turma`/`turma_id` guarda apenas a primeira vinculada.
+- `/api/resultados` informa `aluno.turma`/`aluno.turma_id` (turma do aluno) e
+  `avaliacao.turmas` (lista completa). Os campos legados em `avaliacao`
+  continuam existindo só por compatibilidade.
+- Sem origem no catálogo (aluno importado por XLSX direto na prova), a turma
+  vem da avaliação quando ela atende uma turma só; se atende várias e o aluno
+  não tem origem, a turma fica em branco (não se adivinha).
+- Histórico de correções e Relatórios filtram e exibem por essa turma; o PDF
+  por turma recorta apenas os alunos da turma pedida (nenhum dado inventado
+  quando a turma não tem alunos na avaliação).
+
+### 5.5 Edição e situação do aluno (catálogo de turmas)
 
 - Endpoint: `PATCH /api/turmas/{turma_id}/alunos/{aluno_id}` — mesmo caminho do
   DELETE, porque o aluno vive no catálogo da turma.
@@ -198,17 +201,21 @@ Resultados. Cada uma tem status próprio e ação contextual; a regra vive em
   mostra a situação e o histórico do aluno em avaliações (notas por avaliação).
 - Turmas têm ano letivo e arquivamento (`PATCH /api/turmas/{id}`); arquivadas
   somem da listagem padrão e voltam com `?arquivadas=all`.
-
-- Endpoint: `PATCH /api/turmas/{turma_id}/alunos/{aluno_id}` — mesmo caminho do
-  DELETE, porque o aluno vive no catálogo da turma.
-- Campos: `nome` (obrigatório; vazio → 400), `matricula` e
-  `identificador_externo` (string vazia limpa o campo) e `nova_turma_id`
-  (opcional, move o aluno; só aceita turma visível ao usuário).
-- Matrícula não pode repetir dentro da turma de destino: outra pessoa já usando
-  ela → 400. A matrícula do próprio aluno nunca é conflito.
-- A materialização é cópia: editar o catálogo **não** altera alunos já
-  importados em provas, nem cartões/QR emitidos. O nome impresso permanece o da
-  época da geração.
 - Tela **Alunos**: ação "Editar" na linha da tabela (e no card do mobile) e
   "Editar aluno" no painel de detalhes. O formulário avisa sobre matrícula já
   usada antes de enviar e mostra o erro do backend quando ele ocorre.
+
+
+## 6. Regras operacionais
+
+- Backup/restore e usuários ficam na área admin.
+- Exclusão de prova cria lápide por 30 dias para não ressuscitar em outro
+  aparelho.
+- Banco de testes OMR usa os mesmos leitores de produção para calibrar
+  thresholds.
+- Fontes do editor de criação usam `pt`; a conversão para px depende do DPI do
+  cartão.
+- A prévia do gerador de cartão (`/api/custom-templates/generate-preview`) não
+  grava nada, mas exige sessão porque usa o mesmo desenhista oficial.
+- Impressão por lista manual gera códigos temporários e não substitui o lote
+  oficial vinculado à prova.

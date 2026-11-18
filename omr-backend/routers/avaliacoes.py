@@ -90,6 +90,103 @@ class RevisaoPayload(BaseModel):
 # ─── Helpers ───
 
 
+# ─── Resolução de turma (fonte da verdade: o aluno, não a avaliação) ───
+#
+# Uma avaliação pode atender VÁRIAS turmas (`avaliacao_turmas`). O campo
+# legado `avaliacoes.turma`/`turma_id` guarda apenas a primeira turma
+# vinculada — usá-lo como "a turma do resultado" atribuía todos os cartões
+# de uma avaliação multi-turma a uma turma só. A turma correta de um
+# resultado é a turma de origem do aluno no catálogo.
+
+
+def turmas_de_origem(db: Session, aluno_ids: list[int]) -> dict[int, dict]:
+    """Turma do catálogo de cada aluno, pela origem da materialização.
+
+    Devolve `{aluno_id: {"id": turma_id, "nome": nome}}`. Alunos importados
+    direto por XLSX (sem origem) ficam de fora.
+    """
+    ids = [a for a in aluno_ids if a]
+    if not ids:
+        return {}
+    alunos = db.execute(
+        select(Aluno.id, Aluno.origem_turma_aluno_id).where(Aluno.id.in_(ids))
+    ).all()
+    origens = {o for _, o in alunos if o}
+    por_origem: dict[int, dict] = {}
+    if origens:
+        linhas = db.execute(
+            select(TurmaAluno.id, Turma.id, Turma.nome)
+            .join(Turma, Turma.id == TurmaAluno.turma_id)
+            .where(TurmaAluno.id.in_(origens))
+        ).all()
+        por_origem = {ta_id: {"id": tid, "nome": nome} for ta_id, tid, nome in linhas}
+    return {aid: por_origem[o] for aid, o in alunos if o in por_origem}
+
+
+def turmas_de_varias_avaliacoes(db: Session, avaliacao_ids: list[int]) -> dict[int, list[dict]]:
+    """Turmas de cada avaliação (junção N:N, com fallback do vínculo legado)."""
+    ids = [i for i in avaliacao_ids if i]
+    if not ids:
+        return {}
+    por_avaliacao: dict[int, list[dict]] = {}
+    if ids:
+        vinculos = db.execute(
+            select(AvaliacaoTurma.avaliacao_id, Turma.id, Turma.nome)
+            .join(Turma, Turma.id == AvaliacaoTurma.turma_id)
+            .where(AvaliacaoTurma.avaliacao_id.in_(ids))
+        ).all()
+        for avid, tid, nome in vinculos:
+            por_avaliacao.setdefault(avid, []).append({"id": tid, "nome": nome})
+
+    sem_vinculo = [i for i in ids if i not in por_avaliacao]
+    if sem_vinculo:
+        avals = db.scalars(select(Avaliacao).where(Avaliacao.id.in_(sem_vinculo))).all()
+        turma_ids = [a.turma_id for a in avals if a.turma_id]
+        nomes = {
+            t.id: t.nome
+            for t in db.scalars(select(Turma).where(Turma.id.in_(turma_ids or [-1]))).all()
+        }
+        for a in avals:
+            if a.turma_id and a.turma_id in nomes:
+                por_avaliacao.setdefault(a.id, []).append({"id": a.turma_id, "nome": nomes[a.turma_id]})
+            elif a.turma:
+                por_avaliacao.setdefault(a.id, []).append({"id": None, "nome": a.turma})
+    return por_avaliacao
+
+
+def turma_do_resultado(g: GabaritoNomeado, turma_por_aluno: dict[int, dict],
+                       turmas_por_avaliacao: dict[int, list[dict]]) -> dict | None:
+    """Turma de um cartão corrigido: origem do aluno → turma única → nada."""
+    direta = turma_por_aluno.get(g.aluno_id)
+    if direta:
+        return direta
+    lista = turmas_por_avaliacao.get(g.avaliacao_id) or []
+    return lista[0] if len(lista) == 1 else None
+
+
+def alunos_da_turma(db: Session, av: Avaliacao, turma_id: int) -> list[int]:
+    """Alunos DESTA avaliação que pertencem à turma pedida.
+
+    Regra: pela origem no catálogo (`origem_turma_aluno_id`). Se nenhum aluno
+    tem origem (prova alimentada por XLSX) e a avaliação só atende essa turma,
+    todos os alunos contam. Lista vazia = recorte honestamente sem alunos.
+    """
+    linhas = db.execute(
+        select(Aluno.id)
+        .join(TurmaAluno, TurmaAluno.id == Aluno.origem_turma_aluno_id)
+        .where(Aluno.avaliacao_id == av.id, TurmaAluno.turma_id == turma_id)
+    ).all()
+    ids = [r[0] for r in linhas]
+    if ids:
+        return ids
+    turmas = _turmas_da_avaliacao(db, av)
+    if len(turmas) == 1 and turmas[0]["id"] == turma_id:
+        return [r[0] for r in db.execute(
+            select(Aluno.id).where(Aluno.avaliacao_id == av.id)
+        ).all()]
+    return []
+
+
 def _prova_to_dict(p: Prova) -> dict:
     return {
         "id": p.id,

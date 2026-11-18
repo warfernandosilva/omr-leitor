@@ -127,6 +127,40 @@ def init_db() -> None:
     _ensure_coluna("alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
     _ensure_coluna("turma_alunos", "situacao", "VARCHAR(20) NOT NULL DEFAULT 'ativo'")
     _backfill_provas(engine)
+    _backfill_avaliacao_turmas(engine)
+
+
+def _backfill_avaliacao_turmas(engine) -> dict:
+    """Cria o vinculo N:N de avaliacoes que so tem o campo legado (idempotente).
+
+    `avaliacoes.turma_id` guarda apenas a PRIMEIRA turma; `avaliacao_turmas`
+    e a lista completa. Copiar o legado para a juncao deixa as duas visões
+    iguais nas avaliacoes antigas (as multi-turma ja tem as suas linhas e
+    por isso nao sao tocadas).
+    """
+    from sqlalchemy import text
+
+    criadas = 0
+    with engine.begin() as conn:
+        pendentes = conn.execute(text(
+            "SELECT a.id, a.turma_id FROM avaliacoes a "
+            "WHERE a.turma_id IS NOT NULL AND NOT EXISTS ("
+            "  SELECT 1 FROM avaliacao_turmas at WHERE at.avaliacao_id = a.id)"
+        )).all()
+        for aid, turma_id in pendentes:
+            existe = conn.execute(text(
+                "SELECT 1 FROM avaliacao_turmas WHERE avaliacao_id = :a AND turma_id = :t"
+            ), {"a": aid, "t": turma_id}).first()
+            if existe:
+                continue
+            conn.execute(text(
+                "INSERT INTO avaliacao_turmas (avaliacao_id, turma_id, created_at) "
+                "VALUES (:a, :t, CURRENT_TIMESTAMP)"
+            ), {"a": aid, "t": turma_id})
+            criadas += 1
+    if criadas:
+        print(f"[migracao] {criadas} vinculo(s) avaliacao<->turma criado(s) a partir do campo legado")
+    return {"criadas": criadas}
 
 
 def _ensure_coluna(table: str, column: str, ddl_type: str) -> None:

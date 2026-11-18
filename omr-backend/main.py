@@ -2053,9 +2053,33 @@ def put_answer_key(external_id: str, req: AnswerKeyRequest, db: Session = Depend
     return {"external_id": av.external_id, "answer_key": av.answer_key, "grade_scale": av.grade_scale}
 
 
+def _aluno_com_turma(g: GabaritoNomeado, turma: dict | None) -> dict:
+    """Serializa o aluno do resultado já com a TURMA dele (chaves separadas).
+
+    `turma` vem como `{"id", "nome"}`; espalhar direto colidiria com
+    `aluno.nome` (o nome da turma sobrescreveria o nome do aluno).
+    """
+    base = {
+        "id": g.aluno.id,
+        "nome": g.aluno.nome,
+        "matricula": g.aluno.matricula,
+    }
+    if turma:
+        base["turma"] = turma.get("nome")
+        base["turma_id"] = turma.get("id")
+    return base
+
+
 @app.get("/api/resultados")
 def list_resultados(limit: int = 100, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(auth.get_current_user)):
-    """Lista gabaritos corrigidos do usuário (admin vê todos) — paginado."""
+    """Lista gabaritos corrigidos do usuário (admin vê todos) — paginado.
+
+    `aluno.turma`/`aluno.turma_id` é a turma DO ALUNO (catálogo de origem) e
+    `avaliacao.turmas` lista TODAS as turmas da avaliação. O campo legado
+    `avaliacao.turma` continua existindo por compatibilidade, mas guarda só a
+    primeira turma vinculada — por isso não pode servir de "turma do
+    resultado" em avaliações multi-turma.
+    """
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     q = select(GabaritoNomeado).where(GabaritoNomeado.status == GabaritoNomeado.STATUS_CORRIGIDO).order_by(GabaritoNomeado.data_correcao.desc()).limit(limit).offset(offset)
@@ -2064,6 +2088,17 @@ def list_resultados(limit: int = 100, offset: int = 0, db: Session = Depends(get
             Avaliacao.owner_id == current_user.id
         )
     gabaritos = db.scalars(q).all()
+
+    # Import local: routers.avaliacoes depende de database/models já carregados.
+    from routers.avaliacoes import (
+        turma_do_resultado,
+        turmas_de_origem,
+        turmas_de_varias_avaliacoes,
+    )
+    turma_por_aluno = turmas_de_origem(db, [g.aluno_id for g in gabaritos])
+    turmas_por_avaliacao = turmas_de_varias_avaliacoes(
+        db, [g.avaliacao_id for g in gabaritos])
+
     return [
         {
             "codigo_unico": g.codigo_unico,
@@ -2076,7 +2111,9 @@ def list_resultados(limit: int = 100, offset: int = 0, db: Session = Depends(get
             "nota": g.nota,
             "observacoes": g.observacoes,
             "data_correcao": g.data_correcao.isoformat() if g.data_correcao else None,
-            "aluno": {"id": g.aluno.id, "nome": g.aluno.nome, "matricula": g.aluno.matricula},
+            "aluno": _aluno_com_turma(
+                g, turma_do_resultado(g, turma_por_aluno, turmas_por_avaliacao),
+            ),
             "avaliacao": {
                 "id": g.avaliacao.id,
                 "external_id": g.avaliacao.external_id,
@@ -2086,8 +2123,10 @@ def list_resultados(limit: int = 100, offset: int = 0, db: Session = Depends(get
                 "grade_scale": g.avaliacao.grade_scale,
                 "template": g.avaliacao.template,
                 "custom_template_id": g.avaliacao.custom_template_id,
+                # legado: apenas a primeira turma vinculada (ver docstring)
                 "turma": g.avaliacao.turma,
                 "turma_id": g.avaliacao.turma_id,
+                "turmas": turmas_por_avaliacao.get(g.avaliacao_id) or [],
             },
         }
         for g in gabaritos

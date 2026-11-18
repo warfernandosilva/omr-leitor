@@ -12,6 +12,7 @@ import { getResults, getExams } from '../utils/storage';
 import { downloadCSV, downloadXLSX } from '../utils/export';
 import { getResultadosFromDB, listTurmas, type DBResultado, type TurmaDTO } from '../utils/api';
 import { baixarRelatorioPDF } from '../utils/api-avaliacoes';
+import { casaComTurma, turmaDoResultado, turmaPorResultado } from '../utils/turma-resultado';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -77,6 +78,9 @@ export default function ReportsPage({ onNavigate }: Props) {
   }, [local, dbResults]);
 
   const examById = useMemo(() => new Map(exams.map(e => [e.id, e])), [exams]);
+  // Turma de cada resultado: a do ALUNO (catálogo), não a da avaliação —
+  // uma avaliação pode atender várias turmas.
+  const turmaMap = useMemo(() => turmaPorResultado(dbResults), [dbResults]);
 
   const filtered = useMemo(() => {
     const now = Date.now();
@@ -84,13 +88,14 @@ export default function ReportsPage({ onNavigate }: Props) {
     return allResults.filter(r => {
       if (examFilter && r.examId !== examFilter) return false;
       if (turmaFilter) {
-        const ex = examById.get(r.examId);
-        const tid = ex?.turmaId != null ? String(ex.turmaId) : null;
-        const tname = ex?.turma ?? null;
-        const turma = turmas.find(t => String(t.id) === turmaFilter);
-        const matchId = tid === turmaFilter;
-        const matchName = turma != null && tname != null && tname === turma.nome;
-        if (!matchId && !matchName) return false;
+        const doServidor = turmaDoResultado(
+          (r as unknown as { codigoUnico?: string }).codigoUnico, turmaMap,
+        );
+        const turma = doServidor ?? (() => {
+          const ex = examById.get(r.examId);
+          return { id: ex?.turmaId ?? null, nome: ex?.turma ?? null };
+        })();
+        if (!casaComTurma(turma, turmaFilter, turmas)) return false;
       }
       if (studentSearch && !r.studentName.toLowerCase().includes(studentSearch.trim().toLowerCase())) return false;
       if (days !== Infinity) {
@@ -99,7 +104,7 @@ export default function ReportsPage({ onNavigate }: Props) {
       }
       return true;
     });
-  }, [allResults, examFilter, turmaFilter, studentSearch, period, examById, turmas]);
+  }, [allResults, examFilter, turmaFilter, studentSearch, period, examById, turmas, turmaMap]);
 
   const stats = useMemo(() => {
     if (filtered.length === 0) return null;

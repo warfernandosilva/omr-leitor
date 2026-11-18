@@ -71,7 +71,7 @@ prova do frontend, avaliação, gabaritos e resultados.
 
 ## 6. Testes executados
 
-- Backend: **431 passed, 1 skipped** (suíte completa).
+- Backend: **435 passed, 1 skipped** (suíte completa).
   - `test_workflow_status.py` (10): motor puro.
   - `test_avaliacoes.py` (9): criação, reuso, versão, transição, publicação,
     isolamento.
@@ -80,7 +80,9 @@ prova do frontend, avaliação, gabaritos e resultados.
   - `test_aceitacao_fluxo.py` (9): os 8 cenários do enunciado ponta a ponta +
     isolamento entre usuários.
   - `test_turmas.py` (18): arquivamento, filtro, ano letivo, situação.
-- Frontend: **340 testes vitest** (25 novos: espelho do fluxo + cliente HTTP).
+  - `test_turma_resultado.py` (4): turma do aluno em avaliação multi-turma,
+    recorte do PDF por turma, helpers em lote e fallback de aluno sem origem.
+- Frontend: **347 testes vitest** (7 novos: resolução da turma por resultado).
 - `tsc`, `eslint --max-warnings 0` e `npm run build` verdes.
 - Regressão OMR direcionada: 126 passed.
 - Validação visual no navegador (seed `dev-demo.db`): menu novo, painel
@@ -89,6 +91,23 @@ prova do frontend, avaliação, gabaritos e resultados.
   mobile sem overflow horizontal.
 
 ## 7. Problemas identificados e resolvidos
+
+### 7.1 Turma do resultado corrigido (correção pós-entrega)
+
+**Sintoma:** no histórico de correções (e nos relatórios), todos os cartões de
+uma avaliação multi-turma apareciam na mesma turma — a primeira vinculada.
+**Causa:** `/api/resultados` informava `avaliacao.turma`, que guarda apenas a
+primeira turma; uma avaliação pode atender várias turmas
+(`avaliacao_turmas`). No banco real, a avaliação "Atividade de Itens 8 - 5 ANO"
+tinha 22 cartões corrigidos (21 da 5 ANO A, 1 da 5 ANO B) listados como
+"5 ANO C". **Correção:** a turma passa a ser a do aluno (catálogo de origem),
+com fallback para a turma única da avaliação e depois o valor legado;
+`/api/resultados` ganhou `aluno.turma`/`aluno.turma_id` e
+`avaliacao.turmas`. O histórico de correções ganhou a coluna **Turma** e o
+PDF por turma recorta só os alunos da turma. Coberto por
+`test_turma_resultado.py` e `turma-resultado.test.ts`.
+
+### 7.2 Encontrados durante a reestruturação
 
 1. **Migração interrompia no Postgres**: `DEFAULT 0` em coluna BOOLEAN é
    rejeitado — resolvido com DDL por dialeto e migração tolerante a falha.

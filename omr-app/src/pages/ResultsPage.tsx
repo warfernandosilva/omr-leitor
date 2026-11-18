@@ -11,6 +11,7 @@ import { getResults, getExams, deleteResult } from '../utils/storage';
 import { downloadCSV, downloadXLSX, downloadSaevCsv, examsWithRemoteFallback } from '../utils/export';
 import { computeSubjectStats } from '../utils/exam';
 import { getResultadosFromDB, deleteResultadoDB, DBResultado, listTurmas, TurmaDTO } from '../utils/api';
+import { casaComTurma, turmaDoResultado, turmaPorResultado, type TurmaRef } from '../utils/turma-resultado';
 import { useAuth } from '../context/AuthContext';
 
 interface Props {
@@ -79,6 +80,19 @@ export default function ResultsPage({ onNavigate }: Props) {
     () => new Map(examsWithRemoteFallback(exams, dbResults).map(e => [e.id, e])),
     [exams, dbResults],
   );
+  // Turma de cada resultado: a do ALUNO (catálogo), não a da avaliação —
+  // uma avaliação pode atender várias turmas.
+  const turmaMap = useMemo(() => turmaPorResultado(dbResults), [dbResults]);
+
+  /** Turma do resultado, com fallback na prova local (resultado só neste aparelho). */
+  const turmaDe = (r: { id: string; examId: string }): TurmaRef | null => {
+    const doServidor = turmaDoResultado(
+      (r as unknown as { codigoUnico?: string }).codigoUnico, turmaMap,
+    );
+    if (doServidor) return doServidor;
+    const ex = examById.get(r.examId);
+    return { id: ex?.turmaId ?? null, nome: ex?.turma ?? null };
+  };
   // Provas sintéticas (do servidor) entram no export para que resultados
   // só-servidor não caiam no "skipped" do lote SAEV nem zerem LP/MAT.
   const examsForExport = useMemo(() => [...examById.values()], [examById]);
@@ -87,14 +101,7 @@ export default function ResultsPage({ onNavigate }: Props) {
     .filter(r => {
       if (searchTerm && !r.studentName.toLowerCase().includes(searchTerm.toLowerCase())) return false;
       if (filterExamId && r.examId !== filterExamId) return false;
-      if (filterTurmaId) {
-        const ex = examById.get(r.examId);
-        const tid = ex?.turmaId != null ? String(ex.turmaId) : null;
-        const turma = turmas.find(t => String(t.id) === filterTurmaId);
-        const matchId = tid === filterTurmaId;
-        const matchName = turma != null && ex?.turma != null && ex.turma === turma.nome;
-        if (!matchId && !matchName) return false;
-      }
+      if (filterTurmaId && !casaComTurma(turmaDe(r), filterTurmaId, turmas)) return false;
       return true;
     })
     .sort((a, b) => {
@@ -220,6 +227,7 @@ export default function ResultsPage({ onNavigate }: Props) {
                 <tr className="border-b border-line dark:border-gray-700">
                   <th className="table-th">Aluno</th>
                   <th className="table-th hidden sm:table-cell">Prova</th>
+                  <th className="table-th hidden lg:table-cell">Turma</th>
                   <th className="table-th hidden md:table-cell">Data/Hora</th>
                   <th className="table-th text-center">✓</th>
                   <th className="table-th text-center">✗</th>
@@ -238,6 +246,9 @@ export default function ResultsPage({ onNavigate }: Props) {
                     <tr key={r.id} className="border-b border-line/60 dark:border-gray-800 hover:bg-[#F8FAFF] dark:hover:bg-gray-800/60">
                       <td className="table-td font-medium text-[#172B4D] dark:text-gray-100">{r.studentName}</td>
                       <td className="table-td text-[#71809A] dark:text-gray-400 hidden sm:table-cell">{exam?.name || '—'}</td>
+                      <td className="table-td text-[#71809A] dark:text-gray-400 hidden lg:table-cell">
+                        {turmaDe(r)?.nome || '—'}
+                      </td>
                       <td className="table-td text-[#71809A] dark:text-gray-400 text-xs hidden md:table-cell">
                         {new Date(r.timestamp).toLocaleString('pt-BR')}
                       </td>

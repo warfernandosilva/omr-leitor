@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 import auth
 from database import get_db
 from models import Aluno, Avaliacao, GabaritoNomeado, Turma, User
+from routers.avaliacoes import alunos_da_turma
 
 router = APIRouter()
 
@@ -280,10 +281,10 @@ def gerar_relatorio_pdf(
     if req.aluno_id is not None:
         q = q.where(GabaritoNomeado.aluno_id == req.aluno_id)
     elif turma_id is not None:
-        # Restringe aos alunos materializados desta turma quando houver vínculo.
-        alunos_turma = db.scalars(
-            select(Aluno.id).where(Aluno.avaliacao_id == av.id, Aluno.origem_turma_aluno_id.is_not(None))
-        ).all()
+        # Recorte por TURMA DO ALUNO (catálogo de origem): em avaliações
+        # multi-turma, filtrar pelo campo legado da avaliação misturaria
+        # alunos de todas as turmas num relatório só.
+        alunos_turma = alunos_da_turma(db, av, turma_id)
         q = q.where(GabaritoNomeado.aluno_id.in_(alunos_turma or [-1]))
     alvos = db.scalars(q).all()
 

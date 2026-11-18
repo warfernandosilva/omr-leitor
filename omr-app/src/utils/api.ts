@@ -919,8 +919,29 @@ export interface DBResultado {
   nota: number | null;
   observacoes: string | null;
   data_correcao: string | null;
-  aluno: { id: number; nome: string; matricula: string | null };
-  avaliacao: { id: number; external_id: string; titulo: string; questions_per_subject: number; layout_mode: string; grade_scale: string; template: string | null; custom_template_id?: number | null; turma: string | null; turma_id: number | null };
+  aluno: {
+    id: number;
+    nome: string;
+    matricula: string | null;
+    /** Turma do ALUNO (catálogo de origem) — a certa para filtrar/agrupar. */
+    turma?: string | null;
+    turma_id?: number | null;
+  };
+  avaliacao: {
+    id: number;
+    external_id: string;
+    titulo: string;
+    questions_per_subject: number;
+    layout_mode: string;
+    grade_scale: string;
+    template: string | null;
+    custom_template_id?: number | null;
+    /** Legado: apenas a PRIMEIRA turma vinculada à avaliação. */
+    turma: string | null;
+    turma_id: number | null;
+    /** Todas as turmas que a avaliação atende (N:N). */
+    turmas?: { id: number | null; nome: string }[];
+  };
 }
 
 export async function getResultadosFromDB(): Promise<DBResultado[]> {
