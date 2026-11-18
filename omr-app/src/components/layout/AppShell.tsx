@@ -41,7 +41,7 @@ export default function AppShell({
           onNavigate={onNavigate}
           onOpenMenu={onOpenDrawer}
         />
-        <main className="pb-[calc(4.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+        <main className="pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-0">
           <div className={`p-4 md:p-6 lg:p-7 animate-fade-in ${wide ? 'w-full' : 'mx-auto w-full max-w-[1440px]'}`}>
             {children}
           </div>

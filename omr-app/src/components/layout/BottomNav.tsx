@@ -11,8 +11,9 @@ export default function BottomNav({ currentView, onNavigate }: Props) {
   return (
     <nav
       aria-label="Navegação rápida"
-      className="fixed bottom-0 inset-x-0 z-40 lg:hidden glass border-t border-line dark:border-gray-800 shadow-glass"
-      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      className="fixed z-40 lg:hidden left-3 right-3 glass rounded-2xl shadow-glass overflow-hidden"
+      /* Flutuante: descolada das bordas; a safe-area entra no offset inferior. */
+      style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
     >
       <div className="grid grid-cols-5">
         {BOTTOM_NAV.map((item) => {
