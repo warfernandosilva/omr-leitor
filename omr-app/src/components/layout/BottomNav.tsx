@@ -11,7 +11,7 @@ export default function BottomNav({ currentView, onNavigate }: Props) {
   return (
     <nav
       aria-label="Navegação rápida"
-      className="fixed z-40 lg:hidden left-3 right-3 glass rounded-2xl shadow-glass overflow-hidden"
+      className="fixed z-40 lg:hidden left-3 right-3 glass bg-brand-50/80 rounded-2xl shadow-glass overflow-hidden"
       /* Flutuante: descolada das bordas; a safe-area entra no offset inferior. */
       style={{ bottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
     >
