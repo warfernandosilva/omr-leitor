@@ -97,6 +97,26 @@ Regras oficiais:
 
 ## 4. Leitura e correção
 
+### 4.1 Quem ainda falta corrigir
+
+Regra: "falta corrigir" = cartão gerado sem nota (`status` `gerado` ou `lido`).
+O número vem de `GET /api/exams/{external_id}/gabaritos` (`stats.pendentes`) e,
+no ciclo de vida, de `contadores.falta_corrigir` em `/api/avaliacoes`.
+
+Onde consultar (3 caminhos, todos levam à mesma lista nominal):
+
+1. **Menu → Avaliações → "Alunos e notas por prova"**: escolhe a prova e vê os
+   cards (cadastrados, gerados, lidos, corrigidos, falta corrigir) mais a
+   tabela com nome, matrícula, QR, página, status e nota.
+2. **Central de avaliações** ("Gerenciar avaliações"): cada avaliação com
+   pendência mostra o botão **"Faltam N"**, que abre direto a lista dela.
+3. **Detalhe da avaliação**: na etapa **Leitura**, o botão
+   **"Ver quem falta (N)"** abre a mesma lista.
+
+Na lista, o filtro **"Falta corrigir (N)"** mostra só os cartões sem nota
+(inclusive os já lidos que aguardam correção), com busca por aluno, matrícula
+ou QR e o atalho "Corrigir os N que faltam" para a leitura.
+
 1. Usuário escolhe a prova e envia foto/arquivo.
 2. Backend decodifica a imagem e escolhe o leitor pelo tipo do cartão.
 3. Backend retifica, lê bolhas, QR, matrícula e classifica:

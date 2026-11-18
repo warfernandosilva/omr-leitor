@@ -331,6 +331,17 @@ export default function AvaliacaoDetailPage({ examId, onNavigate }: Props) {
                       {e.acao ?? meta?.acaoPadrao}
                     </Button>
                   )}
+                  {/* Quem ainda falta corrigir, nominalmente */}
+                  {e.id === 'leitura' && (dados.contadores?.falta_corrigir ?? 0) > 0 && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => onNavigate('manage-exam', dados.external_id)}
+                      title="Lista nominal de alunos e cartões, com status e nota"
+                    >
+                      Ver quem falta ({dados.contadores!.falta_corrigir})
+                    </Button>
+                  )}
                   {e.id === 'impressao' && dados.status_efetivo === 'pronta_impressao' && (
                     <Button size="sm" variant="ghost" loading={ocupado} onClick={() => void marcarImpressa()}>
                       {transicoes[0]?.rotulo ?? 'Marcar como impressa'}

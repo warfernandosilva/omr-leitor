@@ -55,6 +55,16 @@ export interface AvaliacaoDTO {
   status_efetivo: StatusAvaliacao;
   etapas?: EtapaDTO[] | null;
   proxima_acao?: { etapa: string; acao: string } | null;
+  /** Números crus: base do "quem falta corrigir" nas telas. */
+  contadores?: {
+    alunos: number;
+    turmas: number;
+    cartoes_gerados: number;
+    cartoes_recebidos: number;
+    cartoes_corrigidos: number;
+    revisoes_pendentes: number;
+    falta_corrigir: number;
+  };
   bloqueios: string[];
   progresso: number;
   prova?: ProvaDTO | null;

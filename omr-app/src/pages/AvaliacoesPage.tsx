@@ -209,6 +209,17 @@ export default function AvaliacoesPage({ onNavigate }: Props) {
                     {prox?.acao && (
                       <Badge tone="info">{prox.acao}</Badge>
                     )}
+                    {/* Quem ainda falta corrigir: atalho direto para a lista */}
+                    {(a.contadores?.falta_corrigir ?? 0) > 0 && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => onNavigate('manage-exam', a.external_id)}
+                        title="Abrir a lista de alunos e cartões desta avaliação"
+                      >
+                        Faltam {a.contadores!.falta_corrigir}
+                      </Button>
+                    )}
                     <Button size="sm" onClick={() => abrir(a)} icon={<ArrowRight size={15} aria-hidden />}>
                       Abrir
                     </Button>

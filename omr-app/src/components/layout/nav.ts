@@ -41,6 +41,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Avaliações',
     items: [
       { view: 'avaliacoes', label: 'Gerenciar avaliações', icon: ListChecks },
+      { view: 'manage-exam', label: 'Alunos e notas por prova', icon: ClipboardCheck },
       { view: 'new-exam', label: 'Provas e avaliações', icon: ClipboardList },
       { view: 'provas', label: 'Gabaritos', icon: KeyRound },
       { view: 'custom-template', label: 'Gabaritos personalizados', icon: PenSquare },
@@ -104,7 +105,7 @@ export const VIEW_META: Record<AppView, { title: string; group: string }> = {
   'generate-card': { title: 'Gerar cartões-resposta', group: 'Avaliações' },
   'custom-template': { title: 'Gabaritos personalizados', group: 'Avaliações' },
   'import-students': { title: 'Cartões por lista da prova', group: 'Avaliações' },
-  'manage-exam': { title: 'Detalhe da avaliação', group: 'Avaliações' },
+  'manage-exam': { title: 'Alunos e notas por prova', group: 'Avaliações' },
   'register-key': { title: 'Gabaritos', group: 'Avaliações' },
   'correct-card': { title: 'Nova leitura', group: 'Correção OMR' },
   results: { title: 'Histórico de correções', group: 'Correção OMR' },

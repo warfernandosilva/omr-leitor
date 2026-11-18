@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { Download, FileUp, RefreshCw, ScanLine, Trash2, TriangleAlert } from 'lucide-react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { ClipboardList, Download, FileUp, RefreshCw, ScanLine, Search, Trash2, TriangleAlert } from 'lucide-react';
 import { AppView } from '../types';
 import { getExams } from '../utils/storage';
 import {
@@ -24,11 +24,16 @@ interface Props {
   onNavigate: (view: AppView, examId?: string) => void;
 }
 
-const STATUS_TONE: Record<GabaritosListResult['gabaritos'][number]['status'], { label: string; tone: 'neutral' | 'info' | 'success' }> = {
-  gerado: { label: 'Pendente', tone: 'neutral' },
-  lido: { label: 'Lido', tone: 'info' },
+const STATUS_TONE: Record<GabaritosListResult['gabaritos'][number]['status'], { label: string; tone: 'neutral' | 'info' | 'success' | 'warning' }> = {
+  gerado: { label: 'Sem leitura', tone: 'warning' },
+  lido: { label: 'Lido · falta nota', tone: 'info' },
   corrigido: { label: 'Corrigido', tone: 'success' },
 };
+
+/** "Falta corrigir" = cartão gerado que ainda não tem nota (sem leitura ou só lido). */
+function faltaCorrigir(status: GabaritosListResult['gabaritos'][number]['status']): boolean {
+  return status !== 'corrigido';
+}
 
 export default function ManageExamPage({ examId, onNavigate }: Props) {
   const { user } = useAuth();
@@ -39,6 +44,31 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [filtro, setFiltro] = useState<'todos' | 'falta' | 'corrigidos'>('todos');
+  const [busca, setBusca] = useState('');
+
+  /** Contagens reais de "quem falta corrigir" (fonte: os próprios gabaritos). */
+  const contagem = useMemo(() => {
+    const todos = data?.gabaritos ?? [];
+    return {
+      todos: todos.length,
+      falta: todos.filter(g => faltaCorrigir(g.status)).length,
+      corrigidos: todos.filter(g => g.status === 'corrigido').length,
+    };
+  }, [data]);
+
+  /** Lista exibida: filtro de status + busca por aluno/matrícula/QR. */
+  const linhas = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    return (data?.gabaritos ?? []).filter(g => {
+      if (filtro === 'falta' && !faltaCorrigir(g.status)) return false;
+      if (filtro === 'corrigidos' && g.status !== 'corrigido') return false;
+      if (!q) return true;
+      return g.aluno.nome.toLowerCase().includes(q)
+        || (g.aluno.matricula ?? '').toLowerCase().includes(q)
+        || g.codigo_unico.toLowerCase().includes(q);
+    });
+  }, [data, filtro, busca]);
 
   const load = useCallback(async () => {
     if (!selectedExamId) return;
@@ -55,6 +85,13 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
       setLoading(false);
     }
   }, [selectedExamId]);
+
+  // Abrir a tela por um link (busca global, central de avaliações, "ver quem
+  // falta") já traz a prova selecionada — sem isso a página nascia vazia e o
+  // usuário tinha que clicar em "Atualizar" para ver qualquer número.
+  useEffect(() => {
+    if (selectedExamId && !data) void load();
+  }, [selectedExamId, data, load]);
 
   const handleSelect = (id: string) => {
     setSelectedExamId(id);
@@ -114,8 +151,8 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
   return (
     <div className="app-section animate-fade-in">
       <PageHeader
-        title="Gerenciar avaliação"
-        subtitle="Alunos persistidos, gabaritos gerados e status de correção — dados do banco do servidor"
+        title="Alunos e notas por prova"
+        subtitle="Quem tem cartão, quem já foi corrigido e quem ainda falta — dados do banco do servidor"
       />
 
       <div className="card w-full max-w-6xl">
@@ -167,7 +204,7 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
             <StatCard label="Gabaritos gerados" value={data.stats.gabaritos_gerados} />
             <StatCard label="Lidos" value={data.stats.gabaritos_lidos} tone="info" />
             <StatCard label="Corrigidos" value={data.stats.gabaritos_corrigidos} tone="success" />
-            <StatCard label="Pendentes" value={data.stats.pendentes} tone={data.stats.pendentes > 0 ? 'warning' : 'default'} />
+            <StatCard label="Falta corrigir" value={contagem.falta} tone={contagem.falta > 0 ? 'warning' : 'default'} hint={contagem.falta > 0 ? 'cartões sem nota' : 'todos corrigidos'} />
           </div>
 
           {data.stats.alunos_cadastrados > data.stats.gabaritos_gerados && (
@@ -177,14 +214,78 @@ export default function ManageExamPage({ examId, onNavigate }: Props) {
             </div>
           )}
 
+          {/* ─── Quem ainda falta corrigir ─── */}
+          <div className="card w-full">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-[10px] bg-brand-50 dark:bg-brand-700/20 flex items-center justify-center text-brand-600 dark:text-brand-200 shrink-0" aria-hidden>
+                  <ClipboardList size={16} />
+                </span>
+                <div>
+                  <h3 className="font-semibold text-[#172B4D] dark:text-white">
+                    {filtro === 'falta' ? 'Quem ainda falta corrigir' : 'Participantes da avaliação'}
+                  </h3>
+                  <p className="text-xs text-[#71809A] dark:text-gray-400">
+                    {filtro === 'falta'
+                      ? `${contagem.falta} cartão(ões) gerado(s) ainda sem nota`
+                      : `${contagem.todos} cartão(ões) · ${contagem.corrigidos} corrigido(s)`}
+                  </p>
+                </div>
+              </div>
+              {contagem.falta > 0 && (
+                <Button size="sm" onClick={() => onNavigate('correct-card', data.avaliacao.external_id)} icon={<ScanLine size={15} aria-hidden />}>
+                  Corrigir os {contagem.falta} que faltam
+                </Button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="flex flex-wrap gap-2">
+                {([
+                  { id: 'todos', label: `Todos (${contagem.todos})` },
+                  { id: 'falta', label: `Falta corrigir (${contagem.falta})` },
+                  { id: 'corrigidos', label: `Corrigidos (${contagem.corrigidos})` },
+                ] as const).map(op => (
+                  <button
+                    key={op.id}
+                    onClick={() => setFiltro(op.id)}
+                    aria-pressed={filtro === op.id}
+                    className={`px-3 py-1.5 rounded-[8px] text-xs font-medium border transition-colors ${
+                      filtro === op.id
+                        ? 'bg-brand-500 text-white border-brand-500'
+                        : 'bg-white text-[#71809A] border-line hover:text-brand-600 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-400'
+                    }`}
+                  >
+                    {op.label}
+                  </button>
+                ))}
+              </div>
+              <div className="relative sm:ml-auto sm:w-64">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#71809A] pointer-events-none" aria-hidden />
+                <input
+                  type="search"
+                  aria-label="Buscar aluno, matrícula ou QR"
+                  placeholder="Buscar aluno, matrícula ou QR..."
+                  value={busca}
+                  onChange={e => setBusca(e.target.value)}
+                  className="input !pl-9"
+                />
+              </div>
+            </div>
+          </div>
+
           <div className="table-shell">
             <DataTable
-              rows={data.gabaritos}
+              rows={linhas}
               rowKey={(g) => String(g.id)}
               pageSize={25}
               minWidth={900}
-              ariaLabel="Tabela de participantes da avaliação"
-              empty="Nenhum gabarito gerado para esta avaliação ainda."
+              ariaLabel={filtro === 'falta' ? 'Alunos que ainda falta corrigir' : 'Tabela de participantes da avaliação'}
+              empty={contagem.todos === 0
+                ? 'Nenhum gabarito gerado para esta avaliação ainda.'
+                : filtro === 'falta'
+                  ? 'Nenhum cartão sem nota: todos os participantes já foram corrigidos.'
+                  : 'Nenhum participante encontrado com este filtro/busca.'}
               mobileCard={(g) => {
                 const st = STATUS_TONE[g.status];
                 return (

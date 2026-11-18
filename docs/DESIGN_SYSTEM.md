@@ -61,6 +61,8 @@ Fonte principal: **Inter**.
 - `AiAssistPanel`, `ManualReviewPanel`, `ResultSummaryPanel`
 - `BatchQueuePanel`, `MultiPageBatchModal`
 - `AlunoEditModal` (edição de aluno do catálogo)
+- `ManageExamPage` — "Alunos e notas por prova": cards de conclusão, filtro
+  "Falta corrigir", busca e tabela nominal (QR, status, nota)
   
 ### Ciclo de vida da avaliação (telas novas)
 

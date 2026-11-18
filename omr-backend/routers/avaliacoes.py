@@ -330,7 +330,8 @@ def _contadores(db: Session, av: Avaliacao) -> wf.Contadores:
 
 
 def _avaliacao_to_dict(db: Session, av: Avaliacao, com_etapas: bool = True) -> dict:
-    fluxo = wf.calcular_fluxo(_contadores(db, av))
+    c = _contadores(db, av)
+    fluxo = wf.calcular_fluxo(c)
     d: dict = {
         "id": av.id,
         "external_id": av.external_id,
@@ -369,6 +370,17 @@ def _avaliacao_to_dict(db: Session, av: Avaliacao, com_etapas: bool = True) -> d
             {"etapa": fluxo.proxima_acao.id, "acao": fluxo.proxima_acao.acao}
             if fluxo.proxima_acao else None
         ),
+        # Números crus — usados pelas telas para mostrar "quem falta corrigir"
+        # sem precisar reconsultar a lista de gabaritos.
+        "contadores": {
+            "alunos": c.alunos,
+            "turmas": c.turmas,
+            "cartoes_gerados": c.cartoes_gerados,
+            "cartoes_recebidos": c.cartoes_recebidos,
+            "cartoes_corrigidos": c.cartoes_corrigidos,
+            "revisoes_pendentes": c.revisoes_pendentes,
+            "falta_corrigir": max(0, c.cartoes_gerados - c.cartoes_corrigidos),
+        },
         "bloqueios": fluxo.bloqueios,
         "progresso": fluxo.progresso,
         "resultados_publicados_em": (

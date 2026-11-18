@@ -229,6 +229,38 @@ def test_lista_e_isolamento_entre_usuarios(isolated, client):
                    json={"answer_key": {"1": "A"}}).status_code == 403
 
 
+def test_contadores_expoem_quem_falta_corrigir(isolated, client):
+    """`contadores` alimenta o atalho 'quem falta corrigir' das telas."""
+    c = _authed(client, "aval-falta@example.com")
+    t = _cria_turma_com_alunos(c, "9º A", [
+        {"nome": "Ana", "matricula": "1"}, {"nome": "Beto", "matricula": "2"},
+        {"nome": "Caio", "matricula": "3"}])
+    prova = _cria_prova(c, questionsPerSubject=4)
+    av = c.post("/api/avaliacoes", json={"titulo": "Faltantes", "prova_id": prova["id"],
+                                        "turma_ids": [t["id"]]}).json()
+    ext = av["external_id"]
+    c.post("/api/exams/sync", json={"external_id": ext, "titulo": "Faltantes", "turma_id": t["id"]})
+    c.post(f"/api/exams/{ext}/students/from-turma", json={"turma_id": t["id"]})
+    c.post(f"/api/avaliacoes/{ext}/gabarito",
+           json={"answer_key": {str(i): "ABCD"[(i - 1) % 4] for i in range(1, 9)}})
+    c.post(f"/api/exams/{ext}/gabaritos/generate")
+
+    zero = c.get(f"/api/avaliacoes/{ext}").json()["contadores"]
+    assert zero == {"alunos": 3, "turmas": 1, "cartoes_gerados": 3, "cartoes_recebidos": 0,
+                    "cartoes_corrigidos": 0, "revisoes_pendentes": 0, "falta_corrigir": 3}
+
+    # corrige dois dos três
+    gabaritos = c.get(f"/api/exams/{ext}/gabaritos").json()["gabaritos"]
+    for g in gabaritos[:2]:
+        c.post(f"/api/gabaritos/{g['codigo_unico']}/resultado", json={
+            "respostas": {str(i): "ABCD"[(i - 1) % 4] for i in range(1, 9)},
+            "acertos": 8, "erros": 0, "brancos": 0, "nota": 10, "qr_ok": True})
+
+    um = c.get(f"/api/avaliacoes/{ext}").json()["contadores"]
+    assert um["cartoes_corrigidos"] == 2 and um["falta_corrigir"] == 1
+    assert c.get("/api/avaliacoes").json()["avaliacoes"][0]["contadores"]["falta_corrigir"] == 1
+
+
 def test_resumo_operacional_conta_e_aponta_pendencia(isolated, client):
     c = _authed(client, "aval-resumo@example.com")
     t = _cria_turma_com_alunos(c, "9º A", [{"nome": "Ana", "matricula": "1"}])
