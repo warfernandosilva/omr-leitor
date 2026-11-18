@@ -147,7 +147,9 @@ FOTOS_0910 = _fotos_0910()
 
 
 @pytest.mark.skipif(not FOTOS_0910, reason="fotos 0910 ausentes")
-@pytest.mark.parametrize("p", FOTOS_0910, ids=lambda p: p.stem)
+# pytest passa um sentinela ao ids quando a lista esta vazia (sem fotos 0910);
+# sem o getattr a coleta de TODO o suite quebra so porque o arquivo existe.
+@pytest.mark.parametrize("p", FOTOS_0910, ids=lambda p: getattr(p, "stem", "sem-fotos"))
 def test_detector_fotos_0910(p: Path):
     """Aceita ler ou recusar; o que nao pode e emitir nota com geometria torta."""
     img = cv2.imread(str(p))
