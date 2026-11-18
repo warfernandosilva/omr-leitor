@@ -77,7 +77,7 @@ export const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-/** Atalhos da barra de navegação inferior (mobile). "Mais" abre o drawer. */
+/** Atalhos da barra de navegação inferior (mobile). */
 export interface BottomNavItem {
   view: AppView;
   label: string;

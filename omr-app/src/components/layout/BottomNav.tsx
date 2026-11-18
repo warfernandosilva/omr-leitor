@@ -1,15 +1,13 @@
-import { Menu } from 'lucide-react';
 import type { AppView } from '../../types';
 import { BOTTOM_NAV } from './nav';
 
 interface Props {
   currentView: AppView;
   onNavigate: (view: AppView) => void;
-  onOpenMenu: () => void;
 }
 
 /** Barra de navegação inferior (só mobile): atalhos das funções mais usadas. */
-export default function BottomNav({ currentView, onNavigate, onOpenMenu }: Props) {
+export default function BottomNav({ currentView, onNavigate }: Props) {
   return (
     <nav
       aria-label="Navegação rápida"
@@ -40,15 +38,6 @@ export default function BottomNav({ currentView, onNavigate, onOpenMenu }: Props
             </button>
           );
         })}
-        <button
-          onClick={onOpenMenu}
-          aria-label="Abrir menu"
-          className="flex flex-col items-center justify-center gap-1 py-2 min-h-[60px] text-[11px] font-medium text-gray-500 hover:text-ink dark:text-gray-400 dark:hover:text-white transition-colors"
-        >
-          <Menu size={22} strokeWidth={2} aria-hidden />
-          <span className="leading-none">Mais</span>
-          <span aria-hidden className="h-1 w-8 rounded-full bg-transparent" />
-        </button>
       </div>
     </nav>
   );

@@ -47,7 +47,7 @@ export default function AppShell({
           </div>
         </main>
       </div>
-      <BottomNav currentView={currentView} onNavigate={onNavigate} onOpenMenu={onOpenDrawer} />
+      <BottomNav currentView={currentView} onNavigate={onNavigate} />
       {drawerOpen && (
         <div className="fixed inset-0 bg-navy-950/40 backdrop-blur-sm z-40 lg:hidden" onClick={onCloseDrawer} aria-hidden />
       )}
