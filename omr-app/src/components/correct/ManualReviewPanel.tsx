@@ -65,6 +65,33 @@ export default function ManualReviewPanel({
         ? 'Este cartão pertence a outra prova. Corrija a seleção da prova antes de salvar.'
         : 'O nome é usado quando o cartão não tem QR Code ou o código não está cadastrado.';
 
+  /** Estado de uma questao na conferencia (usado pela tabela e pelo card). */
+  const derivar = (q: number) => {
+    const selected = manualAnswers[q] || null;
+    const correctAnswer = exam.answerKey?.[q];
+    const aiS = aiSuggestions[q];
+    const aiLetter = aiS?.suggestion && /^[ABCD]$/.test(aiS.suggestion) ? aiS.suggestion : null;
+    const isBlank = (result.blankQuestions ?? []).includes(q);
+    const isCorrect = selected && correctAnswer && selected === correctAnswer;
+    const isDuplicate = (result.duplicateQuestions ?? []).includes(q);
+    const isLowConf = (result.lowConfidence ?? []).includes(q);
+    const qMarks = result.duplicateMarks?.[q];
+    return { selected, correctAnswer, aiS, aiLetter, isBlank, isCorrect, isDuplicate, isLowConf, qMarks };
+  };
+
+  /** Situacao resumida para o card do celular: icone + texto. */
+  const situacaoCurta = (d: ReturnType<typeof derivar>) => {
+    if (d.selected) {
+      return d.isCorrect
+        ? { texto: 'Correta', cor: 'text-success-600 dark:text-success-100', icone: '✓' }
+        : { texto: 'Incorreta', cor: 'text-danger-600 dark:text-danger-100', icone: '✗' };
+    }
+    if (d.isDuplicate) {
+      return { texto: 'Incorreta', cor: 'text-danger-600 dark:text-danger-100', icone: '✗' };
+    }
+    return { texto: 'Em branco', cor: 'text-[#71809A] dark:text-gray-400', icone: '—' };
+  };
+
   return (
     <div className="card">
       <h3 className="text-lg font-semibold text-[#172B4D] dark:text-white mb-4">
@@ -162,7 +189,7 @@ export default function ManualReviewPanel({
                 <h4 className="text-sm font-bold text-[#172B4D] dark:text-gray-200 mb-2">
                   {getSubjectName(exam, sid)} (1–{end - start + 1})
                 </h4>
-                <div className="table-shell">
+                <div className="table-shell hidden md:block">
                   <div className="table-scroll">
                     <table className="w-full text-sm">
                       <thead className="bg-[#F8FAFF] dark:bg-gray-800">
@@ -180,16 +207,8 @@ export default function ManualReviewPanel({
                       </thead>
                       <tbody>
                         {Array.from({ length: exam.questionsPerSubject }, (_, i) => start + i).map((q) => {
-                          const selected = manualAnswers[q] || null;
-                          const correctAnswer = exam.answerKey?.[q];
-                          const aiS = aiSuggestions[q];
-                          const aiLetter = aiS?.suggestion && /^[ABCD]$/.test(aiS.suggestion)
-                            ? aiS.suggestion : null;
-                          const isBlank = (result.blankQuestions ?? []).includes(q);
-                          const isCorrect = selected && correctAnswer && selected === correctAnswer;
-                          const isDuplicate = (result.duplicateQuestions ?? []).includes(q);
-                          const isLowConf = (result.lowConfidence ?? []).includes(q);
-                          const qMarks = result.duplicateMarks?.[q];
+                          const { selected, correctAnswer, aiS, aiLetter, isBlank,
+                                  isCorrect, isDuplicate, isLowConf, qMarks } = derivar(q);
 
                           return (
                             <tr key={q} className={`border-b border-line/60 dark:border-gray-800 ${isLowConf || isDuplicate ? 'bg-warning-50 dark:bg-warning-500/10' : ''}`}>
@@ -267,6 +286,86 @@ export default function ManualReviewPanel({
                     </table>
                   </div>
                 </div>
+
+              {/* Celular: uma linha por questao, com bolas de 44px. A tabela
+                  de 9 colunas (Q/A/B/C/D/Resposta/IA/Gabarito/Resultado) nao
+                  cabia em 390px: so Q..D apareciam e as bolas tinham 32px.
+                  O restante continua na tabela (md+). */}
+              <div className="space-y-2 md:hidden">
+                {Array.from({ length: exam.questionsPerSubject }, (_, i) => start + i).map((q) => {
+                  const d = derivar(q);
+                  const st = situacaoCurta(d);
+                  const temIa = !!d.aiLetter && d.aiLetter !== d.selected;
+                  return (
+                    <div
+                      key={q}
+                      className={`rounded-[12px] border p-2 ${
+                        d.isLowConf || d.isDuplicate
+                          ? 'border-warning-500/40 bg-warning-50 dark:bg-warning-500/10'
+                          : 'border-line bg-white dark:border-gray-800 dark:bg-gray-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="w-7 shrink-0 text-sm font-bold text-[#172B4D] dark:text-gray-200">
+                          {String(q - start + 1).padStart(2, '0')}
+                        </span>
+
+                        <div className="flex flex-1 items-center justify-between gap-1">
+                          {['A', 'B', 'C', 'D'].map((opt) => {
+                            const marcada = d.selected === opt;
+                            const suspeita = d.isDuplicate && !d.selected && d.qMarks?.includes(opt);
+                            return (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => onAnswer(q, opt)}
+                                aria-label={`Questao ${q - start + 1}, alternativa ${opt}`}
+                                aria-pressed={marcada}
+                                title={suspeita ? `Aluno marcou ${opt}` : undefined}
+                                className={`bubble-option bubble-option--touch text-sm ${
+                                  marcada ? 'selected' : suspeita ? 'marked' : ''
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <span
+                          className={`w-6 shrink-0 text-center text-base font-bold ${st.cor}`}
+                          role="img"
+                          aria-label={st.texto}
+                          title={st.texto}
+                        >
+                          {st.icone}
+                        </span>
+                      </div>
+
+                      {(temIa || (d.isDuplicate && !d.selected)) && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 pl-10">
+                          {temIa && (
+                            <button
+                              type="button"
+                              onClick={() => onApplyAi(q, d.aiLetter!)}
+                              className="rounded-[8px] border border-brand-500 px-2 py-1 text-[11px] font-semibold text-brand-700 dark:text-brand-200"
+                              title={`IA sugeriu ${d.aiLetter} (${Math.round((d.aiS?.confidence ?? 0) * 100)}%) — toque para aplicar`}
+                            >
+                              Sugestao IA: {d.aiLetter}
+                            </button>
+                          )}
+                          {d.isDuplicate && !d.selected && (
+                            <span className="text-[11px] text-danger-600 dark:text-danger-100">
+                              marcou {d.qMarks?.length ? d.qMarks.join(' e ') : 'duas alternativas'}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
               </div>
             );
           })}

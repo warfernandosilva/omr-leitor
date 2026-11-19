@@ -122,6 +122,12 @@ conferência) a barra de atalhos sai da tela — ela flutua sobre o conteúdo e
 cobria as últimas questões da conferência. A navegação continua disponível pelo
 menu (hambúrguer) e pela busca do topo. Nas demais telas ela segue aparecendo.
 
+**Conferência no celular:** a tabela de 9 colunas (Q, A, B, C, D, Resposta,
+IA, Gabarito, Resultado) cabe a partir de `md`; no celular cada questão vira
+uma linha compacta com as quatro alternativas em bolas de 44px e a situação
+(✓ correta, ✗ incorreta, — em branco). Sugestão da IA e marcação duplicada
+continuam acessíveis na mesma linha. Sem rolagem horizontal.
+
 1. Usuário escolhe a prova e envia foto/arquivo.
 2. Backend decodifica a imagem e escolhe o leitor pelo tipo do cartão.
 3. Backend retifica, lê bolhas, QR, matrícula e classifica:

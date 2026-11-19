@@ -63,6 +63,9 @@ Fonte principal: **Inter**.
 - `AlunoEditModal` (edição de aluno do catálogo)
 - `ManageExamPage` — "Alunos e notas por prova": cards de conclusão, filtro
   "Falta corrigir", busca e tabela nominal (QR, status, nota)
+- Conferência no celular: `ManualReviewPanel` troca a tabela de 9 colunas por
+  uma linha por questão (bolas `.bubble-option--touch`, 44px + situação);
+  `.bubble-option--touch` é o modificador de alvo de toque confortável
   
 ### Ciclo de vida da avaliação (telas novas)
 

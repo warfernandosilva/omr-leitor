@@ -249,6 +249,12 @@
 }.bubble-option.selected {
   @apply border-brand-500 bg-brand-500 text-white;
 }
+/* Alvo de toque confortável no celular (44px): usado na conferência em
+   formato de card, onde a tabela não cabe. Precisa de modificador proprio
+   porque as utilities w-11/h-11 não vencem o tamanho base desta classe. */
+.bubble-option--touch {
+  @apply w-11 h-11;
+}
 .bubble-option.marked {
   @apply border-red-500 bg-red-100 text-red-700;
 }
