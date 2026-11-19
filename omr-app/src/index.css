@@ -5,6 +5,10 @@
 @layer base {
   * { @apply border-line dark:border-gray-800; }
   body { @apply bg-[#F4F7FD] text-[#172B4D] antialiased dark:bg-gray-950 dark:text-gray-100; }
+  /* A barra inferior (mobile) flutua sobre o conteúdo: o scroll automático
+     (foco em campo, scrollIntoView) nunca deve parar com o elemento debaixo
+     dela — 6rem cobre a altura da barra + o descolamento das bordas. */
+  html { scroll-padding-bottom: 6rem; }
   :focus-visible { @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-white dark:ring-offset-gray-950; }
 }
 

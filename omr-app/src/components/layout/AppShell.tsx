@@ -41,13 +41,20 @@ export default function AppShell({
           onNavigate={onNavigate}
           onOpenMenu={onOpenDrawer}
         />
-        <main className="pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-0">
+        {/* Na leitura/correção a barra inferior sai: ela flutua sobre o
+            conteúdo e cobria as últimas questões da conferência no celular —
+            a navegação continua disponível pelo menu e pelo topo. */}
+        <main className={
+          currentView === 'correct-card'
+            ? 'lg:pb-0'
+            : 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-0'
+        }>
           <div className={`p-4 md:p-6 lg:p-7 animate-fade-in ${wide ? 'w-full' : 'mx-auto w-full max-w-[1440px]'}`}>
             {children}
           </div>
         </main>
       </div>
-      <BottomNav currentView={currentView} onNavigate={onNavigate} />
+      {currentView !== 'correct-card' && <BottomNav currentView={currentView} onNavigate={onNavigate} />}
       {drawerOpen && (
         <div className="fixed inset-0 bg-navy-950/40 backdrop-blur-sm z-40 lg:hidden" onClick={onCloseDrawer} aria-hidden />
       )}

@@ -117,6 +117,11 @@ Na lista, o filtro **"Falta corrigir (N)"** mostra só os cartões sem nota
 (inclusive os já lidos que aguardam correção), com busca por aluno, matrícula
 ou QR e o atalho "Corrigir os N que faltam" para a leitura.
 
+**Barra inferior no celular:** durante a **Nova leitura** (captura e
+conferência) a barra de atalhos sai da tela — ela flutua sobre o conteúdo e
+cobria as últimas questões da conferência. A navegação continua disponível pelo
+menu (hambúrguer) e pela busca do topo. Nas demais telas ela segue aparecendo.
+
 1. Usuário escolhe a prova e envia foto/arquivo.
 2. Backend decodifica a imagem e escolhe o leitor pelo tipo do cartão.
 3. Backend retifica, lê bolhas, QR, matrícula e classifica:
