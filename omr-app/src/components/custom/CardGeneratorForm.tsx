@@ -2,23 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import type { ReactNode } from 'react';
 import {
   AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, CircleDot,
-  Crosshair, Eye, EyeOff, FileDown, FileText, Focus, Grid3x3, Info, LayoutGrid,
-  Layers, ListChecks, Loader2, Lock, Maximize2, MessageSquare, Minus, PanelLeft,
-  PanelRight, Plus, QrCode, Redo2, RefreshCw, RotateCcw, Ruler, ShieldCheck,
-  Sparkles, Trash2, Type, Undo2, Unlock, X, ZoomIn, ZoomOut,
+  Copy, Crosshair, Eye, EyeOff, FileDown, FileText, Focus, Grid3x3, Info, LayoutGrid,
+  Layers, ListChecks, Loader2, Lock, Maximize2, MessageSquare, Minus, MousePointer2,
+  Move, PanelLeft, PanelRight, Plus, QrCode, Redo2, RefreshCw, RotateCcw, Ruler,
+  Scaling, ShieldCheck, Sparkles, Trash2, Type, Undo2, Unlock, X, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import type { Exam } from '../../types';
 import { syncExam } from '../../utils/api';
 import {
+  activateCustomTemplate,
   generateCustomTemplateFromSpec,
   previewGeneratedCard,
   type CardBlockSpec,
   type CardElementSpec,
   type CardSpec,
+  type CornerName,
   type CustomTemplateDetail,
   type GeneratePreviewResult,
 } from '../../utils/custom-template-api';
-import { snapDelta, clampRect, type Rect } from '../../utils/custom-template-edit';
+import { type Rect } from '../../utils/custom-template-edit';
+import {
+  clampRectMm, findSnapMm, fitZoom, resizeRectMm, rulerTicks, snapResizeMm,
+  snapToGridWithin, squareResizeMm, zoomStep, GRID_MM, MM_PX,
+  type RectMm,
+} from '../../utils/sheet-geometry';
 import { useToast } from '../ui/Toast';
 import Field from '../ui/Field';
 import Input from '../ui/Input';
@@ -158,14 +165,16 @@ const STARTERS: Starter[] = [
   },
   {
     kind: 'blank',
-    title: 'Folha em branco',
-    desc: 'Comece do zero e monte do seu jeito.',
+    title: 'Padrão livre',
+    desc: 'A4 com 20 questões e identificação livre.',
     tag: 'Livre',
     name: 'Cartão-resposta',
     spec: {
       title: 'Cartão-resposta',
       subtitle: '',
-      fields: ['student_name'],
+      // O modelo "livre" evita campos/instruções fixos: tudo pode ser
+      // adicionado depois no editor, mas o cartão continua válido sozinho.
+      fields: [],
       instructions: '',
       bubble_mm: 5,
       columns: 1,
@@ -178,13 +187,23 @@ const STARTERS: Starter[] = [
 
 type Step = 1 | 2 | 3;
 type PropsTab = 'geral' | 'questoes' | 'elementos' | 'pagina';
-type Selection = { kind: 'block' | 'element'; index: number } | null;
+type SelectionKind = 'block' | 'element' | 'anchor' | 'qr';
+type Selection = { kind: SelectionKind; index: number };
+type ToolMode = 'select' | 'move' | 'resize';
 type ResizeDir = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
-const COMPACT = '!min-h-[38px] !py-1.5 text-xs';
-const PAGE_BASE_PX = 560;
+const ANCHOR_CORNERS: CornerName[] = ['TL', 'TR', 'BR', 'BL'];
 
-const STEP_LABELS = ['Carregar documento', 'Identificar elementos', 'Validar e ativar'];
+const ANCHOR_LABELS: Record<CornerName, string> = {
+  TL: 'Âncora superior esquerda',
+  TR: 'Âncora superior direita',
+  BR: 'Âncora inferior direita',
+  BL: 'Âncora inferior esquerda',
+};
+
+const COMPACT = '!min-h-[38px] !py-1.5 text-xs';
+
+const STEP_LABELS = ['Modelo inicial', 'Editor da folha', 'Validar e gerar'];
 
 const PROPS_TABS: { id: PropsTab; label: string }[] = [
   { id: 'geral', label: 'Documento' },
@@ -198,39 +217,46 @@ interface Snapshot {
   nome: string;
 }
 
+interface DragItem {
+  kind: SelectionKind;
+  index: number;
+  /** Retângulo de partida, em milímetros. */
+  rect: RectMm;
+}
+
 type DragState =
   | {
-      kind: 'element';
-      index: number;
+      kind: 'move';
       startX: number;
       startY: number;
-      origX: number;
-      origY: number;
-      origW: number;
-      origH: number;
-    }
-  | {
-      kind: 'block';
-      index: number;
-      startX: number;
-      startY: number;
-      origX: number;
-      origY: number;
-      origW: number;
-      origH: number;
+      items: DragItem[];
+      orig: RectMm;
       moved?: boolean;
     }
   | {
       kind: 'resize';
-      index: number;
+      target: Selection;
       dir: ResizeDir;
       startX: number;
       startY: number;
-      origX: number;
-      origY: number;
-      origW: number;
-      origH: number;
+      orig: RectMm;
       moved?: boolean;
+    }
+  | {
+      kind: 'marquee';
+      startX: number;
+      startY: number;
+      start: RectMm;
+      additive: boolean;
+      moved?: boolean;
+      box?: RectMm;
+    }
+  | {
+      kind: 'pan';
+      startX: number;
+      startY: number;
+      scrollLeft: number;
+      scrollTop: number;
     };
 
 // ─── Auxiliares ───────────────────────────────────────────────────────────────
@@ -294,6 +320,50 @@ function blockName(block: CardBlockSpec, index: number): string {
   const start = block.start_question ?? 1;
   const n = block.n_questions ?? 0;
   return `Bloco ${index + 1} · ${start}–${start + Math.max(0, n - 1)}`;
+}
+
+/** Um bloco tem posição livre quando todas as quatro medidas estão definidas. */
+function hasBlockPos(b: CardBlockSpec): b is CardBlockSpec & {
+  x_mm: number; y_mm: number; w_mm: number; h_mm: number;
+} {
+  return b.x_mm != null && b.y_mm != null && b.w_mm != null && b.h_mm != null;
+}
+
+/** Remove um item da seleção e reindexa os que vinham depois dele. */
+function dropFromSelection(list: Selection[], kind: 'block' | 'element', index: number): Selection[] {
+  return list
+    .filter((s) => !(s.kind === kind && s.index === index))
+    .map((s) => (s.kind === kind && s.index > index ? { ...s, index: s.index - 1 } : s));
+}
+
+/** Digitação em campo de formulário não deve disparar atalhos do editor. */
+function isTypingTarget(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName?.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable;
+}
+
+const round4 = (v: number) => Math.round(v * 10000) / 10000;
+
+function rectsIntersect(a: RectMm, b: RectMm): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function mergeSelection(base: Selection[], extra: Selection[]): Selection[] {
+  const out = [...base];
+  for (const item of extra) {
+    if (!out.some((s) => s.kind === item.kind && s.index === item.index)) out.push(item);
+  }
+  return out;
+}
+
+function bboxOf(rects: RectMm[]): RectMm {
+  const x = Math.min(...rects.map((r) => r.x));
+  const y = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.w));
+  const bottom = Math.max(...rects.map((r) => r.y + r.h));
+  return { x, y, w: right - x, h: bottom - y };
 }
 
 // ─── Componentes internos ─────────────────────────────────────────────────────
@@ -404,18 +474,8 @@ function ToolButton({
 }
 
 function MiniPage({ kind }: { kind: StarterKind }) {
-  if (kind === 'blank') {
-    return (
-      <div className="flex h-full w-full items-center justify-center rounded-md border border-dashed border-gray-300 bg-white/70 dark:border-gray-600 dark:bg-gray-900/40">
-        <span className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-gray-300 text-gray-400 dark:border-gray-600">
-          <Plus size={22} aria-hidden />
-        </span>
-      </div>
-    );
-  }
-
   const options = kind === 'survey' ? 5 : kind === 'exam' ? 5 : 4;
-  const columns = kind === 'survey' ? 1 : kind === 'exam' ? 3 : 2;
+  const columns = kind === 'survey' || kind === 'blank' ? 1 : kind === 'exam' ? 3 : 2;
   const rows = kind === 'survey' ? 8 : kind === 'exam' ? 9 : 7;
 
   return (
@@ -768,7 +828,10 @@ export default function CardGeneratorForm({
   const [showMargin, setShowMargin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const [selected, setSelected] = useState<Selection>(null);
+  const [selection, setSelection] = useState<Selection[]>([]);
+  const [tool, setTool] = useState<ToolMode>('select');
+  const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
+  const [marquee, setMarquee] = useState<RectMm | null>(null);
   const [propsTab, setPropsTab] = useState<PropsTab>('geral');
   const [rulers, setRulers] = useState(true);
   const [grid, setGrid] = useState(false);
@@ -798,14 +861,24 @@ export default function CardGeneratorForm({
   const margin = spec.margin_mm ?? 10;
   const totalQuestions = blocks.reduce((sum, b) => sum + (b.n_questions ?? 0), 0);
 
-  const displayW = Math.round(PAGE_BASE_PX * zoom);
-  const displayH = Math.round(displayW * (pageH / pageW));
-  const pxPerMm = displayW / pageW;
+  // A folha é desenhada em milímetros reais (96 dpi) e o zoom é só escala.
+  const displayW = pageW * MM_PX * zoom;
+  const displayH = pageH * MM_PX * zoom;
+  const pxPerMm = MM_PX * zoom;
 
-  const selectedBlockIndex = selected?.kind === 'block' && selected.index < blocks.length
-    ? selected.index : null;
-  const selectedElementIndex = selected?.kind === 'element' && selected.index < elements.length
-    ? selected.index : null;
+  const primary = selection.length ? selection[selection.length - 1] : null;
+  const selectedBlockIndex = primary?.kind === 'block' && primary.index < blocks.length
+    ? primary.index : null;
+  const selectedElementIndex = primary?.kind === 'element' && primary.index < elements.length
+    ? primary.index : null;
+  const selectedAnchorIndex = primary?.kind === 'anchor' && primary.index < ANCHOR_CORNERS.length
+    ? primary.index : null;
+  const selectedQr = primary?.kind === 'qr';
+  const isSelected = useCallback(
+    (kind: SelectionKind, index: number) =>
+      selection.some((s) => s.kind === kind && s.index === index),
+    [selection],
+  );
 
   // ─── Histórico ─────────────────────────────────────────────────────────────
 
@@ -813,9 +886,9 @@ export default function CardGeneratorForm({
     const now = Date.now();
     const same = coalesce
       && lastCoalesce.current?.key === coalesce
-      && now - lastCoalesce.current.at < 900;
+      && now - lastCoalesce.current.at < 950;
     if (!same) {
-      past.current = [...past.current.slice(-79), { spec, nome }];
+      past.current = [...past.current.slice(-44), { spec, nome }];
       future.current = [];
       setHistoryTick((n) => n + 1);
     }
@@ -845,29 +918,14 @@ export default function CardGeneratorForm({
   const redo = useCallback(() => {
     const next = future.current.shift();
     if (!next) return;
-    past.current = [...past.current.slice(-79), { spec, nome }];
+    past.current = [...past.current.slice(-44), { spec, nome }];
     setSpec(next.spec);
     setNome(next.nome);
     lastCoalesce.current = null;
     setHistoryTick((n) => n + 1);
   }, [spec, nome]);
 
-  useEffect(() => {
-    if (step !== 2) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey)) return;
-      const k = e.key.toLowerCase();
-      if (k === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) redo(); else undo();
-      } else if (k === 'y') {
-        e.preventDefault();
-        redo();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [step, undo, redo]);
+  // (Atalhos do editor: registrados depois que as ações estão definidas.)
 
   // ─── Prévia real ───────────────────────────────────────────────────────────
 
@@ -905,7 +963,10 @@ export default function CardGeneratorForm({
     });
     setNome(starter.name);
     setExamId('');
-    setSelected(null);
+    setSelection([]);
+    setTool('select');
+    setGuides({ x: [], y: [] });
+    setMarquee(null);
     setPropsTab('geral');
     setZoom(1);
     fittedRef.current = false;
@@ -926,8 +987,18 @@ export default function CardGeneratorForm({
       const d = await generateCustomTemplateFromSpec(
         spec, nome.trim() || 'Cartão-resposta', exam?.id,
       );
-      notify('Cartão gerado e pronto para ler.', 'success');
-      onCreated(d);
+      // O botão promete ativar: gerar só grava como validado/rascunho.
+      try {
+        const act = await activateCustomTemplate(d.id);
+        notify('Cartão gerado e ativado.', 'success');
+        onCreated({ ...d, status: act.status as CustomTemplateDetail['status'] });
+      } catch (e) {
+        notify(
+          `Cartão gerado, mas não foi possível ativar: ${e instanceof Error ? e.message : 'erro desconhecido'}`,
+          'info',
+        );
+        onCreated(d);
+      }
     } catch (e) {
       notify(e instanceof Error ? e.message : 'Falha ao gerar o cartão', 'error');
     } finally {
@@ -963,7 +1034,17 @@ export default function CardGeneratorForm({
         delete next.h_mm;
         return next;
       }),
+      // Posições em mm não fazem sentido no novo formato/tamanho de página.
+      anchor_layout: undefined,
+      qr_layout: undefined,
     }));
+  };
+
+  const resetCodePositions = () => {
+    pushHistory();
+    setSpec((prev) => ({ ...prev, anchor_layout: undefined, qr_layout: undefined }));
+    setSelection([]);
+    notify('Âncoras e QR voltaram às posições padrão.', 'info');
   };
 
   const resetBlockPositions = () => {
@@ -984,11 +1065,8 @@ export default function CardGeneratorForm({
 
   // ─── Blocos e elementos ────────────────────────────────────────────────────
 
-  const hasBlockPos = (b: CardBlockSpec) =>
-    b.x_mm != null && b.y_mm != null && b.w_mm != null && b.h_mm != null;
-
   /** Congela o layout automático dos blocos (mm) antes de uma edição livre. */
-  const freezeBlockPositions = (list: CardBlockSpec[]): CardBlockSpec[] =>
+  const freezeBlockPositions = useCallback((list: CardBlockSpec[]): CardBlockSpec[] =>
     list.map((b, i) => {
       if (hasBlockPos(b)) return b;
       const l = preview?.layout?.find((item) => item.index === i);
@@ -1000,18 +1078,56 @@ export default function CardGeneratorForm({
         w_mm: l.w_mm,
         h_mm: l.h_mm,
       };
-    });
+    }), [preview]);
 
   const blockBounds = useCallback((index: number): Rect & { w: number; h: number } | null => {
     const b = blocks[index];
     if (!b) return null;
     if (hasBlockPos(b)) {
-      return { x: b.x_mm!, y: b.y_mm!, w: b.w_mm!, h: b.h_mm! };
+      return { x: b.x_mm, y: b.y_mm, w: b.w_mm, h: b.h_mm };
     }
     const l = preview?.layout?.find((item) => item.index === index);
     if (!l) return null;
     return { x: l.x_mm, y: l.y_mm, w: l.w_mm, h: l.h_mm };
   }, [blocks, preview]);
+
+  /** Retângulo da âncora (mm): layout do spec, prévia ou canto padrão. */
+  const anchorRectMm = useCallback((corner: CornerName): RectMm | null => {
+    if (spec.anchors === false) return null;
+    const local = spec.anchor_layout?.[corner];
+    if (local) {
+      return { x: local.x_mm, y: local.y_mm, w: local.size_mm, h: local.size_mm };
+    }
+    const fromPreview = preview?.anchors_layout?.find((a) => a.corner === corner);
+    if (fromPreview) {
+      return { x: fromPreview.x_mm, y: fromPreview.y_mm, w: fromPreview.size_mm, h: fromPreview.size_mm };
+    }
+    const size = spec.anchor_mm ?? 10;
+    const m = spec.margin_mm ?? 10;
+    return {
+      x: corner === 'TL' || corner === 'BL' ? m : pageW - m - size,
+      y: corner === 'TL' || corner === 'TR' ? m : pageH - m - size,
+      w: size,
+      h: size,
+    };
+  }, [spec.anchors, spec.anchor_layout, spec.anchor_mm, spec.margin_mm, preview, pageW, pageH]);
+
+  /** Retângulo do QR (mm): layout do spec, prévia ou canto superior direito. */
+  const qrRectMm = useCallback((): RectMm | null => {
+    if (spec.qr === false) return null;
+    const local = spec.qr_layout;
+    if (local) {
+      return { x: local.x_mm, y: local.y_mm, w: local.w_mm, h: local.h_mm };
+    }
+    const fromPreview = preview?.qr_layout;
+    if (fromPreview) {
+      return { x: fromPreview.x_mm, y: fromPreview.y_mm, w: fromPreview.w_mm, h: fromPreview.h_mm };
+    }
+    const size = spec.qr_mm ?? 22;
+    const m = spec.margin_mm ?? 10;
+    const pad = spec.anchors === false ? 0 : (spec.anchor_mm ?? 10) + 3;
+    return { x: pageW - m - pad - size, y: m + pad, w: size, h: size };
+  }, [spec.qr, spec.qr_layout, spec.qr_mm, spec.anchors, spec.anchor_mm, spec.margin_mm, preview, pageW]);
 
   const toggleField = (source: string) => {
     const cur = spec.fields ?? [];
@@ -1048,7 +1164,7 @@ export default function CardGeneratorForm({
           : {}),
       }],
     });
-    setSelected({ kind: 'block', index: newIndex });
+    setSelection([{ kind: 'block', index: newIndex }]);
     setPropsTab('questoes');
   };
 
@@ -1059,9 +1175,7 @@ export default function CardGeneratorForm({
   const removeBlock = (index: number) => {
     if (blocks.length <= 1) return;
     mutate({ blocks: blocks.filter((_, i) => i !== index) }, 'blocks');
-    if (selectedBlockIndex != null && selectedBlockIndex >= index) {
-      setSelected(selectedBlockIndex === index ? null : { kind: 'block', index: selectedBlockIndex - 1 });
-    }
+    setSelection((prev) => dropFromSelection(prev, 'block', index));
   };
 
   const addElement = (kind: CardElementSpec['kind']) => {
@@ -1070,7 +1184,7 @@ export default function CardGeneratorForm({
       : { kind, x: 0.08, y: 0.5, w: 0.84, h: 0.006 };
     const newIndex = elements.length;
     mutate({ elements: [...elements, base] }, 'elements');
-    setSelected({ kind: 'element', index: newIndex });
+    setSelection([{ kind: 'element', index: newIndex }]);
     setPropsTab('elementos');
   };
 
@@ -1080,20 +1194,191 @@ export default function CardGeneratorForm({
 
   const removeElement = (index: number) => {
     mutate({ elements: elements.filter((_, i) => i !== index) }, 'elements');
-    if (selectedElementIndex != null && selectedElementIndex >= index) {
-      setSelected(selectedElementIndex === index ? null : { kind: 'element', index: selectedElementIndex - 1 });
-    }
+    setSelection((prev) => dropFromSelection(prev, 'element', index));
   };
 
-  const selectBlock = (index: number) => {
-    setSelected({ kind: 'block', index });
+  /**
+   * Resolve a seleção depois de um clique. Sem Shift, clicar num item já
+   * selecionado mantém a seleção múltipla (para arrastar o grupo, como no
+   * protótipo); com Shift, alterna o item.
+   */
+  const resolveSelection = (item: Selection, additive: boolean): Selection[] => {
+    const exists = isSelected(item.kind, item.index);
+    if (additive) {
+      return exists
+        ? selection.filter((s) => !(s.kind === item.kind && s.index === item.index))
+        : [...selection, item];
+    }
+    return exists ? selection : [item];
+  };
+
+  const selectBlock = (index: number, additive = false) => {
+    setSelection(resolveSelection({ kind: 'block', index }, additive));
     setPropsTab('questoes');
   };
 
-  const selectElement = (index: number) => {
-    setSelected({ kind: 'element', index });
+  const selectElement = (index: number, additive = false) => {
+    setSelection(resolveSelection({ kind: 'element', index }, additive));
     setPropsTab('elementos');
   };
+
+  const clearSelection = useCallback(() => setSelection([]), []);
+
+  const selectAll = useCallback(() => {
+    const all: Selection[] = [];
+    blocks.forEach((b, index) => {
+      if (!b.hidden) all.push({ kind: 'block', index });
+    });
+    elements.forEach((el, index) => {
+      if (!el.hidden) all.push({ kind: 'element', index });
+    });
+    if (spec.anchors !== false) {
+      ANCHOR_CORNERS.forEach((_, index) => all.push({ kind: 'anchor', index }));
+    }
+    if (spec.qr !== false) all.push({ kind: 'qr', index: 0 });
+    setSelection(all);
+  }, [blocks, elements, spec.anchors, spec.qr]);
+
+  const deleteSelection = useCallback(() => {
+    if (!selection.length) return;
+    const blockIdx = new Set(selection.filter((s) => s.kind === 'block').map((s) => s.index));
+    const elementIdx = new Set(selection.filter((s) => s.kind === 'element').map((s) => s.index));
+    // Âncoras e QR não são excluídos — desligue-os no painel de elementos.
+    if (!blockIdx.size && !elementIdx.size) return;
+    // O cartão precisa de pelo menos um bloco visível para ter questões.
+    const visibleLeft = blocks.filter((b, i) => !blockIdx.has(i) && !b.hidden).length;
+    if (visibleLeft === 0 && blocks.some((b) => !b.hidden)) {
+      notify('Mantenha pelo menos um bloco visível para o cartão ter questões.', 'info');
+      return;
+    }
+    pushHistory();
+    setSpec((prev) => ({
+      ...prev,
+      blocks: (prev.blocks ?? []).filter((_, i) => !blockIdx.has(i)),
+      elements: (prev.elements ?? []).filter((_, i) => !elementIdx.has(i)),
+    }));
+    setSelection([]);
+  }, [selection, blocks, notify, pushHistory]);
+
+  const duplicateSelection = useCallback(() => {
+    if (!selection.length) return;
+    const OFFSET = 4;
+    const frozen = freezeBlockPositions(blocks);
+    const blockAdds: CardBlockSpec[] = [];
+    const elementAdds: CardElementSpec[] = [];
+    const blockStart = frozen.length;
+    const elementStart = elements.length;
+
+    for (const item of selection) {
+      if (item.kind === 'block') {
+        const b = frozen[item.index];
+        const g = blockBounds(item.index);
+        if (!b || !g) continue;
+        blockAdds.push({
+          ...b,
+          title: b.title ? `${b.title} (cópia)` : b.title,
+          x_mm: round1(clamp(g.x + OFFSET, 0, Math.max(0, pageW - g.w))),
+          y_mm: round1(clamp(g.y + OFFSET, 0, Math.max(0, pageH - g.h))),
+          w_mm: round1(g.w),
+          h_mm: round1(g.h),
+        });
+      } else if (item.kind === 'element') {
+        const el = elements[item.index];
+        if (!el) continue;
+        elementAdds.push({
+          ...el,
+          x: round4(clamp(el.x + OFFSET / pageW, 0, Math.max(0, 1 - el.w))),
+          y: round4(clamp(el.y + OFFSET / pageH, 0, Math.max(0, 1 - el.h))),
+        });
+      }
+    }
+
+    if (!blockAdds.length && !elementAdds.length) return;
+    pushHistory();
+    setSpec((prev) => ({
+      ...prev,
+      // Congela também os originais: o backend só respeita posições livres
+      // quando TODOS os blocos têm x/y (senão volta ao fluxo automático).
+      blocks: [...frozen, ...blockAdds],
+      elements: [...(prev.elements ?? []), ...elementAdds],
+    }));
+    setSelection([
+      ...blockAdds.map((_, k) => ({ kind: 'block' as const, index: blockStart + k })),
+      ...elementAdds.map((_, k) => ({ kind: 'element' as const, index: elementStart + k })),
+    ]);
+  }, [selection, blocks, elements, freezeBlockPositions, blockBounds, pageW, pageH, pushHistory]);
+
+  /** Move a seleção com as setas: 0,5 mm (5 mm com Shift), como no protótipo. */
+  const nudgeSelection = useCallback((
+    key: 'arrowleft' | 'arrowright' | 'arrowup' | 'arrowdown',
+    stepMm: number,
+  ) => {
+    if (!selection.length) return;
+    const dx = key === 'arrowleft' ? -stepMm : key === 'arrowright' ? stepMm : 0;
+    const dy = key === 'arrowup' ? -stepMm : key === 'arrowdown' ? stepMm : 0;
+    const blockIdx = new Set(selection.filter((s) => s.kind === 'block').map((s) => s.index));
+    const elementIdx = new Set(selection.filter((s) => s.kind === 'element').map((s) => s.index));
+    const anchorIdx = new Set(selection.filter((s) => s.kind === 'anchor').map((s) => s.index));
+    const moveQr = selection.some((s) => s.kind === 'qr');
+    const anchorStarts = new Map<number, RectMm>();
+    for (const i of anchorIdx) {
+      const corner = ANCHOR_CORNERS[i];
+      const r = corner ? anchorRectMm(corner) : null;
+      if (r) anchorStarts.set(i, r);
+    }
+    const qrStart = moveQr ? qrRectMm() : null;
+
+    pushHistory(`nudge-${key}`);
+    setSpec((prev) => {
+      const moveBlocks = blockIdx.size > 0;
+      const frozen = moveBlocks ? freezeBlockPositions(prev.blocks ?? []) : (prev.blocks ?? []);
+      let anchorLayout = prev.anchor_layout;
+      if (anchorStarts.size) {
+        anchorLayout = { ...(prev.anchor_layout ?? {}) };
+        for (const [i, r] of anchorStarts) {
+          const corner = ANCHOR_CORNERS[i];
+          if (!corner) continue;
+          anchorLayout[corner] = {
+            x_mm: round1(clamp(r.x + dx, 0, Math.max(0, pageW - r.w))),
+            y_mm: round1(clamp(r.y + dy, 0, Math.max(0, pageH - r.h))),
+            size_mm: round1(r.w),
+          };
+        }
+      }
+      const qrLayout = qrStart
+        ? {
+            x_mm: round1(clamp(qrStart.x + dx, 0, Math.max(0, pageW - qrStart.w))),
+            y_mm: round1(clamp(qrStart.y + dy, 0, Math.max(0, pageH - qrStart.h))),
+            w_mm: round1(qrStart.w),
+            h_mm: round1(qrStart.h),
+          }
+        : prev.qr_layout;
+      return {
+        ...prev,
+        anchor_layout: anchorLayout,
+        qr_layout: qrLayout,
+        blocks: moveBlocks
+          ? frozen.map((b, i) => {
+              if (!blockIdx.has(i) || b.x_mm == null || b.y_mm == null) return b;
+              return {
+                ...b,
+                x_mm: round1(clamp(b.x_mm + dx, 0, Math.max(0, pageW - (b.w_mm ?? 0)))),
+                y_mm: round1(clamp(b.y_mm + dy, 0, Math.max(0, pageH - (b.h_mm ?? 0)))),
+              };
+            })
+          : prev.blocks,
+        elements: (prev.elements ?? []).map((el, i) => (
+          elementIdx.has(i)
+            ? {
+                ...el,
+                x: round4(clamp(el.x + dx / pageW, 0, Math.max(0, 1 - el.w))),
+                y: round4(clamp(el.y + dy / pageH, 0, Math.max(0, 1 - el.h))),
+              }
+            : el
+        )),
+      };
+    });
+  }, [selection, pushHistory, freezeBlockPositions, pageW, pageH, anchorRectMm, qrRectMm]);
 
   // ─── Camadas ───────────────────────────────────────────────────────────────
 
@@ -1110,9 +1395,12 @@ export default function CardGeneratorForm({
       [next[index], next[target]] = [next[target], next[index]];
       mutate({ elements: next }, 'layer-element');
     }
-    if (selected?.kind === kind && selected.index === index) {
-      setSelected({ kind, index: target });
-    }
+    setSelection((prev) => prev.map((s) => {
+      if (s.kind !== kind) return s;
+      if (s.index === index) return { ...s, index: target };
+      if (s.index === target) return { ...s, index };
+      return s;
+    }));
   };
 
   const toggleLayer = (kind: 'block' | 'element', index: number) => {
@@ -1138,197 +1426,513 @@ export default function CardGeneratorForm({
     }
   };
 
-  // ─── Drag & drop no canvas ─────────────────────────────────────────────────
+  // ─── Geometria e arraste no canvas ─────────────────────────────────────────
 
-  const allRects = (exclude?: { kind: 'block' | 'element'; index: number }): Rect[] => {
-    const rects: Rect[] = [];
+  const elementRectMm = useCallback((el: CardElementSpec): RectMm => ({
+    x: el.x * pageW,
+    y: el.y * pageH,
+    w: el.w * pageW,
+    h: el.h * pageH,
+  }), [pageW, pageH]);
+
+  const visibleRectsMm = (exclude?: Set<string>): RectMm[] => {
+    const rects: RectMm[] = [];
     blocks.forEach((b, i) => {
-      if (exclude?.kind === 'block' && exclude.index === i) return;
-      if (b.hidden) return;
+      if (b.hidden || exclude?.has(`block:${i}`)) return;
       const g = blockBounds(i);
-      if (!g) return;
-      rects.push({ x: g.x / pageW, y: g.y / pageH, w: g.w / pageW, h: g.h / pageH });
+      if (g) rects.push(g);
     });
     elements.forEach((el, i) => {
-      if (exclude?.kind === 'element' && exclude.index === i) return;
-      if (el.hidden) return;
-      rects.push({ x: el.x, y: el.y, w: el.w, h: el.h });
+      if (el.hidden || exclude?.has(`element:${i}`)) return;
+      rects.push(elementRectMm(el));
     });
-    rects.push({ x: 0, y: 0, w: 1, h: 1 });
+    if (spec.anchors !== false) {
+      ANCHOR_CORNERS.forEach((corner, i) => {
+        if (exclude?.has(`anchor:${i}`)) return;
+        const g = anchorRectMm(corner);
+        if (g) rects.push(g);
+      });
+    }
+    if (spec.qr !== false && !exclude?.has('qr:0')) {
+      const g = qrRectMm();
+      if (g) rects.push(g);
+    }
     return rects;
   };
 
-  const applySnap = (
-    rect: Rect,
-    exclude: { kind: 'block' | 'element'; index: number },
-  ): Rect => {
-    if (!snap) return rect;
-    const s = snapDelta(rect, allRects(exclude));
-    return { ...rect, x: rect.x + s.dx, y: rect.y + s.dy };
+  /** Itens selecionados que podem ser arrastados agora (bloqueados ficam fora). */
+  const dragItemsFor = (list: Selection[]): DragItem[] => {
+    const items: DragItem[] = [];
+    for (const item of list) {
+      if (item.kind === 'block') {
+        const b = blocks[item.index];
+        const g = blockBounds(item.index);
+        if (!b || b.hidden || b.locked || !g) continue;
+        items.push({ kind: 'block', index: item.index, rect: { ...g } });
+      } else if (item.kind === 'element') {
+        const el = elements[item.index];
+        if (!el || el.hidden || el.locked) continue;
+        items.push({ kind: 'element', index: item.index, rect: elementRectMm(el) });
+      } else if (item.kind === 'anchor') {
+        const corner = ANCHOR_CORNERS[item.index];
+        const g = corner ? anchorRectMm(corner) : null;
+        if (g) items.push({ kind: 'anchor', index: item.index, rect: { ...g } });
+      } else if (item.kind === 'qr') {
+        const g = qrRectMm();
+        if (g) items.push({ kind: 'qr', index: 0, rect: { ...g } });
+      }
+    }
+    return items;
+  };
+
+  const applyMove = (items: DragItem[], dx: number, dy: number) => {
+    const blockRects = new Map<number, RectMm>();
+    const elementRects = new Map<number, RectMm>();
+    const anchorRects = new Map<number, RectMm>();
+    let qrRect: RectMm | null = null;
+    for (const item of items) {
+      const next = { ...item.rect, x: item.rect.x + dx, y: item.rect.y + dy };
+      if (item.kind === 'block') blockRects.set(item.index, next);
+      else if (item.kind === 'element') elementRects.set(item.index, next);
+      else if (item.kind === 'anchor') anchorRects.set(item.index, next);
+      else qrRect = next;
+    }
+    setSpec((prev) => {
+      const anchorLayout = anchorRects.size
+        ? { ...(prev.anchor_layout ?? {}) }
+        : prev.anchor_layout;
+      if (anchorLayout) {
+        for (const [i, r] of anchorRects) {
+          const corner = ANCHOR_CORNERS[i];
+          if (corner) {
+            anchorLayout[corner] = {
+              x_mm: round1(r.x),
+              y_mm: round1(r.y),
+              size_mm: round1(r.w),
+            };
+          }
+        }
+      }
+      return {
+        ...prev,
+        blocks: blockRects.size
+          ? (prev.blocks ?? []).map((b, i) => {
+              const n = blockRects.get(i);
+              return n ? { ...b, x_mm: round1(n.x), y_mm: round1(n.y) } : b;
+            })
+          : prev.blocks,
+        elements: elementRects.size
+          ? (prev.elements ?? []).map((el, i) => {
+              const n = elementRects.get(i);
+              return n
+                ? { ...el, x: round4(n.x / pageW), y: round4(n.y / pageH) }
+                : el;
+            })
+          : prev.elements,
+        anchor_layout: anchorLayout,
+        qr_layout: qrRect
+          ? {
+              x_mm: round1(qrRect.x),
+              y_mm: round1(qrRect.y),
+              w_mm: round1(qrRect.w),
+              h_mm: round1(qrRect.h),
+            }
+          : prev.qr_layout,
+      };
+    });
   };
 
   const onPagePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
+    if (!d) return;
+
+    if (d.kind === 'pan') {
+      const sc = canvasScrollRef.current;
+      if (!sc) return;
+      sc.scrollLeft = d.scrollLeft - (e.clientX - d.startX);
+      sc.scrollTop = d.scrollTop - (e.clientY - d.startY);
+      return;
+    }
+
     const rect = pageWrapRef.current?.getBoundingClientRect();
-    if (!d || !rect || rect.width === 0) return;
-
-    if (d.kind === 'element') {
-      const dx = (e.clientX - d.startX) / rect.width;
-      const dy = (e.clientY - d.startY) / rect.height;
-      let next = clampRect({
-        x: d.origX + dx,
-        y: d.origY + dy,
-        w: d.origW,
-        h: d.origH,
-      });
-      next = clampRect(applySnap(next, { kind: 'element', index: d.index }));
-      updateElement(d.index, { x: next.x, y: next.y }, `drag-el-${d.index}`);
-      return;
-    }
-
-    if (d.kind === 'block') {
-      const dx = (e.clientX - d.startX) / rect.width;
-      const dy = (e.clientY - d.startY) / rect.height;
-      let next = clampRect({
-        x: d.origX / pageW + dx,
-        y: d.origY / pageH + dy,
-        w: d.origW / pageW,
-        h: d.origH / pageH,
-      });
-      next = clampRect(applySnap(next, { kind: 'block', index: d.index }));
-      if (!d.moved) {
-        d.moved = true;
-        pushHistory(`drag-block-${d.index}`);
-        // Primeiro arraste congela o layout automático em mm para todos os
-        // blocos; antes disso o gerador continua reorganizando sozinho.
-        setSpec((prev) => ({ ...prev, blocks: freezeBlockPositions(prev.blocks ?? []) }));
-      }
-      setSpec((prev) => ({
-        ...prev,
-        blocks: (prev.blocks ?? []).map((b, i) => (
-          i === d.index
-            ? { ...b, x_mm: round1(next.x * pageW), y_mm: round1(next.y * pageH) }
-            : b
-        )),
-      }));
-      return;
-    }
+    if (!rect || rect.width === 0) return;
 
     const dxMm = ((e.clientX - d.startX) / rect.width) * pageW;
     const dyMm = ((e.clientY - d.startY) / rect.height) * pageH;
-    let x = d.origX;
-    let y = d.origY;
-    let w = d.origW;
-    let h = d.origH;
 
-    if (d.dir.includes('e')) w = d.origW + dxMm;
-    if (d.dir.includes('s')) h = d.origH + dyMm;
-    if (d.dir.includes('w')) { w = d.origW - dxMm; x = d.origX + dxMm; }
-    if (d.dir.includes('n')) { h = d.origH - dyMm; y = d.origY + dyMm; }
+    if (d.kind === 'marquee') {
+      const x1 = clamp(d.start.x, 0, pageW);
+      const y1 = clamp(d.start.y, 0, pageH);
+      const x2 = clamp(d.start.x + dxMm, 0, pageW);
+      const y2 = clamp(d.start.y + dyMm, 0, pageH);
+      const box: RectMm = {
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.abs(x2 - x1),
+        h: Math.abs(y2 - y1),
+      };
+      d.moved = box.w > 0.5 || box.h > 0.5;
+      d.box = box;
+      setMarquee(box);
+      return;
+    }
 
-    w = Math.max(32, w);
-    h = Math.max(20, h);
-    x = clamp(x, 0, Math.max(0, pageW - w));
-    y = clamp(y, 0, Math.max(0, pageH - h));
-    w = Math.min(w, pageW - x);
-    h = Math.min(h, pageH - y);
+    if (d.kind === 'move') {
+      let dx = dxMm;
+      let dy = dyMm;
+      if (e.shiftKey) {
+        if (Math.abs(dx) > Math.abs(dy)) dy = 0;
+        else dx = 0;
+      }
+      const bounded = clampRectMm(
+        { ...d.orig, x: d.orig.x + dx, y: d.orig.y + dy },
+        pageW,
+        pageH,
+      );
+      dx = bounded.x - d.orig.x;
+      dy = bounded.y - d.orig.y;
+
+      if (grid) {
+        // Com a grade visível o arraste trava nos quadradinhos de 5 mm. As
+        // guias de alinhamento ficam de fora para não contradizer a grade.
+        dx = snapToGridWithin(d.orig.x + dx, pageW - d.orig.w) - d.orig.x;
+        dy = snapToGridWithin(d.orig.y + dy, pageH - d.orig.h) - d.orig.y;
+        setGuides({ x: [], y: [] });
+      } else if (snap) {
+        const exclude = new Set(d.items.map((it) => `${it.kind}:${it.index}`));
+        const s = findSnapMm(
+          { ...d.orig, x: d.orig.x + dx, y: d.orig.y + dy },
+          visibleRectsMm(exclude),
+          pageW,
+          pageH,
+        );
+        dx += s.dx;
+        dy += s.dy;
+        setGuides({ x: s.guidesX, y: s.guidesY });
+      } else {
+        setGuides({ x: [], y: [] });
+      }
+
+      // O ímã nunca pode empurrar o grupo para fora da folha.
+      const finalBox = clampRectMm(
+        { ...d.orig, x: d.orig.x + dx, y: d.orig.y + dy },
+        pageW,
+        pageH,
+      );
+      dx = finalBox.x - d.orig.x;
+      dy = finalBox.y - d.orig.y;
+
+      if (!d.moved) {
+        d.moved = true;
+        pushHistory(`drag:${d.items.map((it) => `${it.kind}${it.index}`).join(',')}`);
+        // O primeiro arraste congela o layout automático em mm. Antes disso o
+        // gerador reorganiza os blocos sozinho a cada mudança.
+        setSpec((prev) => ({ ...prev, blocks: freezeBlockPositions(prev.blocks ?? []) }));
+      }
+      applyMove(d.items, dx, dy);
+      return;
+    }
+
+    // Redimensionamento (blocos 18×14 mm; elementos 2×2 mm; âncoras/QR
+    // quadrados com mínimo próprio).
+    const target = d.target;
+    const targetKind = target.kind;
+    const targetIndex = target.index;
+    const isBlock = targetKind === 'block';
+    const isAnchor = targetKind === 'anchor';
+    const isQr = targetKind === 'qr';
+    const minW = isBlock ? 18 : isAnchor ? 6 : isQr ? 10 : 2;
+    const minH = isBlock ? 14 : isAnchor ? 6 : isQr ? 10 : 2;
+    let next = resizeRectMm(d.orig, d.dir, dxMm, dyMm, minW, minH, pageW, pageH);
+
+    // Trava de proporção (Shift) e travamento na grade são mutuamente
+    // exclusivos: seguir a proporção exata deixa o retângulo fora dos
+    // quadradinhos, então a proporção tem prioridade.
+    const ratioLock = e.shiftKey && targetKind === 'element' && d.dir.length === 2 && d.orig.h > 0;
+    if (ratioLock) {
+      const ratio = d.orig.w / d.orig.h;
+      const h = next.w / ratio;
+      next = d.dir.includes('n')
+        ? { ...next, y: Math.max(0, d.orig.y + d.orig.h - h), h }
+        : { ...next, h };
+      next = clampRectMm(next, pageW, pageH);
+    } else if (grid) {
+      // Com a grade visível as alças encaixam nos quadradinhos de 5 mm; só a
+      // aresta que a alça mexe é movida, a oposta continua onde estava.
+      next = snapResizeMm(next, d.dir, minW, minH, pageW, pageH);
+    }
+
+    if (isAnchor || isQr) {
+      // Marcador ArUco e QR precisam continuar quadrados.
+      next = squareResizeMm(next, d.orig, d.dir, Math.max(minW, minH), pageW, pageH);
+    }
 
     if (!d.moved) {
       d.moved = true;
-      pushHistory(`resize-block-${d.index}`);
+      pushHistory(`resize:${targetKind}${targetIndex}`);
       setSpec((prev) => ({ ...prev, blocks: freezeBlockPositions(prev.blocks ?? []) }));
     }
-    setSpec((prev) => ({
-      ...prev,
-      blocks: (prev.blocks ?? []).map((b, i) => (
-        i === d.index
-          ? {
-              ...b,
-              x_mm: round1(x),
-              y_mm: round1(y),
-              w_mm: round1(w),
-              h_mm: round1(h),
-            }
-          : b
-      )),
-    }));
+    setSpec((prev) => {
+      if (isBlock) {
+        return {
+          ...prev,
+          blocks: (prev.blocks ?? []).map((b, i) => (
+            i === targetIndex
+              ? {
+                  ...b,
+                  x_mm: round1(next.x),
+                  y_mm: round1(next.y),
+                  w_mm: round1(next.w),
+                  h_mm: round1(next.h),
+                }
+              : b
+          )),
+        };
+      }
+      if (isAnchor) {
+        const corner = ANCHOR_CORNERS[targetIndex];
+        if (!corner) return prev;
+        return {
+          ...prev,
+          anchor_layout: {
+            ...(prev.anchor_layout ?? {}),
+            [corner]: {
+              x_mm: round1(next.x),
+              y_mm: round1(next.y),
+              size_mm: round1(next.w),
+            },
+          },
+        };
+      }
+      if (isQr) {
+        return {
+          ...prev,
+          qr_layout: {
+            x_mm: round1(next.x),
+            y_mm: round1(next.y),
+            w_mm: round1(next.w),
+            h_mm: round1(next.h),
+          },
+        };
+      }
+      return {
+        ...prev,
+        elements: (prev.elements ?? []).map((el, i) => (
+          i === targetIndex
+            ? {
+                ...el,
+                x: round4(next.x / pageW),
+                y: round4(next.y / pageH),
+                w: round4(next.w / pageW),
+                h: round4(next.h / pageH),
+              }
+            : el
+        )),
+      };
+    });
   };
 
-  const onPagePointerUp = () => { dragRef.current = null; };
+  const onPagePointerUp = () => {
+    const d = dragRef.current;
 
-  const startBlockDrag = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
-    const b = blocks[index];
-    const bounds = blockBounds(index);
-    if (!b || !bounds) return;
+    if (d?.kind === 'marquee' && d.moved && d.box) {
+      const picked: Selection[] = [];
+      blocks.forEach((b, i) => {
+        if (b.hidden) return;
+        const g = blockBounds(i);
+        if (g && rectsIntersect(d.box!, g)) picked.push({ kind: 'block', index: i });
+      });
+      elements.forEach((el, i) => {
+        if (el.hidden) return;
+        if (rectsIntersect(d.box!, elementRectMm(el))) picked.push({ kind: 'element', index: i });
+      });
+      if (spec.anchors !== false) {
+        ANCHOR_CORNERS.forEach((corner, i) => {
+          const g = anchorRectMm(corner);
+          if (g && rectsIntersect(d.box!, g)) picked.push({ kind: 'anchor', index: i });
+        });
+      }
+      if (spec.qr !== false) {
+        const g = qrRectMm();
+        if (g && rectsIntersect(d.box!, g)) picked.push({ kind: 'qr', index: 0 });
+      }
+      setSelection((prev) => (d.additive ? mergeSelection(prev, picked) : picked));
+      const last = picked[picked.length - 1];
+      if (last) setPropsTab(last.kind === 'block' ? 'questoes' : 'elementos');
+    }
+
+    setMarquee(null);
+    setGuides({ x: [], y: [] });
+    dragRef.current = null;
+  };
+
+  /** Clique na folha vazia: marquee (ferramenta selecionar) ou pan (mover). */
+  const onSheetPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
     e.preventDefault();
-    e.stopPropagation();
-    selectBlock(index);
-    if (b.locked || b.hidden) return;
+
+    if (tool === 'move') {
+      const sc = canvasScrollRef.current;
+      dragRef.current = {
+        kind: 'pan',
+        startX: e.clientX,
+        startY: e.clientY,
+        scrollLeft: sc?.scrollLeft ?? 0,
+        scrollTop: sc?.scrollTop ?? 0,
+      };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* captura indisponível */ }
+      return;
+    }
+
+    const rect = pageWrapRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    if (!e.shiftKey) clearSelection();
+
+    const x = ((e.clientX - rect.left) / rect.width) * pageW;
+    const y = ((e.clientY - rect.top) / rect.height) * pageH;
     dragRef.current = {
-      kind: 'block',
-      index,
+      kind: 'marquee',
       startX: e.clientX,
       startY: e.clientY,
-      origX: bounds.x,
-      origY: bounds.y,
-      origW: bounds.w,
-      origH: bounds.h,
+      start: { x, y, w: 0, h: 0 },
+      additive: e.shiftKey,
     };
+    setMarquee({ x, y, w: 0, h: 0 });
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* captura indisponível */ }
   };
 
-  const startBlockResize = (e: ReactPointerEvent<HTMLButtonElement>, index: number, dir: ResizeDir) => {
-    const b = blocks[index];
-    const bounds = blockBounds(index);
-    if (!b || !bounds) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (b.locked) return;
+  const startResizeOf = (
+    e: ReactPointerEvent<HTMLElement>,
+    target: Selection,
+    dir: ResizeDir = 'se',
+  ) => {
+    let orig: RectMm | null;
+    if (target.kind === 'block') {
+      orig = blockBounds(target.index);
+    } else if (target.kind === 'element') {
+      orig = elements[target.index] ? elementRectMm(elements[target.index]) : null;
+    } else if (target.kind === 'anchor') {
+      const corner = ANCHOR_CORNERS[target.index];
+      orig = corner ? anchorRectMm(corner) : null;
+    } else {
+      orig = qrRectMm();
+    }
+    if (!orig) return;
     dragRef.current = {
       kind: 'resize',
-      index,
+      target,
       dir,
       startX: e.clientX,
       startY: e.clientY,
-      origX: bounds.x,
-      origY: bounds.y,
-      origW: bounds.w,
-      origH: bounds.h,
+      orig,
     };
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* captura indisponível */ }
   };
 
-  const startElementDrag = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
-    const el = elements[index];
-    if (!el) return;
+  const startMove = (e: ReactPointerEvent<HTMLDivElement>, item: Selection) => {
     e.preventDefault();
     e.stopPropagation();
-    selectElement(index);
-    if (el.locked || el.hidden) return;
+    const wasSelected = isSelected(item.kind, item.index);
+    const next = resolveSelection(item, e.shiftKey);
+    setSelection(next);
+    setPropsTab(item.kind === 'block' ? 'questoes' : 'elementos');
+
+    // Shift + clique num item já selecionado apenas o remove do grupo; não
+    // começa um arraste com o restante da seleção.
+    if (e.shiftKey && wasSelected) return;
+
+    const clicked = item.kind === 'block'
+      ? blocks[item.index]
+      : item.kind === 'element'
+        ? elements[item.index]
+        : { hidden: item.kind === 'anchor' ? spec.anchors === false : spec.qr === false, locked: false };
+    if (!clicked || clicked.hidden) return;
+    if (clicked.locked) {
+      notify('Elemento bloqueado. Desbloqueie no painel de camadas para mover.', 'info');
+      return;
+    }
+
+    if (tool === 'resize') {
+      startResizeOf(e, item, 'se');
+      return;
+    }
+
+    const items = dragItemsFor(next);
+    if (!items.length) return;
     dragRef.current = {
-      kind: 'element',
-      index,
+      kind: 'move',
       startX: e.clientX,
       startY: e.clientY,
-      origX: el.x,
-      origY: el.y,
-      origW: el.w,
-      origH: el.h,
+      items,
+      orig: bboxOf(items.map((it) => it.rect)),
     };
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* captura indisponível */ }
+  };
+
+  const startBlockDrag = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
+    startMove(e, { kind: 'block', index });
+  };
+
+  const startBlockResize = (
+    e: ReactPointerEvent<HTMLButtonElement>, index: number, dir: ResizeDir,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (blocks[index]?.locked) return;
+    setSelection([{ kind: 'block', index }]);
+    startResizeOf(e, { kind: 'block', index }, dir);
+  };
+
+  const startElementDrag = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
+    startMove(e, { kind: 'element', index });
+  };
+
+  const startElementResize = (
+    e: ReactPointerEvent<HTMLButtonElement>, index: number, dir: ResizeDir,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (elements[index]?.locked) return;
+    setSelection([{ kind: 'element', index }]);
+    startResizeOf(e, { kind: 'element', index }, dir);
+  };
+
+  const startAnchorDrag = (e: ReactPointerEvent<HTMLDivElement>, index: number) => {
+    startMove(e, { kind: 'anchor', index });
+  };
+
+  const startAnchorResize = (
+    e: ReactPointerEvent<HTMLButtonElement>, index: number, dir: ResizeDir,
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelection([{ kind: 'anchor', index }]);
+    startResizeOf(e, { kind: 'anchor', index }, dir);
+  };
+
+  const startQrDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
+    startMove(e, { kind: 'qr', index: 0 });
+  };
+
+  const startQrResize = (e: ReactPointerEvent<HTMLButtonElement>, dir: ResizeDir) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelection([{ kind: 'qr', index: 0 }]);
+    startResizeOf(e, { kind: 'qr', index: 0 }, dir);
   };
 
   const fitToScreen = useCallback(() => {
     const el = canvasScrollRef.current;
     if (!el) return;
-    const availW = Math.max(160, el.clientWidth - 48);
-    const availH = Math.max(160, el.clientHeight - 48);
-    const byWidth = availW / PAGE_BASE_PX;
-    const byHeight = availH / (PAGE_BASE_PX * (pageH / pageW));
-    setZoom(clamp(Math.floor(Math.min(byWidth, byHeight) * 100) / 100, 0.3, 2));
+    setZoom(fitZoom(el.clientWidth, el.clientHeight, pageW, pageH));
     // "Ajustar à tela" é uma ação explícita: libera o re-ajuste automático.
     zoomManualRef.current = false;
   }, [pageH, pageW]);
+
+  const zoomBy = useCallback((dir: 1 | -1) => {
+    zoomManualRef.current = true;
+    setZoom((z) => zoomStep(z, dir));
+  }, []);
 
   // Ao entrar no editor a folha inteira cabe na tela; depois o zoom é livre.
   useEffect(() => {
@@ -1350,11 +1954,7 @@ export default function CardGeneratorForm({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         if (zoomManualRef.current || step !== 2) return;
-        const availW = Math.max(160, el.clientWidth - 48);
-        const availH = Math.max(160, el.clientHeight - 48);
-        const byWidth = availW / PAGE_BASE_PX;
-        const byHeight = availH / (PAGE_BASE_PX * (pageH / pageW));
-        setZoom(clamp(Math.floor(Math.min(byWidth, byHeight) * 100) / 100, 0.3, 2));
+        setZoom(fitZoom(el.clientWidth, el.clientHeight, pageW, pageH));
       });
     });
     ro.observe(el);
@@ -1364,8 +1964,8 @@ export default function CardGeneratorForm({
     };
   }, [step, pageH, pageW]);
 
-  // Ctrl + roda do mouse aproxima/afasta a folha. O wheel é não-passivo para
-  // poder cancelar o zoom do navegador, que encolheria a página inteira.
+  // Ctrl + roda do mouse anda pelos níveis discretos de zoom. O wheel é
+  // não-passivo para poder cancelar o zoom do navegador.
   useEffect(() => {
     const el = canvasScrollRef.current;
     if (!el) return;
@@ -1373,11 +1973,76 @@ export default function CardGeneratorForm({
       if (!e.ctrlKey) return;
       e.preventDefault();
       zoomManualRef.current = true;
-      setZoom((z) => clamp(Math.round((z - e.deltaY * 0.001) * 100) / 100, 0.3, 2));
+      setZoom((z) => zoomStep(z, e.deltaY < 0 ? 1 : -1));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
   }, [step]);
+
+  // Atalhos do editor (só na etapa 2 e fora de campos de texto).
+  useEffect(() => {
+    if (step !== 2) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target) || e.altKey) return;
+      const meta = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+
+      if (meta && k === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
+      if (meta && k === 'y') {
+        e.preventDefault();
+        redo();
+        return;
+      }
+      if (meta && k === 'a') {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+      if (meta && k === 'd') {
+        e.preventDefault();
+        duplicateSelection();
+        return;
+      }
+      if (meta && k === '0') {
+        e.preventDefault();
+        fitToScreen();
+        return;
+      }
+      if (meta) return;
+
+      if (k === 'escape') {
+        if (mobilePanel) {
+          setMobilePanel(null);
+          return;
+        }
+        clearSelection();
+        return;
+      }
+      if (k === 'delete' || k === 'backspace') {
+        e.preventDefault();
+        deleteSelection();
+        return;
+      }
+      if (k === 'v') { setTool('select'); return; }
+      if (k === 'm') { setTool('move'); return; }
+      if (k === 'r') { setTool('resize'); return; }
+      if (k === '+' || k === '=') { zoomBy(1); return; }
+      if (k === '-') { zoomBy(-1); return; }
+      if (k.startsWith('arrow') && selection.length) {
+        e.preventDefault();
+        nudgeSelection(k as 'arrowleft' | 'arrowright' | 'arrowup' | 'arrowdown', e.shiftKey ? 5 : 0.5);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    step, undo, redo, selectAll, duplicateSelection, deleteSelection, clearSelection,
+    nudgeSelection, fitToScreen, zoomBy, selection, mobilePanel,
+  ]);
 
   // ─── Rótulos de seleção ────────────────────────────────────────────────────
 
@@ -1385,7 +2050,21 @@ export default function CardGeneratorForm({
     ? blockName(blocks[selectedBlockIndex], selectedBlockIndex)
     : selectedElementIndex != null
       ? `${elements[selectedElementIndex]?.kind === 'text' ? 'Texto' : 'Linha'} ${selectedElementIndex + 1}`
-      : 'Documento';
+      : selectedAnchorIndex != null
+        ? ANCHOR_LABELS[ANCHOR_CORNERS[selectedAnchorIndex]]
+        : selectedQr
+          ? 'QR Code'
+          : 'Documento';
+
+  const selectedRectMm = primary
+    ? primary.kind === 'block'
+      ? blockBounds(primary.index)
+      : primary.kind === 'element'
+        ? (elements[primary.index] ? elementRectMm(elements[primary.index]) : null)
+        : primary.kind === 'anchor'
+          ? (ANCHOR_CORNERS[primary.index] ? anchorRectMm(ANCHOR_CORNERS[primary.index]) : null)
+          : qrRectMm()
+    : null;
 
   const errorCount = preview?.issues.filter((i) => i.level === 'error').length ?? 0;
   const warningCount = preview?.warnings.length ?? 0;
@@ -1458,7 +2137,26 @@ export default function CardGeneratorForm({
           </div>
         </Section>
 
-        <Section title="Camadas" hint="Do topo para a base da folha.">
+        <Section title="Seleção" hint="Vale para o que está selecionado na folha ou nas camadas.">
+          <div className="grid grid-cols-2 gap-1.5">
+            <ToolButton
+              icon={<Copy size={16} aria-hidden />}
+              label="Duplicar"
+              onClick={duplicateSelection}
+              disabled={!selection.length}
+              title="Duplicar seleção (Ctrl+D)"
+            />
+            <ToolButton
+              icon={<Trash2 size={16} aria-hidden />}
+              label="Excluir"
+              onClick={deleteSelection}
+              disabled={!selection.length}
+              title="Excluir seleção (Delete)"
+            />
+          </div>
+        </Section>
+
+        <Section title="Camadas" hint="Do topo para a base. Shift seleciona vários.">
           <div className="space-y-0.5">
             {blocks.length === 0 && elements.length === 0 && (
               <p className="rounded-md border border-dashed border-line p-2 text-center text-[10.5px] text-gray-400 dark:border-gray-700">
@@ -1467,16 +2165,16 @@ export default function CardGeneratorForm({
             )}
             {[...blocks.keys()].reverse().map((i) => {
               const b = blocks[i];
-              const isSelected = selectedBlockIndex === i;
+              const rowSelected = isSelected('block', i);
               return (
                 <div
                   key={`block-${i}`}
                   role="button"
                   tabIndex={0}
-                  onClick={() => selectBlock(i)}
+                  onClick={(e) => selectBlock(i, e.shiftKey)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectBlock(i); }}
                   className={`group flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[10.5px] ${
-                    isSelected
+                    rowSelected
                       ? 'border-brand-100 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
                       : 'border-transparent text-gray-600 hover:bg-surface dark:text-gray-300 dark:hover:bg-gray-800'
                   }`}
@@ -1496,16 +2194,16 @@ export default function CardGeneratorForm({
             })}
             {[...elements.keys()].reverse().map((i) => {
               const el = elements[i];
-              const isSelected = selectedElementIndex === i;
+              const rowSelected = isSelected('element', i);
               return (
                 <div
                   key={`element-${i}`}
                   role="button"
                   tabIndex={0}
-                  onClick={() => selectElement(i)}
+                  onClick={(e) => selectElement(i, e.shiftKey)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') selectElement(i); }}
                   className={`group flex items-center gap-1.5 rounded-md border px-1.5 py-1 text-[10.5px] ${
-                    isSelected
+                    rowSelected
                       ? 'border-brand-100 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
                       : 'border-transparent text-gray-600 hover:bg-surface dark:text-gray-300 dark:hover:bg-gray-800'
                   }`}
@@ -1735,7 +2433,7 @@ export default function CardGeneratorForm({
               )}
             </Section>
 
-            <Section title="Códigos e âncoras" hint="O leitor usa as âncoras para alinhar a foto.">
+            <Section title="Códigos e âncoras" hint="Arraste as caixas na folha para mover; puxe as alças para redimensionar. A leitura usa as âncoras para alinhar a foto.">
               <div className="flex items-center justify-between gap-3 rounded-lg border border-line p-3 dark:border-gray-700">
                 <div>
                   <p className="text-xs font-semibold text-ink dark:text-white">QR Code</p>
@@ -1755,17 +2453,27 @@ export default function CardGeneratorForm({
               <div className="flex items-center justify-between gap-3 rounded-lg border border-line p-3 dark:border-gray-700">
                 <div>
                   <p className="text-xs font-semibold text-ink dark:text-white">Âncoras ArUco</p>
-                  <p className="text-[11px] text-gray-400">Quatro marcadores nos cantos.</p>
+                  <p className="text-[11px] text-gray-400">Quatro marcadores; o ideal é um por canto.</p>
                 </div>
                 <input type="checkbox" checked={spec.anchors !== false}
                        onChange={(e) => mutate({ anchors: e.target.checked }, 'anchors')} />
               </div>
               {spec.anchors !== false && (
-                <Field label="Tamanho da âncora (mm)" htmlFor="gen-anchor-mm">
+                <Field label="Tamanho padrão da âncora (mm)" htmlFor="gen-anchor-mm">
                   <Input id="gen-anchor-mm" type="number" min={5} max={25} step={0.5}
                          className={COMPACT} value={spec.anchor_mm ?? ''}
                          onChange={(e) => mutate({ anchor_mm: numOrUndefined(e.target.value) }, 'anchor-mm')} />
                 </Field>
+              )}
+
+              {(spec.anchor_layout || spec.qr_layout) && (
+                <div className="flex items-center justify-between gap-2 rounded-lg bg-surface px-3 py-2 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                  <span>Posições personalizadas ativas.</span>
+                  <Button size="sm" variant="secondary" icon={<RotateCcw size={13} aria-hidden />}
+                          onClick={resetCodePositions}>
+                    Padrão
+                  </Button>
+                </div>
               )}
             </Section>
           </>
@@ -1922,7 +2630,7 @@ export default function CardGeneratorForm({
               <Info size={16} className="mt-0.5 shrink-0" aria-hidden />
               <p>
                 Você pode começar por qualquer modelo e mudar formato, questões, blocos e
-                elementos depois. Nada é gravado até clicar em <strong>Gerar cartão</strong>.
+                elementos depois. Nada é gravado até clicar em <strong>Gerar e ativar</strong>.
               </p>
             </div>
           </div>
@@ -2033,7 +2741,7 @@ export default function CardGeneratorForm({
                   disabled={!preview || previewing || errorCount > 0}
                   icon={<Sparkles size={15} aria-hidden />}
                 >
-                  Gerar cartão e ativar
+                  Gerar e ativar
                 </Button>
                 <Button variant="secondary" onClick={() => setStep(2)} icon={<ArrowLeft size={15} aria-hidden />}>
                   Voltar ao editor
@@ -2101,7 +2809,7 @@ export default function CardGeneratorForm({
             icon={<FileDown size={15} aria-hidden />}
             className="ml-1 hidden sm:inline-flex"
           >
-            Gerar cartão
+            Gerar e ativar
           </Button>
         </div>
       </div>
@@ -2122,19 +2830,23 @@ export default function CardGeneratorForm({
               <Layers size={12} aria-hidden /> 1 / 1
             </span>
             <span className="mx-1 h-5 w-px bg-line dark:bg-gray-700" aria-hidden />
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z - 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Diminuir zoom" title="Diminuir zoom (ou Ctrl + roda do mouse)">
+            <ToolbarToggle title="Selecionar e arrastar (V)" active={tool === 'select'} onClick={() => setTool('select')} icon={<MousePointer2 size={15} aria-hidden />} />
+            <ToolbarToggle title="Mover a folha (M)" active={tool === 'move'} onClick={() => setTool('move')} icon={<Move size={15} aria-hidden />} />
+            <ToolbarToggle title="Redimensionar (R)" active={tool === 'resize'} onClick={() => setTool('resize')} icon={<Scaling size={15} aria-hidden />} />
+            <span className="mx-1 h-5 w-px bg-line dark:bg-gray-700" aria-hidden />
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => zoomBy(-1)} aria-label="Diminuir zoom" title="Diminuir zoom (ou Ctrl + roda do mouse)">
               <ZoomOut size={15} aria-hidden />
             </button>
             <span className="w-10 text-center text-[11px] font-semibold text-gray-500">{Math.round(zoom * 100)}%</span>
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => { zoomManualRef.current = true; setZoom((z) => clamp(Math.round((z + 0.1) * 10) / 10, 0.3, 2)); }} aria-label="Aumentar zoom" title="Aumentar zoom (ou Ctrl + roda do mouse)">
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => zoomBy(1)} aria-label="Aumentar zoom" title="Aumentar zoom (ou Ctrl + roda do mouse)">
               <ZoomIn size={15} aria-hidden />
             </button>
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={fitToScreen} aria-label="Ajustar à tela" title="Ajustar à tela">
+            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={fitToScreen} aria-label="Ajustar à tela" title="Ajustar à tela (Ctrl+0)">
               <Maximize2 size={15} aria-hidden />
             </button>
             <span className="mx-1 hidden h-5 w-px bg-line dark:bg-gray-700 sm:block" aria-hidden />
             <ToolbarToggle title="Réguas" active={rulers} onClick={() => setRulers((v) => !v)} icon={<Ruler size={15} aria-hidden />} />
-            <ToolbarToggle title="Grade" active={grid} onClick={() => setGrid((v) => !v)} icon={<Grid3x3 size={15} aria-hidden />} />
+            <ToolbarToggle title="Grade 5 mm (o arraste encaixa nos quadradinhos)" active={grid} onClick={() => setGrid((v) => !v)} icon={<Grid3x3 size={15} aria-hidden />} />
             <ToolbarToggle title="Guias de alinhamento" active={snap} onClick={() => setSnap((v) => !v)} icon={<Crosshair size={15} aria-hidden />} />
             <span className="ml-auto flex items-center gap-1">
               <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px] lg:hidden" onClick={() => setMobilePanel('tools')} aria-label="Ferramentas">
@@ -2163,41 +2875,33 @@ export default function CardGeneratorForm({
                 {rulers && <div aria-hidden />}
                 {rulers && (
                   <div className="relative overflow-hidden border border-line bg-[#FBFCFE] dark:border-gray-700 dark:bg-gray-900" style={{ width: displayW, height: 21 }} aria-hidden>
-                    {Array.from({ length: Math.floor(pageW / 10) + 1 }).map((_, i) => {
-                      const mm = i * 10;
-                      const major = mm % 20 === 0;
-                      return (
-                        <span key={mm}>
-                          <span className="absolute top-0 w-px bg-[#B7C4D6]" style={{ left: mm * pxPerMm, height: major ? 8 : 4 }} />
-                          {major && mm < pageW && (
-                            <span className="absolute top-[10px] -translate-x-1/2 text-[7.5px] leading-none text-[#7C8DA6]" style={{ left: mm * pxPerMm }}>
-                              {mm}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
+                    {rulerTicks(pageW, 5, 10, zoom < 0.5 ? 20 : 10).map(({ mm, major, label }) => (
+                      <span key={mm}>
+                        <span className="absolute top-0 w-px bg-[#B7C4D6]" style={{ left: mm * pxPerMm, height: major ? 8 : 4 }} />
+                        {label && mm < pageW && (
+                          <span className="absolute top-[10px] -translate-x-1/2 text-[7.5px] leading-none text-[#7C8DA6]" style={{ left: mm * pxPerMm }}>
+                            {mm}
+                          </span>
+                        )}
+                      </span>
+                    ))}
                   </div>
                 )}
                 {rulers && (
                   <div className="relative overflow-hidden border border-line bg-[#FBFCFE] dark:border-gray-700 dark:bg-gray-900" style={{ width: 21, height: displayH }} aria-hidden>
-                    {Array.from({ length: Math.floor(pageH / 10) + 1 }).map((_, i) => {
-                      const mm = i * 10;
-                      const major = mm % 20 === 0;
-                      return (
-                        <span key={mm}>
-                          <span className="absolute left-0 h-px bg-[#B7C4D6]" style={{ top: mm * pxPerMm, width: major ? 8 : 4 }} />
-                          {major && mm < pageH && (
-                            <span
-                              className="absolute left-[10px] text-[7.5px] leading-none text-[#7C8DA6]"
-                              style={{ top: mm * pxPerMm, transform: 'translateY(-50%) rotate(-90deg)', transformOrigin: 'center' }}
-                            >
-                              {mm}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })}
+                    {rulerTicks(pageH, 5, 10, zoom < 0.5 ? 20 : 10).map(({ mm, major, label }) => (
+                      <span key={mm}>
+                        <span className="absolute left-0 h-px bg-[#B7C4D6]" style={{ top: mm * pxPerMm, width: major ? 8 : 4 }} />
+                        {label && mm < pageH && (
+                          <span
+                            className="absolute left-[10px] text-[7.5px] leading-none text-[#7C8DA6]"
+                            style={{ top: mm * pxPerMm, transform: 'translateY(-50%) rotate(-90deg)', transformOrigin: 'center' }}
+                          >
+                            {mm}
+                          </span>
+                        )}
+                      </span>
+                    ))}
                   </div>
                 )}
 
@@ -2235,7 +2939,10 @@ export default function CardGeneratorForm({
                     </div>
                   )}
 
-                  <div className="absolute inset-0 z-0" onPointerDown={() => setSelected(null)} />
+                  <div
+                    className={`absolute inset-0 z-0 ${tool === 'move' ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+                    onPointerDown={onSheetPointerDown}
+                  />
 
                   {grid && (
                     <div
@@ -2243,7 +2950,7 @@ export default function CardGeneratorForm({
                       style={{
                         backgroundImage:
                           'linear-gradient(to right, rgba(23,105,255,.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(23,105,255,.14) 1px, transparent 1px)',
-                        backgroundSize: `${10 * pxPerMm}px ${10 * pxPerMm}px`,
+                        backgroundSize: `${GRID_MM * pxPerMm}px ${GRID_MM * pxPerMm}px`,
                       }}
                       aria-hidden
                     />
@@ -2262,12 +2969,45 @@ export default function CardGeneratorForm({
                     />
                   )}
 
+                  {/* Guias de alinhamento (mm → px) */}
+                  {guides.x.map((gx) => (
+                    <div
+                      key={`guide-x-${gx}`}
+                      className="pointer-events-none absolute bottom-0 top-0 z-30 w-px bg-brand-500/80"
+                      style={{ left: gx * pxPerMm }}
+                      aria-hidden
+                    />
+                  ))}
+                  {guides.y.map((gy) => (
+                    <div
+                      key={`guide-y-${gy}`}
+                      className="pointer-events-none absolute left-0 right-0 z-30 h-px bg-brand-500/80"
+                      style={{ top: gy * pxPerMm }}
+                      aria-hidden
+                    />
+                  ))}
+
+                  {/* Retângulo de seleção por arrasto */}
+                  {marquee && (
+                    <div
+                      className="pointer-events-none absolute z-30 border border-brand-500 bg-brand-500/10"
+                      style={{
+                        left: marquee.x * pxPerMm,
+                        top: marquee.y * pxPerMm,
+                        width: marquee.w * pxPerMm,
+                        height: marquee.h * pxPerMm,
+                      }}
+                      aria-hidden
+                    />
+                  )}
+
                   {/* Blocos de questões: caixas de seleção/arraste */}
                   {blocks.map((b, i) => {
                     if (b.hidden) return null;
                     const g = blockBounds(i);
                     if (!g) return null;
-                    const isSelected = selectedBlockIndex === i;
+                    const blockSelected = isSelected('block', i);
+                    const isPrimary = selectedBlockIndex === i && selection.length === 1;
                     return (
                       <div
                         key={`block-${i}`}
@@ -2277,7 +3017,7 @@ export default function CardGeneratorForm({
                         onPointerDown={(e) => startBlockDrag(e, i)}
                         onKeyDown={(e) => { if (e.key === 'Enter') selectBlock(i); }}
                         className={`absolute z-10 rounded-[3px] border-2 transition-colors ${
-                          isSelected
+                          blockSelected
                             ? 'border-brand-500 bg-brand-500/[0.06]'
                             : 'border-brand-500/35 bg-brand-500/[0.02] hover:border-brand-500/80'
                         } ${b.locked ? 'cursor-default' : 'cursor-move'}`}
@@ -2289,11 +3029,11 @@ export default function CardGeneratorForm({
                           touchAction: 'none',
                         }}
                       >
-                        <span className={`pointer-events-none absolute -top-[18px] left-0 inline-flex max-w-full items-center gap-1 truncate rounded-t bg-brand-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white ${isSelected ? '' : 'opacity-70'}`}>
+                        <span className={`pointer-events-none absolute -top-[18px] left-0 inline-flex max-w-full items-center gap-1 truncate rounded-t bg-brand-500 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white ${blockSelected ? '' : 'opacity-70'}`}>
                           {b.locked && <Lock size={9} aria-hidden />}
                           {blockName(b, i)}
                         </span>
-                        {isSelected && !b.locked && (
+                        {isPrimary && !b.locked && (
                           <>
                             {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as ResizeDir[]).map((dir) => {
                               const style: React.CSSProperties = {
@@ -2322,7 +3062,8 @@ export default function CardGeneratorForm({
                   {/* Elementos decorativos: caixas de arraste */}
                   {elements.map((el, i) => {
                     if (el.hidden) return null;
-                    const isSelected = selectedElementIndex === i;
+                    const elementSelected = isSelected('element', i);
+                    const isPrimary = selectedElementIndex === i && selection.length === 1;
                     return (
                       <div
                         key={`element-${i}`}
@@ -2332,7 +3073,7 @@ export default function CardGeneratorForm({
                         onPointerDown={(e) => startElementDrag(e, i)}
                         onKeyDown={(e) => { if (e.key === 'Enter') selectElement(i); }}
                         className={`absolute z-20 rounded-[2px] border border-dashed transition-colors ${
-                          isSelected
+                          elementSelected
                             ? 'border-brand-500 bg-brand-500/[0.05]'
                             : 'border-transparent hover:border-brand-400/70'
                         } ${el.locked ? 'cursor-default' : 'cursor-move'}`}
@@ -2345,15 +3086,160 @@ export default function CardGeneratorForm({
                           touchAction: 'none',
                         }}
                       >
-                        {isSelected && (
+                        {elementSelected && (
                           <span className="pointer-events-none absolute -top-[16px] left-0 inline-flex items-center gap-1 rounded bg-brand-500 px-1 py-0.5 text-[8.5px] font-semibold leading-none text-white">
                             {el.locked && <Lock size={8} aria-hidden />}
                             {el.kind === 'text' ? 'Texto' : 'Linha'} {i + 1}
                           </span>
                         )}
+                        {isPrimary && !el.locked && (
+                          <>
+                            {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as ResizeDir[]).map((dir) => {
+                              const style: React.CSSProperties = {
+                                left: dir.includes('w') ? 0 : dir.includes('e') ? '100%' : '50%',
+                                top: dir.includes('n') ? 0 : dir.includes('s') ? '100%' : '50%',
+                                transform: 'translate(-50%, -50%)',
+                                cursor: `${dir}-resize`,
+                              };
+                              return (
+                                <button
+                                  key={dir}
+                                  type="button"
+                                  aria-label={`Redimensionar ${dir}`}
+                                  onPointerDown={(e) => startElementResize(e, i, dir)}
+                                  className="absolute z-20 h-2.5 w-2.5 rounded-[2px] border border-brand-500 bg-white shadow-sm"
+                                  style={style}
+                                />
+                              );
+                            })}
+                          </>
+                        )}
                       </div>
                     );
                   })}
+
+                  {/* Âncoras ArUco: caixas de arraste/redimensionamento */}
+                  {spec.anchors !== false && ANCHOR_CORNERS.map((corner, i) => {
+                    const g = anchorRectMm(corner);
+                    if (!g) return null;
+                    const anchorSelected = isSelected('anchor', i);
+                    const isPrimary = selectedAnchorIndex === i && selection.length === 1;
+                    return (
+                      <div
+                        key={`anchor-${corner}`}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={ANCHOR_LABELS[corner]}
+                        title="Arraste para reposicionar · puxe as alças para redimensionar"
+                        onPointerDown={(e) => startAnchorDrag(e, i)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setSelection([{ kind: 'anchor', index: i }]);
+                            setPropsTab('elementos');
+                          }
+                        }}
+                        className={`absolute z-20 rounded-[3px] border-2 transition-colors cursor-move ${
+                          anchorSelected
+                            ? 'border-warning-500 bg-warning-500/[0.08]'
+                            : 'border-warning-500/40 bg-warning-500/[0.02] hover:border-warning-500/80'
+                        }`}
+                        style={{
+                          left: `${(g.x / pageW) * 100}%`,
+                          top: `${(g.y / pageH) * 100}%`,
+                          width: `${(g.w / pageW) * 100}%`,
+                          height: `${(g.h / pageH) * 100}%`,
+                          touchAction: 'none',
+                        }}
+                      >
+                        <span className={`pointer-events-none absolute -top-[18px] left-0 inline-flex max-w-full items-center gap-1 truncate rounded-t bg-warning-600 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white ${anchorSelected ? '' : 'opacity-70'}`}>
+                          {corner} · âncora
+                        </span>
+                        {isPrimary && (
+                          <>
+                            {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as ResizeDir[]).map((dir) => {
+                              const style: React.CSSProperties = {
+                                left: dir.includes('w') ? 0 : dir.includes('e') ? '100%' : '50%',
+                                top: dir.includes('n') ? 0 : dir.includes('s') ? '100%' : '50%',
+                                transform: 'translate(-50%, -50%)',
+                                cursor: `${dir}-resize`,
+                              };
+                              return (
+                                <button
+                                  key={dir}
+                                  type="button"
+                                  aria-label={`Redimensionar âncora ${corner} (${dir})`}
+                                  onPointerDown={(e) => startAnchorResize(e, i, dir)}
+                                  className="absolute z-20 h-2.5 w-2.5 rounded-[2px] border border-warning-600 bg-white shadow-sm"
+                                  style={style}
+                                />
+                              );
+                            })}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* QR Code: caixa de arraste/redimensionamento */}
+                  {spec.qr !== false && (() => {
+                    const g = qrRectMm();
+                    if (!g) return null;
+                    const qrSelected = isSelected('qr', 0);
+                    const isPrimary = selectedQr && selection.length === 1;
+                    return (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label="QR Code"
+                        title="Arraste para reposicionar · puxe as alças para redimensionar"
+                        onPointerDown={startQrDrag}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            setSelection([{ kind: 'qr', index: 0 }]);
+                            setPropsTab('elementos');
+                          }
+                        }}
+                        className={`absolute z-20 rounded-[3px] border-2 transition-colors cursor-move ${
+                          qrSelected
+                            ? 'border-success-500 bg-success-500/[0.08]'
+                            : 'border-success-500/40 bg-success-500/[0.02] hover:border-success-500/80'
+                        }`}
+                        style={{
+                          left: `${(g.x / pageW) * 100}%`,
+                          top: `${(g.y / pageH) * 100}%`,
+                          width: `${(g.w / pageW) * 100}%`,
+                          height: `${(g.h / pageH) * 100}%`,
+                          touchAction: 'none',
+                        }}
+                      >
+                        <span className={`pointer-events-none absolute -top-[18px] left-0 inline-flex max-w-full items-center gap-1 truncate rounded-t bg-success-700 px-1.5 py-0.5 text-[9px] font-semibold leading-none text-white ${qrSelected ? '' : 'opacity-70'}`}>
+                          QR Code
+                        </span>
+                        {isPrimary && (
+                          <>
+                            {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as ResizeDir[]).map((dir) => {
+                              const style: React.CSSProperties = {
+                                left: dir.includes('w') ? 0 : dir.includes('e') ? '100%' : '50%',
+                                top: dir.includes('n') ? 0 : dir.includes('s') ? '100%' : '50%',
+                                transform: 'translate(-50%, -50%)',
+                                cursor: `${dir}-resize`,
+                              };
+                              return (
+                                <button
+                                  key={dir}
+                                  type="button"
+                                  aria-label={`Redimensionar QR Code (${dir})`}
+                                  onPointerDown={(e) => startQrResize(e, dir)}
+                                  className="absolute z-20 h-2.5 w-2.5 rounded-[2px] border border-success-700 bg-white shadow-sm"
+                                  style={style}
+                                />
+                              );
+                            })}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -2361,9 +3247,13 @@ export default function CardGeneratorForm({
 
           <div className="flex items-center justify-between gap-2 border-t border-line bg-white px-3 py-1.5 text-[10.5px] text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
             <span className="min-w-0 truncate">
-              {selectedLabel === 'Documento'
-                ? 'Selecione um bloco ou elemento para editar as propriedades.'
-                : `Selecionado: ${selectedLabel}`}
+              {selection.length > 1
+                ? `${selection.length} elementos selecionados · arraste para mover em conjunto`
+                : selectedLabel === 'Documento'
+                  ? 'Selecione um bloco ou elemento para editar as propriedades.'
+                  : selectedRectMm
+                    ? `${selectedLabel} · x ${round1(selectedRectMm.x)} · y ${round1(selectedRectMm.y)} · ${round1(selectedRectMm.w)} × ${round1(selectedRectMm.h)} mm`
+                    : `Selecionado: ${selectedLabel}`}
             </span>
             <span className="shrink-0">
               {pageW.toFixed(0)} × {pageH.toFixed(0)} mm · {Math.round(zoom * 100)}%

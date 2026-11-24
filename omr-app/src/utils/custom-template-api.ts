@@ -10,6 +10,21 @@ import { apiBlob, apiForm, apiJson, apiJsonBody, saveBlob } from './api';
 
 export type CornerName = 'TL' | 'TR' | 'BR' | 'BL';
 
+/** Posição/tamanho de uma âncora na folha (mm, canto superior esquerdo). */
+export interface CardAnchorLayout {
+  x_mm: number;
+  y_mm: number;
+  size_mm: number;
+}
+
+/** Posição/tamanho do QR na folha (mm, canto superior esquerdo). */
+export interface CardQrLayout {
+  x_mm: number;
+  y_mm: number;
+  w_mm: number;
+  h_mm: number;
+}
+
 export interface CustomAnchor {
   id: string;
   type: 'aruco' | 'quad';
@@ -362,6 +377,10 @@ export interface CardSpec {
   anchor_mm?: number;
   qr?: boolean;
   qr_mm?: number;
+  /** Posição/tamanho livre de cada âncora (mm). Ausente = cantos da margem. */
+  anchor_layout?: Partial<Record<CornerName, CardAnchorLayout>>;
+  /** Posição/tamanho livre do QR (mm). Ausente = canto superior direito. */
+  qr_layout?: CardQrLayout;
   /** Vários blocos de questões (substitui os campos planos de questões). */
   blocks?: CardBlockSpec[] | null;
   /** Elementos decorativos desenhados na folha. */
@@ -390,6 +409,13 @@ export interface PreviewBlockLayout {
   end_question: number;
 }
 
+export interface PreviewAnchorLayout {
+  corner: CornerName;
+  x_mm: number;
+  y_mm: number;
+  size_mm: number;
+}
+
 export interface GeneratePreviewResult {
   ok: boolean;
   image: string; // data URL
@@ -398,6 +424,10 @@ export interface GeneratePreviewResult {
   summary: CustomTemplateSummary['config_summary'];
   /** Geometria dos blocos desenhados, em mm. */
   layout?: PreviewBlockLayout[];
+  /** Geometria das âncoras desenhadas, em mm. */
+  anchors_layout?: PreviewAnchorLayout[];
+  /** Geometria do QR desenhado, em mm. */
+  qr_layout?: CardQrLayout | null;
 }
 
 export function previewGeneratedCard(spec: CardSpec): Promise<GeneratePreviewResult> {

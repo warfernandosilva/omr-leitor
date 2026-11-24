@@ -363,6 +363,8 @@ def generate_preview(req: GenerateCardRequest, current_user: User = Depends(auth
         "issues": validate_config(card.config),
         "summary": config_summary(card.config),
         "layout": card.layout,
+        "anchors_layout": card.anchors_layout,
+        "qr_layout": card.qr_layout,
     }
 
 

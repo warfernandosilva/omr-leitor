@@ -300,3 +300,88 @@ def test_api_generate_rejects_impossible_spec(authed):
     })
     assert r.status_code == 400
     assert "Não cabe" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Âncoras e QR posicionados pelo editor
+# ---------------------------------------------------------------------------
+
+def test_anchor_layout_moves_and_resizes_only_that_anchor():
+    """`anchor_layout` em mm define posição/tamanho; os demais cantos ficam
+    exatamente como antes (compatibilidade dos cartões já gerados)."""
+    card = generate_card({
+        "n_questions": 10,
+        "anchor_layout": {
+            "TL": {"x_mm": 20.0, "y_mm": 25.0, "size_mm": 12.0},
+        },
+    })
+    cfg = card.config
+    assert not ct.has_errors(ct.validate_config(cfg))
+    anchors = {a["corner"]: a for a in cfg["anchors"]}
+    assert anchors["TL"]["x"] == pytest.approx((20.0 + 6.0) / 210.0, abs=5e-4)
+    assert anchors["TL"]["y"] == pytest.approx((25.0 + 6.0) / 297.0, abs=5e-4)
+    assert anchors["TL"]["size"] == pytest.approx(12.0 / 210.0, abs=5e-4)
+    # Padrão preservado no canto não informado (margem 10 + âncora 10).
+    assert anchors["TR"]["x"] == pytest.approx((210.0 - 10.0 - 5.0) / 210.0, abs=5e-4)
+    assert anchors["TR"]["size"] == pytest.approx(10.0 / 210.0, abs=5e-4)
+
+    layout = {a["corner"]: a for a in card.anchors_layout}
+    assert layout["TL"]["x_mm"] == pytest.approx(20.0, abs=0.5)
+    assert layout["TL"]["y_mm"] == pytest.approx(25.0, abs=0.5)
+    assert layout["TL"]["size_mm"] == pytest.approx(12.0, abs=0.5)
+
+
+def test_qr_layout_moves_and_resizes_region():
+    card = generate_card({
+        "n_questions": 10,
+        "qr_layout": {"x_mm": 120.0, "y_mm": 210.0, "w_mm": 26.0, "h_mm": 24.0},
+    })
+    cfg = card.config
+    assert not ct.has_errors(ct.validate_config(cfg))
+    qr = cfg["qr"]
+    assert qr["x"] == pytest.approx(120.0 / 210.0, abs=5e-4)
+    assert qr["y"] == pytest.approx(210.0 / 297.0, abs=5e-4)
+    assert qr["w"] == pytest.approx(26.0 / 210.0, abs=5e-4)
+    assert qr["h"] == pytest.approx(24.0 / 297.0, abs=5e-4)
+    assert card.qr_layout["x_mm"] == pytest.approx(120.0, abs=0.5)
+    assert card.qr_layout["w_mm"] == pytest.approx(26.0, abs=0.5)
+
+
+def test_moved_anchors_are_still_read_by_the_omr_engine():
+    """Mover as quatro âncoras não pode quebrar a leitura: o config acompanha
+    as novas posições e o motor continua alinhando a folha."""
+    moved = {
+        corner: {"x_mm": 12.0 if corner in ("TL", "BL") else 188.0,
+                 "y_mm": 14.0 if corner in ("TL", "TR") else 273.0,
+                 "size_mm": 10.0}
+        for corner in ("TL", "TR", "BR", "BL")
+    }
+    card = generate_card({"n_questions": 10, "anchor_layout": moved})
+    cfg = card.config
+    assert not ct.has_errors(ct.validate_config(cfg))
+    marks = {1: "A", 5: "C", 10: "D"}
+    result = ct.process_custom_image(_mark(card.image, cfg, marks), cfg)
+    assert result is not None
+    assert result.answers == marks
+
+
+def test_api_preview_returns_anchor_and_qr_layout(authed):
+    """A prévia devolve o layout das âncoras/QR para o editor desenhar as
+    caixas de arraste exatamente onde o backend desenhou."""
+    r = authed.post("/api/custom-templates/generate-preview", json={
+        "spec": {
+            "n_questions": 10,
+            "anchor_layout": {"TL": {"x_mm": 18.0, "y_mm": 22.0, "size_mm": 11.0}},
+            "qr_layout": {"x_mm": 120.0, "y_mm": 210.0, "w_mm": 24.0, "h_mm": 24.0},
+        },
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["anchors_layout"]) == 4
+    tl = next(a for a in body["anchors_layout"] if a["corner"] == "TL")
+    assert tl["x_mm"] == pytest.approx(18.0, abs=0.5)
+    assert tl["y_mm"] == pytest.approx(22.0, abs=0.5)
+    assert body["qr_layout"]["x_mm"] == pytest.approx(120.0, abs=0.5)
+    assert body["qr_layout"]["w_mm"] == pytest.approx(24.0, abs=0.5)
+
+

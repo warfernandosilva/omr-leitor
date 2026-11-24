@@ -88,6 +88,9 @@ class GeneratedCard:
     # Geometria dos blocos desenhados (mm), usada pelo editor para mostrar
     # as caixas de seleção em cima da prévia e para arrastar blocos.
     layout: list[dict] = field(default_factory=list)
+    # Geometria das âncoras e do QR (mm), também para o editor arrastar.
+    anchors_layout: list[dict] = field(default_factory=list)
+    qr_layout: dict | None = None
 
 
 def _num(spec: dict, key: str, lo: float, hi: float) -> float:
@@ -96,6 +99,76 @@ def _num(spec: dict, key: str, lo: float, hi: float) -> float:
     except (TypeError, ValueError):
         v = float(DEFAULTS[key])
     return max(lo, min(hi, v))
+
+
+ANCHOR_CORNERS = ("TL", "TR", "BR", "BL")
+
+
+def _anchor_boxes(
+    spec: dict, page_w: float, page_h: float, default_mm: float,
+    margin_mm: float, enabled: bool,
+) -> dict[str, dict[str, float]]:
+    """Retângulo (mm) de cada âncora, a partir do layout do editor.
+
+    `anchor_layout` é opcional e guarda, por canto, `x_mm`/`y_mm` (canto
+    superior esquerdo) e `size_mm` (lado do marcador). Sem ele — ou para os
+    cantos ausentes — as âncoras continuam nos cantos da margem, como antes.
+    """
+    boxes: dict[str, dict[str, float]] = {}
+    raw = spec.get("anchor_layout") if enabled else None
+    for corner in ANCHOR_CORNERS:
+        item = raw.get(corner) if isinstance(raw, dict) else None
+        size = default_mm
+        x: float | None = None
+        y: float | None = None
+        if isinstance(item, dict):
+            try:
+                size = float(item.get("size_mm", default_mm))
+                x = float(item["x_mm"])
+                y = float(item["y_mm"])
+            except (KeyError, TypeError, ValueError):
+                x = y = None
+        size = max(4.0, min(size, min(page_w, page_h)))
+        if x is None or y is None:
+            x = margin_mm if corner in ("TL", "BL") else page_w - margin_mm - size
+            y = margin_mm if corner in ("TL", "TR") else page_h - margin_mm - size
+        boxes[corner] = {
+            "x_mm": max(0.0, min(x, max(0.0, page_w - size))),
+            "y_mm": max(0.0, min(y, max(0.0, page_h - size))),
+            "size_mm": size,
+        }
+    return boxes
+
+
+def _qr_box(
+    spec: dict, page_w: float, page_h: float, default_mm: float,
+    margin_mm: float, pad_mm: float, enabled: bool,
+) -> dict[str, float] | None:
+    """Retângulo (mm) do QR, a partir de `qr_layout` do editor.
+
+    Sem layout, repete o canto superior direito de dentro da margem (o mesmo
+    lugar de sempre), então cartões antigos não mudam.
+    """
+    if not enabled:
+        return None
+    raw = spec.get("qr_layout")
+    try:
+        w = float(raw["w_mm"])
+        h = float(raw["h_mm"])
+        x = float(raw["x_mm"])
+        y = float(raw["y_mm"])
+    except (KeyError, TypeError, ValueError):
+        w = h = default_mm
+        x = page_w - margin_mm - pad_mm - w
+        y = margin_mm + pad_mm
+    w = max(5.0, min(w, page_w))
+    h = max(5.0, min(h, page_h))
+    return {
+        "x_mm": max(0.0, min(x, max(0.0, page_w - w))),
+        "y_mm": max(0.0, min(y, max(0.0, page_h - h))),
+        "w_mm": w,
+        "h_mm": h,
+    }
 
 
 def _px_font(spec: dict, key: str, fallback_px: float, dpi: float, lo: int = 6, hi: int = 400) -> int:
@@ -260,10 +333,14 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     pw = int(round(mm2px(pw_mm)))
     ph = int(round(mm2px(ph_mm)))
 
-    margin_px = mm2px(_num(s, "margin_mm", 3.0, 40.0))
+    margin_mm = _num(s, "margin_mm", 3.0, 40.0)
+    margin_px = mm2px(margin_mm)
     use_anchors = bool(s.get("anchors", True))
-    anchor_px = mm2px(_num(s, "anchor_mm", 5.0, 25.0)) if use_anchors else 0.0
-    qr_px = mm2px(_num(s, "qr_mm", 10.0, 60.0)) if s.get("qr", True) else 0.0
+    anchor_mm = _num(s, "anchor_mm", 5.0, 25.0)
+    anchor_px = mm2px(anchor_mm) if use_anchors else 0.0
+    use_qr = bool(s.get("qr", True))
+    qr_mm = _num(s, "qr_mm", 10.0, 60.0)
+    qr_px = mm2px(qr_mm) if use_qr else 0.0
 
     n_q = int(_num(s, "n_questions", 1, MAX_QUESTIONS))
     labels = _labels(s)
@@ -273,7 +350,8 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     shape = "square" if str(s.get("shape")) == "square" else "circle"
 
     # ── Geometria base ──────────────────────────────────────────────────────
-    pad = anchor_px + mm2px(3.0) if use_anchors else 0.0
+    pad_mm = anchor_mm + 3.0 if use_anchors else 0.0
+    pad = mm2px(pad_mm) if use_anchors else 0.0
     cx0 = margin_px + pad
     cx1 = pw - margin_px - pad
     cy0 = margin_px + pad
@@ -281,12 +359,24 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     if cx1 - cx0 < mm2px(40) or cy1 - cy0 < mm2px(40):
         raise ValueError("Margens grandes demais para o formato escolhido.")
 
-    anchor_centers = {
-        "TL": (margin_px + anchor_px / 2, margin_px + anchor_px / 2),
-        "TR": (pw - margin_px - anchor_px / 2, margin_px + anchor_px / 2),
-        "BR": (pw - margin_px - anchor_px / 2, ph - margin_px - anchor_px / 2),
-        "BL": (margin_px + anchor_px / 2, ph - margin_px - anchor_px / 2),
+    # Âncoras/QR podem ser movidos e redimensionados no editor. O layout é
+    # opcional: os padrões abaixo são idênticos aos cantos da margem.
+    anchor_boxes_mm = _anchor_boxes(
+        s, pw_mm, ph_mm, anchor_mm, margin_mm, use_anchors,
+    )
+    anchor_sizes_px = {
+        corner: mm2px(box["size_mm"]) for corner, box in anchor_boxes_mm.items()
     }
+    anchor_centers = {
+        corner: (
+            mm2px(box["x_mm"]) + anchor_sizes_px[corner] / 2,
+            mm2px(box["y_mm"]) + anchor_sizes_px[corner] / 2,
+        )
+        for corner, box in anchor_boxes_mm.items()
+    }
+    qr_box_mm = _qr_box(
+        s, pw_mm, ph_mm, qr_mm, margin_mm, pad_mm, use_qr,
+    )
 
     img = np.ones((ph, pw, 3), dtype=np.uint8) * 255
     pil = _PIL(img)
@@ -429,21 +519,25 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
 
 
     qr_region = None
-    if qr_px:
-        qx = cx1 - qr_px
-        qy = cy0
-        draw.rectangle((qx, qy, qx + qr_px, qy + qr_px), outline=(200, 200, 200), width=1)
-        _center_text(draw, (qx + qr_px / 2, qy + qr_px / 2), "QR", small_font, (190, 190, 190))
+    qr_layout_mm = None
+    if qr_box_mm is not None:
+        qx = mm2px(qr_box_mm["x_mm"])
+        qy = mm2px(qr_box_mm["y_mm"])
+        qw = mm2px(qr_box_mm["w_mm"])
+        qh = mm2px(qr_box_mm["h_mm"])
+        draw.rectangle((qx, qy, qx + qw, qy + qh), outline=(200, 200, 200), width=1)
+        _center_text(draw, (qx + qw / 2, qy + qh / 2), "QR", small_font, (190, 190, 190))
         qr_region = {
             "id": "qr",
             "x": qx / pw,
             "y": qy / ph,
-            "w": qr_px / pw,
-            "h": qr_px / ph,
+            "w": qw / pw,
+            "h": qh / ph,
             "required": False,
             "purpose": "card",
             "field": "codigo_unico",
         }
+        qr_layout_mm = dict(qr_box_mm)
 
     # ── Grade de questões ───────────────────────────────────────────────────
     grid_w = cx1 - cx0
@@ -918,16 +1012,24 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
     img = _BGR(pil)
 
     # Âncoras por último: nada pode ser desenhado por cima delas.
-    for corner, (ax, ay) in anchor_centers.items():
-        if not use_anchors:
-            continue
-        marker = _generate_aruco_marker(ARUCO_DICT, list(anchor_centers).index(corner), int(round(anchor_px)))
-        if marker.ndim == 2:
-            marker = cv2.cvtColor(marker, cv2.COLOR_GRAY2BGR)
-        x0 = int(round(ax - anchor_px / 2))
-        y0 = int(round(ay - anchor_px / 2))
-        h, w = marker.shape[:2]
-        img[y0:y0 + h, x0:x0 + w] = marker
+    anchors_layout: list[dict] = []
+    if use_anchors:
+        for i, corner in enumerate(ANCHOR_CORNERS):
+            ax, ay = anchor_centers[corner]
+            size_px = anchor_sizes_px[corner]
+            marker = _generate_aruco_marker(ARUCO_DICT, i, max(8, int(round(size_px))))
+            if marker.ndim == 2:
+                marker = cv2.cvtColor(marker, cv2.COLOR_GRAY2BGR)
+            x0 = int(round(ax - size_px / 2))
+            y0 = int(round(ay - size_px / 2))
+            h, w = marker.shape[:2]
+            img[y0:y0 + h, x0:x0 + w] = marker
+            anchors_layout.append({
+                "corner": corner,
+                "x_mm": px_to_mm(x0),
+                "y_mm": px_to_mm(y0),
+                "size_mm": px_to_mm(size_px),
+            })
 
     config: dict = {
         "schema_version": SCHEMA_VERSION,
@@ -947,7 +1049,7 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
                 "page": 0,
                 "x": anchor_centers[corner][0] / pw,
                 "y": anchor_centers[corner][1] / ph,
-                "size": anchor_px / pw,
+                "size": anchor_sizes_px[corner] / pw,
                 "tolerance": 0.15,
                 "required": True,
             }
@@ -967,7 +1069,10 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         raise ValueError("; ".join(i["message"] for i in issues if i.get("level") == "error"))
     warnings.extend(i["message"] for i in issues if i.get("level") == "warning")
 
-    return GeneratedCard(image=img, config=config, warnings=warnings, layout=block_layout)
+    return GeneratedCard(
+        image=img, config=config, warnings=warnings, layout=block_layout,
+        anchors_layout=anchors_layout, qr_layout=qr_layout_mm,
+    )
 
 
 # ── Ponte PIL (texto/linhas) ↔ numpy (ArUco) ──────────────────────────────
