@@ -63,10 +63,23 @@ export interface CustomInfoRegion {
   locked?: boolean;
 }
 
+/** Tipos de elemento decorativo. Nenhum deles entra na leitura OMR — o motor
+ *  só olha âncoras, QR, bolhas e matrícula. `image` existe apenas nos modelos
+ *  importados de imagem; o gerador do zero desenha os demais. */
+export type CustomElementKind =
+  | 'text'
+  | 'line'
+  | 'image'
+  | 'rect'
+  | 'circle'
+  | 'box'
+  | 'written_lines'
+  | 'instructions';
+
 /** Elemento decorativo: desenhado na impressão, ignorado pela leitura OMR. */
 export interface CustomElement {
   id: string;
-  kind: 'text' | 'line' | 'image';
+  kind: CustomElementKind;
   page?: number;
   x: number;
   y: number;
@@ -80,6 +93,18 @@ export interface CustomElement {
   /** Id opaco do arquivo de imagem (`ast_<12 hex>`), só para kind='image'. */
   asset: string | null;
   locked?: boolean;
+  /** Rótulo/título (caixa de comentário, instruções). */
+  label?: string;
+  /** Nº de linhas (linhas de resposta ou área de comentário). */
+  rows?: number;
+  /** Formas preenchidas (rect/circle). Padrão: só contorno. */
+  fill?: boolean;
+  /** Espessura do contorno em fração da maior dimensão da página. */
+  stroke_w?: number;
+  /** Rotação em graus — só faz sentido em decorativos. */
+  rotation?: number;
+  /** Oculto no projeto: não é impresso. */
+  hidden?: boolean;
 }
 
 export interface CustomBlock {
@@ -331,10 +356,12 @@ export interface CardBlockSpec {
   locked?: boolean;
 }
 
-/** Elemento decorativo do gerador (texto ou linha). Coordenadas 0..1. */
+/** Elemento decorativo do gerador (texto, linha, formas e áreas). 0..1. */
 export interface CardElementSpec {
-  kind: 'text' | 'line';
+  kind: Exclude<CustomElementKind, 'image'>;
   text?: string;
+  /** Rótulo/título de caixa de comentário e instruções. */
+  label?: string;
   x: number;
   y: number;
   w: number;
@@ -345,6 +372,14 @@ export interface CardElementSpec {
   font_mm?: number;
   align?: 'left' | 'center' | 'right';
   bold?: boolean;
+  /** Nº de linhas (written_lines/box). */
+  rows?: number;
+  /** Formas preenchidas. */
+  fill?: boolean;
+  /** Espessura do contorno em mm. */
+  stroke_mm?: number;
+  /** Rotação em graus (apenas decorativos). */
+  rotation?: number;
   hidden?: boolean;
   locked?: boolean;
 }

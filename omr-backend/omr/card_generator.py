@@ -937,14 +937,19 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             "end_question": start_q + n_q - 1,
         })
 
-    # ── Elementos decorativos (texto/linha) ─────────────────────────────────
+    # ── Elementos decorativos (texto/linha/formas/áreas) ────────────────────
+    from PIL import Image as _Image, ImageDraw as _ImageDraw
+
     elements_config: list[dict] = []
     for e in s.get("elements") or []:
         if not isinstance(e, dict):
             continue
         if bool(e.get("hidden", False)):
             continue
-        kind = e.get("kind") if e.get("kind") in ("text", "line") else "text"
+        kind = e.get("kind")
+        if kind not in ("text", "line", "rect", "circle", "box",
+                        "written_lines", "instructions"):
+            kind = "text"
         if e.get("kind") == "image":
             warnings.append("Imagens decorativas não são suportadas no gerador do zero.")
             continue
@@ -967,32 +972,112 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
         font_px = _px_font(e, "font", mm2px(font_mm), dpi)
         x_px, y_px = ex * pw, ey * ph
         w_px, h_px = ew * pw, eh * ph
-        fill = (40, 40, 40)
+
+        ink = (40, 40, 40, 255)
+        try:
+            rotation = max(-180.0, min(180.0, float(e.get("rotation") or 0.0)))
+        except (TypeError, ValueError):
+            rotation = 0.0
+        try:
+            stroke_mm = max(0.1, min(3.0, float(e.get("stroke_mm") or 0.25)))
+        except (TypeError, ValueError):
+            stroke_mm = 0.25
+        lw = max(1, int(round(mm2px(stroke_mm))))
+        try:
+            rows = max(0, min(30, int(e.get("rows") or 0)))
+        except (TypeError, ValueError):
+            rows = 0
+        label = str(e.get("label") or "")[:120]
+        bold = bool(e.get("bold", False))
+        fill_shape = bool(e.get("fill", False))
+
+        def _paste_rotated(fn, x0, y0, bw, bh, deg):
+            """Desenha num buffer transparente e cola (girando) sobre o cartão.
+
+            Como o buffer é transparente, a rotação só adiciona tinta — não
+            apaga o que já está desenhado embaixo.
+            """
+            layer = _Image.new("RGBA", (max(1, int(round(bw))), max(1, int(round(bh)))),
+                               (255, 255, 255, 0))
+            fn(_ImageDraw.Draw(layer))
+            if abs(deg) < 0.01:
+                pil.paste(layer, (int(round(x0)), int(round(y0))), layer)
+                return
+            rot = layer.rotate(deg, resample=_Image.BICUBIC, expand=True)
+            cx, cy = x0 + bw / 2, y0 + bh / 2
+            pil.paste(rot, (int(round(cx - rot.width / 2)),
+                            int(round(cy - rot.height / 2))), rot)
+
+        iw, ih = max(1, int(round(w_px))), max(1, int(round(h_px)))
 
         if kind == "text":
-            font = load_font(font_px)
-            line_h = font_px * 1.25
-            lines = text.splitlines() or [""]
-            for li, line in enumerate(lines):
-                if line_h * (li + 1) > h_px + 1:
-                    break
-                fitted = _fit_text(draw, line, font, w_px)
-                tw = draw.textlength(fitted, font=font)
-                tx = x_px
-                if align == "center":
-                    tx = x_px + (w_px - tw) / 2
-                elif align == "right":
-                    tx = x_px + w_px - tw
-                ty = y_px + li * line_h
-                if bool(e.get("bold", False)):
-                    draw.text((tx, ty), fitted, font=font, fill=fill,
-                              stroke_width=1, stroke_fill=fill)
-                else:
-                    draw.text((tx, ty), fitted, font=font, fill=fill)
-        else:  # linha horizontal
-            ly = y_px + h_px / 2
-            draw.line((x_px, ly, x_px + w_px, ly), fill=(90, 90, 90),
-                      width=max(1, int(round(mm2px(0.25)))))
+            def _txt(dd):
+                font = load_font(font_px)
+                line_h = font_px * 1.25
+                for li, line in enumerate(text.splitlines() or [""]):
+                    if li > 0 and line_h * (li + 1) > ih + 1:
+                        break
+                    fitted = _fit_text(dd, line, font, iw)
+                    tw = dd.textlength(fitted, font=font)
+                    tx = 0.0
+                    if align == "center":
+                        tx = (iw - tw) / 2
+                    elif align == "right":
+                        tx = iw - tw
+                    if bold:
+                        dd.text((tx, li * line_h), fitted, font=font, fill=ink,
+                                stroke_width=1, stroke_fill=ink)
+                    else:
+                        dd.text((tx, li * line_h), fitted, font=font, fill=ink)
+
+            _paste_rotated(_txt, x_px, y_px, iw, ih, rotation)
+        elif kind == "line":
+            _paste_rotated(
+                lambda dd: dd.line((0, ih / 2, iw, ih / 2), fill=ink, width=lw),
+                x_px, y_px, iw, ih, rotation)
+        elif kind == "rect":
+            _paste_rotated(
+                lambda dd: dd.rectangle((0, 0, iw - 1, ih - 1), outline=ink,
+                                        fill=ink if fill_shape else None, width=lw),
+                x_px, y_px, iw, ih, rotation)
+        elif kind == "circle":
+            _paste_rotated(
+                lambda dd: dd.ellipse((0, 0, iw - 1, ih - 1), outline=ink,
+                                      fill=ink if fill_shape else None, width=lw),
+                x_px, y_px, iw, ih, rotation)
+        elif kind == "written_lines":
+            n = max(1, rows or 3)
+            gap = ih / n
+
+            def _lines(dd):
+                for i in range(n):
+                    ly = int(round((i + 1) * gap)) - lw // 2
+                    ly = max(lw, min(ih - lw, ly))
+                    dd.line((lw, ly, iw - lw, ly), fill=ink, width=lw)
+
+            _paste_rotated(_lines, x_px, y_px, iw, ih, rotation)
+        else:  # box | instructions
+            def _box(dd):
+                dd.rectangle((0, 0, iw - 1, ih - 1), outline=ink, width=lw)
+                font = load_font(font_px)
+                pad = max(2, lw)
+                ty = pad
+                if label:
+                    dd.text((pad, ty), label, font=font, fill=ink,
+                            stroke_width=1, stroke_fill=ink)
+                    ty += int(font_px * 1.3)
+                for line in (text.splitlines()[:4] if text else []):
+                    if ty > ih - pad:
+                        break
+                    dd.text((pad, ty), line, font=font, fill=ink)
+                    ty += int(font_px * 1.25)
+                for i in range(rows):
+                    ly = ty + int(round((i + 0.6) * (ih - ty) / max(1, rows)))
+                    if ly > ih - pad:
+                        break
+                    dd.line((pad, ly, iw - pad, ly), fill=ink, width=max(1, lw // 2))
+
+            _paste_rotated(_box, x_px, y_px, iw, ih, rotation)
 
         elements_config.append({
             "id": f"el_{len(elements_config) + 1}",
@@ -1005,8 +1090,13 @@ def generate_card(spec: dict | None = None) -> GeneratedCard:
             "text": text,
             "font_size": font_px,
             "align": align,
-            "bold": bool(e.get("bold", False)),
+            "bold": bold,
             "asset": None,
+            "label": label,
+            "rows": rows,
+            "fill": fill_shape,
+            "stroke_w": max(0.0002, min(0.02, stroke_mm / max(pw_mm, ph_mm))),
+            "rotation": rotation,
         })
 
     img = _BGR(pil)

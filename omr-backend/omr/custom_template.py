@@ -55,6 +55,15 @@ SCHEMA_VERSION = 1
 
 CORNERS = ("TL", "TR", "BR", "BL")
 
+# Tipos de elemento decorativo. `text`/`line`/`image` são os originais; os
+# demais (retângulo, círculo, caixa de comentário, linhas de resposta e
+# instruções prontas) também são DECORATIVOS — não participam da leitura: o
+# motor só olha âncoras, QR, bolhas e matrícula.
+ELEMENT_KINDS = (
+    "text", "line", "image",
+    "rect", "circle", "box", "written_lines", "instructions",
+)
+
 # Teto do lado maior do alvo de retificação (evita warp gigante com foto 12MP)
 MAX_CANON_SIDE = 2600
 
@@ -328,7 +337,7 @@ def normalize_config(config: dict | None) -> dict:
             continue
         elements.append({
             "id": str(e.get("id") or f"el_{len(elements) + 1}"),
-            "kind": e.get("kind") if e.get("kind") in ("text", "line", "image") else "text",
+            "kind": e.get("kind") if e.get("kind") in ELEMENT_KINDS else "text",
             "page": _page_index(e.get("page")),
             "x": _clamp01(e.get("x")),
             "y": _clamp01(e.get("y")),
@@ -340,6 +349,20 @@ def normalize_config(config: dict | None) -> dict:
             "bold": bool(e.get("bold", False)),
             "asset": _asset_id(e.get("asset")),
             "locked": bool(e.get("locked", False)),
+            # ── Campos dos tipos decorativos novos (P: paridade de UX) ──
+            # Rótulo/título (caixa de comentário, instruções, formas).
+            "label": str(e.get("label") or "")[:120],
+            # Nº de linhas (linhas de resposta escrita / caixa de comentário).
+            "rows": max(0, min(30, int(e.get("rows") or 0))),
+            # Preenchido (formas) — por padrão é só contorno.
+            "fill": bool(e.get("fill", False)),
+            # Espessura do contorno em fração da MAIOR dimensão da página.
+            "stroke_w": max(0.0002, min(0.02, float(e.get("stroke_w") or 0.0015))),
+            # Rotação em graus. Permitida SÓ em elementos decorativos — e todo
+            # `elements` é decorativo (o motor nunca lê essas regiões).
+            "rotation": max(-180.0, min(180.0, float(e.get("rotation") or 0.0))),
+            # Oculto: fica no projeto do editor mas não é desenhado.
+            "hidden": bool(e.get("hidden", False)),
         })
     out["elements"] = elements
 
@@ -775,6 +798,22 @@ def validate_config(config: dict) -> list[dict]:
             add("warning", "element_empty", "Elemento de texto sem conteúdo.", e["id"])
         if e["kind"] == "image" and e["asset"] is None:
             add("warning", "element_asset", "Elemento de imagem sem arquivo enviado.", e["id"])
+        # Caixa de comentário sem rótulo: o aluno não sabe o que escrever ali.
+        if e["kind"] == "box" and not e["label"].strip():
+            add("warning", "element_box_label",
+                "Área de comentários sem rótulo — escreva algo como "
+                "\"Observações\" para o aluno saber o que preencher.", e["id"])
+        if e["kind"] == "written_lines" and e["rows"] < 1:
+            add("warning", "element_rows",
+                "Linhas de resposta sem nenhuma linha definida — "
+                "aumente a quantidade de linhas.", e["id"])
+        # Elementos rotacionados são decorativos (nunca entram na leitura), mas
+        # o giu aumenta a área ocupada: a checagem de sobreposição abaixo usa o
+        # retângulo alinhado, então avisamos para conferir visualmente.
+        if abs(e["rotation"]) > 0.01:
+            add("warning", "element_rotated",
+                "Elemento rotacionado: confira se ele não invade as áreas de "
+                "leitura (âncoras, QR, bolhas e matrícula).", e["id"])
         ex0, ey0, ex1, ey1 = e["x"], e["y"], e["x"] + e["w"], e["y"] + e["h"]
         hit = next(
             (b for b in bubbles_all
@@ -789,6 +828,25 @@ def validate_config(config: dict) -> list[dict]:
                                    or ey1 <= qr["y"] or qr["y"] + qr["h"] <= ey0):
             add("warning", "element_over_qr",
                 "Elemento sobre o QR Code — o QR precisa ficar limpo para ser lido.", e["id"])
+        for a in cfg["anchors"]:
+            if int(a.get("page") or 0) != int(e["page"] or 0):
+                continue
+            half = float(a["size"]) / 2
+            if not (ex1 <= a["x"] - half or a["x"] + half <= ex0
+                    or ey1 <= a["y"] - half or a["y"] + half <= ey0):
+                add("warning", "element_over_anchor",
+                    f"Elemento sobre a âncora {a['id']} — a âncora precisa do "
+                    "quadrado limpo para alinhar a folha.", e["id"])
+                break
+        for g in cfg["idgrids"]:
+            if int(g.get("page") or 0) != int(e["page"] or 0):
+                continue
+            if not (ex1 <= g["x"] or g["x"] + g["w"] <= ex0
+                    or ey1 <= g["y"] or g["y"] + g["h"] <= ey0):
+                add("warning", "element_over_idgrid",
+                    "Elemento sobre a grade de matrícula — a leitura da "
+                    "matrícula pode falhar; mova-o para fora.", e["id"])
+                break
 
     # Matrícula em bolhas: fora da página é erro; sobre bolha de resposta é
     # aviso (as duas leituras brigam pela mesma tinta).
@@ -2708,40 +2766,142 @@ def render_overlay(config: dict, base_bgr: np.ndarray, fields: dict[str, str] | 
     # Elementos decorativos da página. Depois dos campos para que texto/linha
     # do usuário fiquem por cima; âncoras e bolhas continuam intocadas porque
     # a validação avisa quando um elemento cai sobre elas.
-    elements = [e for e in cfg["elements"] if int(e.get("page") or 0) == int(page or 0)]
+    elements = [e for e in cfg["elements"]
+                if int(e.get("page") or 0) == int(page or 0)
+                and not e.get("hidden")]
     if elements:
         pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-        d = ImageDraw.Draw(pil)
+        INK = (0, 0, 0)
+
+        def _paste_rotated(draw_fn, x0: int, y0: int, bw: int, bh: int, deg: float) -> None:
+            """Desenha `draw_fn` num buffer (bw x bh) e cola girando pelo centro.
+
+            O buffer é transparente, então a rotação só ADICIONA tinta: nada
+            que esteja embaixo (campos, bolhas, QR) é apagado.
+            """
+            layer = Image.new("RGBA", (max(1, bw), max(1, bh)), (0, 0, 0, 0))
+            draw_fn(ImageDraw.Draw(layer))
+            if abs(deg) < 0.01:
+                pil.paste(layer, (x0, y0), layer)
+                return
+            rot = layer.rotate(deg, resample=Image.BICUBIC, expand=True)
+            cx, cy = x0 + bw / 2, y0 + bh / 2
+            pil.paste(rot, (int(round(cx - rot.width / 2)),
+                            int(round(cy - rot.height / 2))), rot)
+
         for e in elements:
             x0 = int(e["x"] * w)
             y0 = int(e["y"] * h)
             bw = max(1, int(e["w"] * w))
             bh = max(1, int(e["h"] * h))
-            if e["kind"] == "line":
-                d.rectangle((x0, y0, x0 + bw, y0 + bh), fill=(0, 0, 0))
-            elif e["kind"] == "image":
+            kind = e["kind"]
+            rot = float(e.get("rotation") or 0.0)
+            lw = max(1, int(round(float(e.get("stroke_w") or 0.0015) * max(w, h))))
+
+            if kind == "line":
+                _paste_rotated(
+                    lambda dd: dd.rectangle((0, 0, bw, bh), fill=INK),
+                    x0, y0, bw, bh, rot)
+            elif kind == "rect":
+                fill = INK if e.get("fill") else None
+                _paste_rotated(
+                    lambda dd, fill=fill: dd.rectangle(
+                        (0, 0, max(0, bw - 1), max(0, bh - 1)),
+                        outline=INK, fill=fill, width=lw),
+                    x0, y0, bw, bh, rot)
+            elif kind == "circle":
+                fill = INK if e.get("fill") else None
+                _paste_rotated(
+                    lambda dd, fill=fill: dd.ellipse(
+                        (0, 0, max(0, bw - 1), max(0, bh - 1)),
+                        outline=INK, fill=fill, width=lw),
+                    x0, y0, bw, bh, rot)
+            elif kind == "written_lines":
+                rows = max(1, int(e.get("rows") or 3))
+                gap = bh / rows
+
+                def _lines(dd, rows=rows, gap=gap):
+                    for i in range(rows):
+                        ly = int(round((i + 1) * gap)) - lw // 2
+                        ly = max(lw, min(bh - lw, ly))
+                        dd.line((lw, ly, bw - lw, ly), fill=INK, width=lw)
+
+                _paste_rotated(_lines, x0, y0, bw, bh, rot)
+            elif kind in ("box", "instructions"):
+                label = (e.get("label") or "").strip()
+                text = (e.get("text") or "").strip()
+                font = load_font(max(6, int(e["font_size"])))
+                rows = max(0, int(e.get("rows") or 0))
+                pad = max(2, lw)
+                fsize = max(6, int(e["font_size"]))
+
+                def _box(dd, label=label, text=text, font=font, rows=rows,
+                         pad=pad, fsize=fsize):
+                    dd.rectangle((0, 0, max(0, bw - 1), max(0, bh - 1)),
+                                 outline=INK, width=lw)
+                    ty = pad
+                    if label:
+                        dd.text((pad, ty), label, font=font, fill=INK,
+                                stroke_width=1, stroke_fill=INK)
+                        ty += int(fsize * 1.3)
+                    if text:
+                        for line in text.splitlines()[:4]:
+                            if ty > bh - pad:
+                                break
+                            dd.text((pad, ty), line, font=font, fill=INK)
+                            ty += int(fsize * 1.25)
+                    for i in range(rows):
+                        ly = ty + int(round((i + 0.6) * (bh - ty) / max(1, rows)))
+                        if ly > bh - pad:
+                            break
+                        dd.line((pad, ly, bw - pad, ly), fill=INK, width=max(1, lw // 2))
+
+                _paste_rotated(_box, x0, y0, bw, bh, rot)
+            elif kind == "image":
                 asset = (assets or {}).get(e.get("asset") or "")
                 if asset is None:
                     continue
-                scale = min(bw / asset.width, bh / asset.height)
-                nw = max(1, int(asset.width * scale))
-                nh = max(1, int(asset.height * scale))
-                resized = asset.resize((nw, nh), Image.LANCZOS)
-                pil.paste(resized, (x0 + (bw - nw) // 2, y0 + (bh - nh) // 2), resized)
-            else:
-                text = e["text"].strip()
+                if abs(rot) < 0.01:
+                    scale = min(bw / asset.width, bh / asset.height)
+                    nw = max(1, int(asset.width * scale))
+                    nh = max(1, int(asset.height * scale))
+                    resized = asset.resize((nw, nh), Image.LANCZOS)
+                    pil.paste(resized, (x0 + (bw - nw) // 2, y0 + (bh - nh) // 2), resized)
+                else:
+                    def _img(dd, asset=asset):
+                        scale = min(bw / asset.width, bh / asset.height)
+                        nw = max(1, int(asset.width * scale))
+                        nh = max(1, int(asset.height * scale))
+                        r = asset.resize((nw, nh), Image.LANCZOS)
+                        pil.paste(r, (int((bw - nw) / 2), int((bh - nh) / 2)), r)
+
+                    _paste_rotated(_img, x0, y0, bw, bh, rot)
+            else:  # text
+                text = (e.get("text") or "").strip()
                 if not text:
                     continue
                 font = load_font(max(6, int(e["font_size"])))
-                tw = d.textlength(text, font=font)
-                if e["align"] == "center":
-                    tx = x0 + max(0, (bw - tw) / 2)
-                elif e["align"] == "right":
-                    tx = x0 + max(0, bw - tw)
-                else:
-                    tx = x0
-                stroke = max(0, int(e["font_size"] / 22)) if e["bold"] else 0
-                d.text((tx, y0), text, fill=(0, 0, 0), font=font, stroke_width=stroke)
+                line_h = int(max(6, int(e["font_size"])) * 1.25)
+                bold = bool(e.get("bold", False))
+                align = e["align"]
+
+                def _text(dd, text=text, font=font, bold=bold, align=align,
+                          line_h=line_h):
+                    for li, line in enumerate(text.splitlines() or [""]):
+                        if li > 0 and line_h * (li + 1) > bh + 1:
+                            break
+                        tw = dd.textlength(line, font=font)
+                        if align == "center":
+                            tx = max(0, (bw - tw) / 2)
+                        elif align == "right":
+                            tx = max(0, bw - tw)
+                        else:
+                            tx = 0
+                        dd.text((tx, li * line_h), line, font=font, fill=INK,
+                                stroke_width=1 if bold else 0, stroke_fill=INK)
+
+                _paste_rotated(_text, x0, y0, bw, bh, rot)
+
         img = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2BGR)
 
     return img
