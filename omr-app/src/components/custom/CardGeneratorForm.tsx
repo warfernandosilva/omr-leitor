@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { ReactNode } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, CircleDot,
-  Copy, Crosshair, Eye, EyeOff, FileDown, FileText, Focus, Grid3x3, Info, LayoutGrid,
-  Layers, ListChecks, Loader2, Lock, Maximize2, MessageSquare, Minus, MousePointer2,
-  Move, PanelLeft, PanelRight, Plus, QrCode, Redo2, RefreshCw, RotateCcw, Ruler,
-  Scaling, ShieldCheck, Sparkles, Trash2, Type, Undo2, Unlock, X, ZoomIn, ZoomOut,
+  AlertTriangle, AlignCenterVertical, AlignEndVertical, AlignStartVertical,
+  AlignHorizontalDistributeCenter, AlignVerticalDistributeCenter, ArrowLeft,
+  ArrowRight, BringToFront, Check, ChevronDown, ChevronUp, Circle, CircleDot,
+  ClipboardPaste, Copy, Crosshair, Eye, EyeOff, FileDown, FileText, Focus,
+  Grid3x3, Info, LayoutGrid, Layers, ListChecks, Loader2, Lock, Maximize2,
+  MessageSquare, Minus, MousePointer2, Move, PanelLeft, PanelRight, PenLine,
+  Plus, QrCode, Redo2, RefreshCw, RotateCcw, Ruler, Scaling, Scissors,
+  SendToBack, ShieldCheck, Sparkles, Square, TextCursorInput, Trash2, Type,
+  Undo2, Unlock, X, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import type { Exam } from '../../types';
 import { syncExam } from '../../utils/api';
@@ -187,10 +191,31 @@ const STARTERS: Starter[] = [
 
 type Step = 1 | 2 | 3;
 type PropsTab = 'geral' | 'questoes' | 'elementos' | 'pagina';
+type RibbonTab = 'inicio' | 'inserir' | 'layout' | 'exibir';
 type SelectionKind = 'block' | 'element' | 'anchor' | 'qr';
 type Selection = { kind: SelectionKind; index: number };
 type ToolMode = 'select' | 'move' | 'resize';
 type ResizeDir = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+
+/** Tipos decorativos que o gerador do zero consegue desenhar. */
+type GeneratorElementKind = CardElementSpec['kind'];
+
+const ELEMENT_LABELS: Record<GeneratorElementKind, string> = {
+  text: 'Texto',
+  line: 'Linha',
+  rect: 'Retângulo',
+  circle: 'Círculo',
+  box: 'Área de comentários',
+  written_lines: 'Linhas de resposta',
+  instructions: 'Instruções',
+};
+
+const RIBBON_TABS: { id: RibbonTab; label: string }[] = [
+  { id: 'inicio', label: 'Início' },
+  { id: 'inserir', label: 'Inserir' },
+  { id: 'layout', label: 'Layout' },
+  { id: 'exibir', label: 'Exibir' },
+];
 
 const ANCHOR_CORNERS: CornerName[] = ['TL', 'TR', 'BR', 'BL'];
 
@@ -366,6 +391,69 @@ function bboxOf(rects: RectMm[]): RectMm {
   return { x, y, w: right - x, h: bottom - y };
 }
 
+function ElementIcon({ kind, size = 13 }: { kind: GeneratorElementKind; size?: number }) {
+  switch (kind) {
+    case 'rect':
+      return <Square size={size} aria-hidden />;
+    case 'circle':
+      return <Circle size={size} aria-hidden />;
+    case 'written_lines':
+      return <PenLine size={size} aria-hidden />;
+    case 'box':
+      return <MessageSquare size={size} aria-hidden />;
+    case 'instructions':
+      return <Info size={size} aria-hidden />;
+    case 'line':
+      return <Minus size={size} aria-hidden />;
+    default:
+      return <Type size={size} aria-hidden />;
+  }
+}
+
+function elementLabel(kind: GeneratorElementKind): string {
+  return ELEMENT_LABELS[kind] ?? 'Elemento';
+}
+
+function RibbonAction({
+  icon, label, onClick, disabled, active, title,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-pressed={active}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+        active
+          ? 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
+          : 'border-transparent text-gray-600 hover:bg-surface dark:text-gray-300 dark:hover:bg-gray-800'
+      } disabled:cursor-not-allowed disabled:opacity-40`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function RibbonGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex shrink-0 flex-col gap-0.5 rounded-md px-1 py-0.5">
+      <div className="flex items-center gap-0.5">{children}</div>
+      <span className="text-center text-[9px] font-semibold uppercase tracking-[0.06em] text-gray-400">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 // ─── Componentes internos ─────────────────────────────────────────────────────
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -440,36 +528,6 @@ function Stepper({
         )}
       </div>
     </div>
-  );
-}
-
-function ToolButton({
-  icon, label, onClick, active, disabled, title, wide,
-}: {
-  icon: ReactNode;
-  label: string;
-  onClick: () => void;
-  active?: boolean;
-  disabled?: boolean;
-  title?: string;
-  wide?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title ?? label}
-      aria-pressed={active}
-      className={`flex ${wide ? 'col-span-2' : ''} flex-col items-center justify-center gap-1 rounded-lg border px-1 py-2 text-[10px] font-semibold leading-none transition-colors disabled:opacity-40 ${
-        active
-          ? 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
-          : 'border-line bg-white text-gray-600 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-brand-700 dark:hover:bg-brand-700/20'
-      }`}
-    >
-      <span aria-hidden>{icon}</span>
-      <span className="truncate">{label}</span>
-    </button>
   );
 }
 
@@ -549,9 +607,14 @@ function ElementCard({
     const limited = key === 'w' || key === 'h' ? Math.max(0.01, value) : value;
     onChange({ [key]: limited }, `el-${index}-${key}`);
   };
+  const kind = element.kind;
+  const hasText = kind === 'text' || kind === 'instructions' || kind === 'box';
+  const hasLines = kind === 'written_lines' || kind === 'box';
+  const isShape = kind === 'rect' || kind === 'circle';
 
   return (
     <div
+      data-el-card={index}
       className={`rounded-lg border p-2.5 transition-colors ${
         selected ? 'border-brand-300 bg-brand-50/40 dark:border-brand-700 dark:bg-brand-700/10' : 'border-line dark:border-gray-700'
       }`}
@@ -559,68 +622,148 @@ function ElementCard({
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 dark:text-gray-400">
-          {element.kind === 'text' ? <Type size={13} aria-hidden /> : <Minus size={13} aria-hidden />}
-          {element.kind === 'text' ? 'Texto' : 'Linha'} {index + 1}
-          {(element.hidden || element.locked) && (
-            <span className="ml-1 inline-flex items-center gap-1 text-[10px] font-normal text-gray-400">
-              {element.hidden && <EyeOff size={10} aria-hidden />}
-              {element.locked && <Lock size={10} aria-hidden />}
-            </span>
-          )}
+          <ElementIcon kind={kind} />
+          {elementLabel(kind)} {index + 1}
         </span>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onRemove(); }}
-          className="btn-icon !min-h-[26px] !min-w-[26px] text-gray-400 hover:text-danger-600"
-          aria-label={`Remover ${element.kind === 'text' ? 'texto' : 'linha'} ${index + 1}`}
-        >
-          <Trash2 size={13} aria-hidden />
-        </button>
+        <span className="flex items-center gap-0.5">
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onChange({ hidden: !element.hidden }, `el-${index}-hidden`); }}
+            className="btn-icon !min-h-[26px] !min-w-[26px] text-gray-400"
+            aria-label={element.hidden ? 'Mostrar elemento' : 'Ocultar elemento'}
+            title={element.hidden ? 'Mostrar' : 'Ocultar'}
+          >
+            {element.hidden ? <EyeOff size={13} aria-hidden /> : <Eye size={13} aria-hidden />}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onChange({ locked: !element.locked }, `el-${index}-locked`); }}
+            className="btn-icon !min-h-[26px] !min-w-[26px] text-gray-400"
+            aria-label={element.locked ? 'Desbloquear elemento' : 'Bloquear elemento'}
+            title={element.locked ? 'Desbloquear' : 'Bloquear'}
+          >
+            {element.locked ? <Lock size={13} aria-hidden /> : <Unlock size={13} aria-hidden />}
+          </button>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="btn-icon !min-h-[26px] !min-w-[26px] text-gray-400 hover:text-danger-600"
+            aria-label={`Remover ${elementLabel(kind).toLowerCase()} ${index + 1}`}
+          >
+            <Trash2 size={13} aria-hidden />
+          </button>
+        </span>
       </div>
 
-      {element.kind === 'text' && (
-        <>
-          <Input
-            value={element.text ?? ''}
-            placeholder="Texto"
-            aria-label="Conteúdo do texto"
-            className={`${COMPACT} mb-2`}
-            onChange={(e) => onChange({ text: e.target.value }, `el-${index}-text`)}
-          />
-          <div className="mb-2 grid grid-cols-2 gap-2">
-            <div>
-              <span className="mb-0.5 block text-[10px] text-gray-400">Fonte (pt)</span>
-              <Input
-                type="number" min={4} max={200} step={0.5}
-                value={element.font_pt ?? fontMmToPt(element.font_mm)}
-                className={COMPACT}
-                aria-label="Tamanho da fonte do texto em pontos"
-                onChange={(e) => onChange({ font_pt: numOrUndefined(e.target.value), font_mm: undefined }, `el-${index}-font`)}
-              />
-            </div>
-            <div>
-              <span className="mb-0.5 block text-[10px] text-gray-400">Alinhamento</span>
-              <Select
-                value={element.align ?? 'left'}
-                className={COMPACT}
-                onChange={(e) => onChange({ align: e.target.value as CardElementSpec['align'] }, `el-${index}-align`)}
-              >
-                <option value="left">Esquerda</option>
-                <option value="center">Centro</option>
-                <option value="right">Direita</option>
-              </Select>
-            </div>
+      {hasText && (
+        <Input
+          value={element.text ?? ''}
+          placeholder={kind === 'box' ? 'Texto de apoio (opcional)' : kind === 'instructions' ? 'Instruções para o aluno' : 'Texto'}
+          aria-label="Conteúdo do texto"
+          className={`${COMPACT} mb-2`}
+          onChange={(e) => onChange({ text: e.target.value }, `el-${index}-text`)}
+        />
+      )}
+
+      {kind === 'box' && (
+        <Input
+          value={element.label ?? ''}
+          placeholder="Rótulo (ex.: Observações)"
+          aria-label="Rótulo da área de comentários"
+          className={`${COMPACT} mb-2`}
+          onChange={(e) => onChange({ label: e.target.value }, `el-${index}-label`)}
+        />
+      )}
+
+      {(hasText || kind === 'written_lines') && (
+        <div className="mb-2 grid grid-cols-2 gap-2">
+          <div>
+            <span className="mb-0.5 block text-[10px] text-gray-400">Fonte (pt)</span>
+            <Input
+              type="number" min={4} max={200} step={0.5}
+              value={element.font_pt ?? fontMmToPt(element.font_mm)}
+              className={COMPACT}
+              aria-label="Tamanho da fonte em pontos"
+              onChange={(e) => onChange({ font_pt: numOrUndefined(e.target.value), font_mm: undefined }, `el-${index}-font`)}
+            />
           </div>
-          <label className="mb-2 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+          <div>
+            <span className="mb-0.5 block text-[10px] text-gray-400">Alinhamento</span>
+            <Select
+              value={element.align ?? 'left'}
+              className={COMPACT}
+              onChange={(e) => onChange({ align: e.target.value as CardElementSpec['align'] }, `el-${index}-align`)}
+            >
+              <option value="left">Esquerda</option>
+              <option value="center">Centro</option>
+              <option value="right">Direita</option>
+            </Select>
+          </div>
+        </div>
+      )}
+
+      {hasText && (
+        <label className="mb-2 flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
+          <input
+            type="checkbox"
+            checked={element.bold === true}
+            onChange={(e) => onChange({ bold: e.target.checked }, `el-${index}-bold`)}
+          />
+          Negrito
+        </label>
+      )}
+
+      {hasLines && (
+        <div className="mb-2">
+          <span className="mb-0.5 block text-[10px] text-gray-400">Linhas</span>
+          <Input
+            type="number" min={1} max={30} step={1}
+            value={element.rows ?? (kind === 'box' ? 3 : 3)}
+            className={COMPACT}
+            aria-label="Quantidade de linhas"
+            onChange={(e) => onChange({ rows: clamp(Number(e.target.value) || 1, 1, 30) }, `el-${index}-rows`)}
+          />
+        </div>
+      )}
+
+      {isShape && (
+        <div className="mb-2 grid grid-cols-2 items-end gap-2">
+          <label className="flex items-center gap-2 text-[11px] text-gray-500 dark:text-gray-400">
             <input
               type="checkbox"
-              checked={element.bold === true}
-              onChange={(e) => onChange({ bold: e.target.checked }, `el-${index}-bold`)}
+              checked={element.fill === true}
+              onChange={(e) => onChange({ fill: e.target.checked }, `el-${index}-fill`)}
             />
-            Negrito
+            Preenchido
           </label>
-        </>
+          <div>
+            <span className="mb-0.5 block text-[10px] text-gray-400">Contorno (mm)</span>
+            <Input
+              type="number" min={0.1} max={3} step={0.05}
+              value={element.stroke_mm ?? 0.25}
+              className={COMPACT}
+              aria-label="Espessura do contorno em milímetros"
+              onChange={(e) => onChange({ stroke_mm: numOrUndefined(e.target.value) }, `el-${index}-stroke`)}
+            />
+          </div>
+        </div>
       )}
+
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <div>
+          <span className="mb-0.5 block text-[10px] text-gray-400">Rotação (°)</span>
+          <Input
+            type="number" min={-180} max={180} step={1}
+            value={element.rotation ?? 0}
+            className={COMPACT}
+            aria-label="Rotação do elemento decorativo em graus"
+            onChange={(e) => onChange({ rotation: numOrUndefined(e.target.value) ?? 0 }, `el-${index}-rotation`)}
+          />
+        </div>
+        <p className="self-end text-[10px] leading-tight text-gray-400">
+          Só decorativos giram; áreas de leitura não.
+        </p>
+      </div>
 
       <div className="grid grid-cols-4 gap-1.5">
         {(['x', 'y', 'w', 'h'] as const).map((key) => (
@@ -833,9 +976,16 @@ export default function CardGeneratorForm({
   const [guides, setGuides] = useState<{ x: number[]; y: number[] }>({ x: [], y: [] });
   const [marquee, setMarquee] = useState<RectMm | null>(null);
   const [propsTab, setPropsTab] = useState<PropsTab>('geral');
+  /** Aba do ribbon: Início | Inserir | Layout | Exibir. */
+  const [ribbonTab, setRibbonTab] = useState<RibbonTab>('inicio');
+  const clipboardRef = useRef<{
+    blocks: { spec: CardBlockSpec; rect: Rect }[];
+    elements: CardElementSpec[];
+  } | null>(null);
   const [rulers, setRulers] = useState(true);
   const [grid, setGrid] = useState(false);
   const [snap, setSnap] = useState(true);
+  const [showOmr, setShowOmr] = useState(true);
   const [mobilePanel, setMobilePanel] = useState<'tools' | 'props' | null>(null);
 
   const [preview, setPreview] = useState<GeneratePreviewResult | null>(null);
@@ -879,6 +1029,14 @@ export default function CardGeneratorForm({
       selection.some((s) => s.kind === kind && s.index === index),
     [selection],
   );
+
+  // Mantém o cartão do elemento selecionado visível no painel de propriedades.
+  useEffect(() => {
+    if (selectedElementIndex == null || propsTab !== 'elementos') return;
+    document
+      .querySelectorAll(`[data-el-card="${selectedElementIndex}"]`)
+      .forEach((node) => node.scrollIntoView({ block: 'nearest' }));
+  }, [selectedElementIndex, propsTab]);
 
   // ─── Histórico ─────────────────────────────────────────────────────────────
 
@@ -1063,6 +1221,19 @@ export default function CardGeneratorForm({
     notify('Blocos reorganizados no fluxo automático.', 'info');
   };
 
+  /** Recomeça a folha inteira, mantendo a possibilidade de desfazer. */
+  const resetSheet = () => {
+    if (!window.confirm('Recomeçar a folha do zero? As alterações atuais podem ser desfeitas com Ctrl+Z.')) {
+      return;
+    }
+    pushHistory();
+    setSpec({ ...DEFAULT_SPEC, blocks: [{ ...DEFAULT_BLOCK }] });
+    setNome('Cartão-resposta');
+    setSelection([]);
+    fittedRef.current = false;
+    notify('Folha reiniciada.', 'info');
+  };
+
   // ─── Blocos e elementos ────────────────────────────────────────────────────
 
   /** Congela o layout automático dos blocos (mm) antes de uma edição livre. */
@@ -1178,14 +1349,113 @@ export default function CardGeneratorForm({
     setSelection((prev) => dropFromSelection(prev, 'block', index));
   };
 
-  const addElement = (kind: CardElementSpec['kind']) => {
-    const base: CardElementSpec = kind === 'text'
-      ? { kind, text: 'Novo texto', x: 0.08, y: 0.12, w: 0.5, h: 0.05, font_pt: 11, align: 'left' }
-      : { kind, x: 0.08, y: 0.5, w: 0.84, h: 0.006 };
+  const addElement = (kind: GeneratorElementKind) => {
+    const defaults: Record<GeneratorElementKind, CardElementSpec> = {
+      text: { kind, text: 'Novo texto', x: 0.08, y: 0.12, w: 0.5, h: 0.05, font_pt: 11, align: 'left' },
+      line: { kind, x: 0.08, y: 0.5, w: 0.84, h: 0.006 },
+      rect: { kind, x: 0.08, y: 0.32, w: 0.35, h: 0.12, stroke_mm: 0.25 },
+      circle: { kind, x: 0.08, y: 0.32, w: 0.15, h: 0.10, stroke_mm: 0.25 },
+      written_lines: {
+        kind, x: 0.08, y: 0.58, w: 0.84, h: 0.12, rows: 3, stroke_mm: 0.25,
+      },
+      box: {
+        kind, x: 0.08, y: 0.74, w: 0.84, h: 0.14, rows: 3, label: 'Observações',
+        text: '', font_pt: 9, stroke_mm: 0.25,
+      },
+      instructions: {
+        kind, x: 0.08, y: 0.24, w: 0.84, h: 0.065, label: 'Instruções',
+        text: 'Preencha as bolhas completamente com caneta escura ou lápis.',
+        font_pt: 9, align: 'left',
+      },
+    };
+    const base = defaults[kind];
     const newIndex = elements.length;
-    mutate({ elements: [...elements, base] }, 'elements');
+    mutate({ elements: [...elements, placeNewElement(base)] }, 'elements');
     setSelection([{ kind: 'element', index: newIndex }]);
     setPropsTab('elementos');
+  };
+
+  /**
+   * Procura o primeiro espaço livre (fora de blocos, âncoras, QR e outros
+   * elementos) para o elemento novo não nascer em cima das bolhas.
+   */
+  const placeNewElement = (base: CardElementSpec): CardElementSpec => {
+    const wMm = base.w * pageW;
+    const hMm = base.h * pageH;
+    const pad = Math.max(3, spec.margin_mm ?? 10);
+    const occupied = visibleRectsMm();
+    const fitsAt = (xMm: number, yMm: number) => {
+      if (xMm < pad - 0.01 || yMm < pad - 0.01) return false;
+      if (xMm + wMm > pageW - pad + 0.01 || yMm + hMm > pageH - pad + 0.01) return false;
+      return !occupied.some((o) => rectsIntersect({ x: xMm, y: yMm, w: wMm, h: hMm }, o));
+    };
+    let pos = { x: base.x * pageW, y: base.y * pageH };
+    if (!fitsAt(pos.x, pos.y)) {
+      const step = 4;
+      let found = false;
+      outer: for (let y = pad; y <= pageH - pad - hMm; y += step) {
+        for (let x = pad; x <= pageW - pad - wMm; x += step) {
+          if (fitsAt(x, y)) {
+            pos = { x, y };
+            found = true;
+            break outer;
+          }
+        }
+      }
+      // Sem espaço livre (folha cheia de questões): desloca em cascata para os
+      // elementos novos não nascerem exatamente um sobre o outro.
+      if (!found) {
+        const cascade = (elements.length % 6) * 6;
+        pos = {
+          x: clamp(pos.x, pad, Math.max(pad, pageW - pad - wMm)),
+          y: clamp(pos.y + cascade, pad, Math.max(pad, pageH - pad - hMm)),
+        };
+      }
+    }
+    return { ...base, x: round4(pos.x / pageW), y: round4(pos.y / pageH) };
+  };
+
+  /** Título pronto: texto decorativo em destaque no topo da folha. */
+  const addTitle = () => {
+    const newIndex = elements.length;
+    const base: CardElementSpec = {
+      kind: 'text', text: 'Título da avaliação', x: 0.08, y: 0.08, w: 0.84,
+      h: 0.06, font_pt: 18, align: 'center', bold: true,
+    };
+    mutate({ elements: [...elements, placeNewElement(base)] }, 'elements');
+    setSelection([{ kind: 'element', index: newIndex }]);
+    setPropsTab('elementos');
+  };
+
+  /** Bloco de verdadeiro/falso: duas alternativas fixas. */
+  const addTrueFalseBlock = () => {
+    const bounds = blocks.map((_, i) => blockBounds(i)).filter(Boolean) as Rect[];
+    const x = bounds.length ? Math.min(...bounds.map((b) => b.x)) : margin;
+    const y = bounds.length ? Math.max(...bounds.map((b) => b.y + b.h)) + 4 : 50;
+    const w = bounds.length ? Math.max(...bounds.map((b) => b.w)) : Math.max(60, pageW - margin * 2);
+    const h = 50;
+    const newIndex = blocks.length;
+    const free = blocks.length > 0 && blocks.every(hasBlockPos);
+    mutate({
+      blocks: [...blocks, {
+        ...DEFAULT_BLOCK,
+        title: 'Verdadeiro ou falso',
+        n_questions: 10,
+        labels: ['V', 'F'],
+        columns: 1,
+        start_question: totalQuestions + 1,
+        ...(free
+          ? {
+              x_mm: round1(x),
+              y_mm: round1(Math.min(y, Math.max(margin, pageH - h - margin))),
+              w_mm: round1(w),
+              h_mm: h,
+            }
+          : {}),
+      }],
+    });
+    setSelection([{ kind: 'block', index: newIndex }]);
+    setPropsTab('questoes');
   };
 
   const updateElement = (index: number, patch: Partial<CardElementSpec>, coalesce: string) => {
@@ -1425,6 +1695,171 @@ export default function CardGeneratorForm({
       updateElement(index, { locked: !elements[index]?.locked }, `lock-element-${index}`);
     }
   };
+
+  // ─── Área de transferência e organização (decorativos) ────────────────────
+
+  const selectedElementIndexes = useCallback(
+    () => selection.filter((s) => s.kind === 'element').map((s) => s.index),
+    [selection],
+  );
+
+  const copySelection = useCallback(() => {
+    const blockItems = selection
+      .filter((s) => s.kind === 'block')
+      .map((s) => ({ spec: blocks[s.index], rect: blockBounds(s.index) }))
+      .filter((x): x is { spec: CardBlockSpec; rect: Rect } => !!x.spec && !!x.rect);
+    const elementItems = selection
+      .filter((s) => s.kind === 'element')
+      .map((s) => elements[s.index])
+      .filter((x): x is CardElementSpec => !!x);
+    if (!blockItems.length && !elementItems.length) return;
+    clipboardRef.current = {
+      blocks: blockItems.map((x) => ({ spec: { ...x.spec }, rect: { ...x.rect } })),
+      elements: elementItems.map((x) => ({ ...x })),
+    };
+    const total = blockItems.length + elementItems.length;
+    notify(total === 1 ? '1 item copiado.' : `${total} itens copiados.`, 'info');
+  }, [selection, blocks, elements, blockBounds, notify]);
+
+  const cutSelection = useCallback(() => {
+    copySelection();
+    deleteSelection();
+  }, [copySelection, deleteSelection]);
+
+  const pasteClipboard = useCallback(() => {
+    const clip = clipboardRef.current;
+    if (!clip || (!clip.blocks.length && !clip.elements.length)) return;
+    const OFFSET = 4;
+    const frozen = freezeBlockPositions(blocks);
+    const blockStart = frozen.length;
+    const elementStart = elements.length;
+    const blockAdds: CardBlockSpec[] = clip.blocks.map(({ spec: b, rect }) => ({
+      ...b,
+      x_mm: round1(clamp(rect.x + OFFSET, 0, Math.max(0, pageW - rect.w))),
+      y_mm: round1(clamp(rect.y + OFFSET, 0, Math.max(0, pageH - rect.h))),
+      w_mm: round1(rect.w),
+      h_mm: round1(rect.h),
+    }));
+    const elementAdds: CardElementSpec[] = clip.elements.map((el) => ({
+      ...el,
+      x: round4(clamp(el.x + OFFSET / pageW, 0, Math.max(0, 1 - el.w))),
+      y: round4(clamp(el.y + OFFSET / pageH, 0, Math.max(0, 1 - el.h))),
+    }));
+    pushHistory();
+    setSpec((prev) => ({
+      ...prev,
+      blocks: [...frozen, ...blockAdds],
+      elements: [...(prev.elements ?? []), ...elementAdds],
+    }));
+    setSelection([
+      ...blockAdds.map((_, k) => ({ kind: 'block' as const, index: blockStart + k })),
+      ...elementAdds.map((_, k) => ({ kind: 'element' as const, index: elementStart + k })),
+    ]);
+  }, [blocks, elements, freezeBlockPositions, pageW, pageH, pushHistory]);
+
+  /** Alinha os elementos decorativos selecionados pela caixa da seleção. */
+  const alignElements = useCallback((mode: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => {
+    const idxs = selectedElementIndexes();
+    if (idxs.length < 2) return;
+    const rectOf = (el: CardElementSpec): RectMm => ({
+      x: el.x * pageW, y: el.y * pageH, w: el.w * pageW, h: el.h * pageH,
+    });
+    const rects = idxs.map((i) => rectOf(elements[i]));
+    const box = bboxOf(rects);
+    const next = elements.map((el, i) => {
+      const k = idxs.indexOf(i);
+      if (k < 0) return el;
+      const r = rects[k];
+      let x = r.x;
+      let y = r.y;
+      if (mode === 'left') x = box.x;
+      if (mode === 'center') x = box.x + (box.w - r.w) / 2;
+      if (mode === 'right') x = box.x + box.w - r.w;
+      if (mode === 'top') y = box.y;
+      if (mode === 'middle') y = box.y + (box.h - r.h) / 2;
+      if (mode === 'bottom') y = box.y + box.h - r.h;
+      return {
+        ...el,
+        x: round4(clamp(x / pageW, 0, Math.max(0, 1 - el.w))),
+        y: round4(clamp(y / pageH, 0, Math.max(0, 1 - el.h))),
+      };
+    });
+    mutate({ elements: next }, `align-${mode}`);
+  }, [selectedElementIndexes, elements, pageW, pageH, mutate]);
+
+  /** Distribui os elementos selecionados com espaçamento uniforme. */
+  const distributeElements = useCallback((axis: 'x' | 'y') => {
+    const idxs = selectedElementIndexes();
+    if (idxs.length < 3) return;
+    const rectOf = (el: CardElementSpec): RectMm => ({
+      x: el.x * pageW, y: el.y * pageH, w: el.w * pageW, h: el.h * pageH,
+    });
+    const items = idxs
+      .map((i) => ({ i, r: rectOf(elements[i]) }))
+      .sort((a, b) => (axis === 'x' ? a.r.x - b.r.x : a.r.y - b.r.y));
+    const box = bboxOf(items.map((it) => it.r));
+    const total = items.reduce((sum, it) => sum + (axis === 'x' ? it.r.w : it.r.h), 0);
+    const gap = ((axis === 'x' ? box.w : box.h) - total) / (items.length - 1);
+    let cursor = axis === 'x' ? box.x : box.y;
+    const pos = new Map<number, number>();
+    for (const it of items) {
+      pos.set(it.i, cursor);
+      cursor += (axis === 'x' ? it.r.w : it.r.h) + gap;
+    }
+    const next = elements.map((el, i) => {
+      const p = pos.get(i);
+      if (p == null) return el;
+      return axis === 'x'
+        ? { ...el, x: round4(clamp(p / pageW, 0, Math.max(0, 1 - el.w))) }
+        : { ...el, y: round4(clamp(p / pageH, 0, Math.max(0, 1 - el.h))) };
+    });
+    mutate({ elements: next }, `distribute-${axis}`);
+  }, [selectedElementIndexes, elements, pageW, pageH, mutate]);
+
+  /** Traz os elementos selecionados para o topo/base da ordem de camadas. */
+  const arrangeZ = useCallback((where: 'front' | 'back') => {
+    const idxs = selectedElementIndexes();
+    if (!idxs.length) return;
+    const picked = new Set(idxs);
+    const kept = elements.filter((_, i) => !picked.has(i));
+    const moved = idxs.map((i) => elements[i]);
+    const next = where === 'front' ? [...kept, ...moved] : [...moved, ...kept];
+    mutate({ elements: next }, `z-${where}`);
+    const start = where === 'front' ? kept.length : 0;
+    setSelection(idxs.map((_, k) => ({ kind: 'element' as const, index: start + k })));
+  }, [selectedElementIndexes, elements, mutate]);
+
+  const toggleSelectionLock = useCallback(() => {
+    const blocksSel = selection.filter((s) => s.kind === 'block').map((s) => s.index);
+    const elementsSel = selectedElementIndexes();
+    if (!blocksSel.length && !elementsSel.length) return;
+    const blockSet = new Set(blocksSel);
+    const elementSet = new Set(elementsSel);
+    const allLocked = [
+      ...blocksSel.map((i) => blocks[i]?.locked),
+      ...elementsSel.map((i) => elements[i]?.locked),
+    ].every(Boolean);
+    mutate({
+      blocks: blocks.map((b, i) => blockSet.has(i) ? { ...b, locked: !allLocked } : b),
+      elements: elements.map((el, i) => elementSet.has(i) ? { ...el, locked: !allLocked } : el),
+    }, 'lock-selection');
+  }, [selection, selectedElementIndexes, blocks, elements, mutate]);
+
+  const toggleSelectionHidden = useCallback(() => {
+    const blocksSel = selection.filter((s) => s.kind === 'block').map((s) => s.index);
+    const elementsSel = selectedElementIndexes();
+    if (!blocksSel.length && !elementsSel.length) return;
+    const blockSet = new Set(blocksSel);
+    const elementSet = new Set(elementsSel);
+    const allHidden = [
+      ...blocksSel.map((i) => blocks[i]?.hidden),
+      ...elementsSel.map((i) => elements[i]?.hidden),
+    ].every(Boolean);
+    mutate({
+      blocks: blocks.map((b, i) => blockSet.has(i) ? { ...b, hidden: !allHidden } : b),
+      elements: elements.map((el, i) => elementSet.has(i) ? { ...el, hidden: !allHidden } : el),
+    }, 'hide-selection');
+  }, [selection, selectedElementIndexes, blocks, elements, mutate]);
 
   // ─── Geometria e arraste no canvas ─────────────────────────────────────────
 
@@ -2007,6 +2442,21 @@ export default function CardGeneratorForm({
         duplicateSelection();
         return;
       }
+      if (meta && k === 'c') {
+        e.preventDefault();
+        copySelection();
+        return;
+      }
+      if (meta && k === 'x') {
+        e.preventDefault();
+        cutSelection();
+        return;
+      }
+      if (meta && k === 'v') {
+        e.preventDefault();
+        pasteClipboard();
+        return;
+      }
       if (meta && k === '0') {
         e.preventDefault();
         fitToScreen();
@@ -2042,6 +2492,7 @@ export default function CardGeneratorForm({
   }, [
     step, undo, redo, selectAll, duplicateSelection, deleteSelection, clearSelection,
     nudgeSelection, fitToScreen, zoomBy, selection, mobilePanel,
+    copySelection, cutSelection, pasteClipboard,
   ]);
 
   // ─── Rótulos de seleção ────────────────────────────────────────────────────
@@ -2049,7 +2500,7 @@ export default function CardGeneratorForm({
   const selectedLabel = selectedBlockIndex != null
     ? blockName(blocks[selectedBlockIndex], selectedBlockIndex)
     : selectedElementIndex != null
-      ? `${elements[selectedElementIndex]?.kind === 'text' ? 'Texto' : 'Linha'} ${selectedElementIndex + 1}`
+      ? `${elementLabel(elements[selectedElementIndex]?.kind ?? 'text')} ${selectedElementIndex + 1}`
       : selectedAnchorIndex != null
         ? ANCHOR_LABELS[ANCHOR_CORNERS[selectedAnchorIndex]]
         : selectedQr
@@ -2075,88 +2526,16 @@ export default function CardGeneratorForm({
     <div className={`flex h-full w-full flex-col bg-white dark:bg-gray-900 ${mobile ? '' : 'border-r border-line dark:border-gray-800'}`}>
       <div className="flex items-center justify-between border-b border-line px-3 py-2.5 dark:border-gray-800">
         <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-gray-500 dark:text-gray-400">
-          Ferramentas
+          Camadas
         </span>
         {mobile && (
-          <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => setMobilePanel(null)} aria-label="Fechar ferramentas">
+          <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => setMobilePanel(null)} aria-label="Fechar camadas">
             <X size={16} aria-hidden />
           </button>
         )}
       </div>
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-3">
-        <Section title="Inserir" hint="Adicione elementos à folha.">
-          <div className="grid grid-cols-3 gap-1.5">
-            <ToolButton icon={<Type size={16} aria-hidden />} label="Texto" onClick={() => addElement('text')} />
-            <ToolButton icon={<Minus size={16} aria-hidden />} label="Linha" onClick={() => addElement('line')} />
-            <ToolButton icon={<ListChecks size={16} aria-hidden />} label="Bloco" onClick={addBlock} />
-            <ToolButton
-              icon={<QrCode size={16} aria-hidden />} label="QR"
-              active={spec.qr !== false}
-              onClick={() => mutate({ qr: spec.qr === false }, 'qr')}
-              title="Ligar/desligar a área de QR Code"
-            />
-            <ToolButton
-              icon={<Focus size={16} aria-hidden />} label="Âncoras"
-              active={spec.anchors !== false}
-              onClick={() => mutate({ anchors: spec.anchors === false }, 'anchors')}
-              title="Ligar/desligar as âncoras ArUco"
-            />
-            <ToolButton
-              icon={<CircleDot size={16} aria-hidden />} label={spec.shape === 'square' ? 'Quadrado' : 'Círculo'}
-              onClick={() => mutate({ shape: spec.shape === 'square' ? 'circle' : 'square' }, 'shape')}
-              title="Alternar formato das bolhas"
-            />
-          </div>
-        </Section>
-
-        <Section title="Campos" hint="Linhas de identificação impressas no topo.">
-          <div className="grid grid-cols-2 gap-1">
-            {FIELD_OPTIONS.map((f) => {
-              const active = (spec.fields ?? []).includes(f.value);
-              return (
-                <button
-                  key={f.value}
-                  type="button"
-                  onClick={() => toggleField(f.value)}
-                  aria-pressed={active}
-                  className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[10.5px] font-medium transition-colors ${
-                    active
-                      ? 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
-                      : 'border-line text-gray-500 hover:bg-surface dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'
-                  }`}
-                >
-                  <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${
-                    active ? 'border-brand-500 bg-brand-500 text-white' : 'border-gray-300 dark:border-gray-600'
-                  }`}>
-                    {active && <Check size={9} aria-hidden />}
-                  </span>
-                  <span className="truncate">{f.short}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Section>
-
-        <Section title="Seleção" hint="Vale para o que está selecionado na folha ou nas camadas.">
-          <div className="grid grid-cols-2 gap-1.5">
-            <ToolButton
-              icon={<Copy size={16} aria-hidden />}
-              label="Duplicar"
-              onClick={duplicateSelection}
-              disabled={!selection.length}
-              title="Duplicar seleção (Ctrl+D)"
-            />
-            <ToolButton
-              icon={<Trash2 size={16} aria-hidden />}
-              label="Excluir"
-              onClick={deleteSelection}
-              disabled={!selection.length}
-              title="Excluir seleção (Delete)"
-            />
-          </div>
-        </Section>
-
-        <Section title="Camadas" hint="Do topo para a base. Shift seleciona vários.">
+        <Section title="Ordem de desenho" hint="Do topo para a base. Shift seleciona vários.">
           <div className="space-y-0.5">
             {blocks.length === 0 && elements.length === 0 && (
               <p className="rounded-md border border-dashed border-line p-2 text-center text-[10.5px] text-gray-400 dark:border-gray-700">
@@ -2208,9 +2587,9 @@ export default function CardGeneratorForm({
                       : 'border-transparent text-gray-600 hover:bg-surface dark:text-gray-300 dark:hover:bg-gray-800'
                   }`}
                 >
-                  {el.kind === 'text' ? <Type size={12} className="shrink-0" aria-hidden /> : <Minus size={12} className="shrink-0" aria-hidden />}
+                  <ElementIcon kind={el.kind} size={12} />
                   <span className={`min-w-0 flex-1 truncate ${el.hidden ? 'line-through opacity-50' : ''} ${el.locked ? 'text-gray-400' : ''}`}>
-                    {el.kind === 'text' ? `Texto ${i + 1}` : `Linha ${i + 1}`}
+                    {elementLabel(el.kind)} {i + 1}
                   </span>
                   <span className="flex shrink-0 items-center opacity-60 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                     <LayerAction title="Subir camada" onClick={() => moveLayer('element', i, 1)} icon={<ChevronUp size={11} aria-hidden />} disabled={i === elements.length - 1} />
@@ -2401,20 +2780,24 @@ export default function CardGeneratorForm({
         {propsTab === 'elementos' && (
           <>
             <Section title="Elementos decorativos" hint="Desenhados na folha; ignorados pela leitura.">
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" icon={<Type size={14} aria-hidden />}
-                        onClick={() => addElement('text')} className="flex-1">
-                  Texto
-                </Button>
-                <Button size="sm" variant="secondary" icon={<Minus size={14} aria-hidden />}
-                        onClick={() => addElement('line')} className="flex-1">
-                  Linha
-                </Button>
+              <div className="grid grid-cols-2 gap-2">
+                {(['text', 'line', 'rect', 'circle', 'written_lines', 'box', 'instructions'] as GeneratorElementKind[]).map((kind) => (
+                  <Button
+                    key={kind}
+                    size="sm"
+                    variant="secondary"
+                    icon={<ElementIcon kind={kind} size={14} />}
+                    onClick={() => addElement(kind)}
+                  >
+                    {elementLabel(kind)}
+                  </Button>
+                ))}
               </div>
 
               {elements.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-line p-3 text-center text-[11px] text-gray-400 dark:border-gray-700">
-                  Nenhum elemento ainda. Arraste textos e linhas no canvas para personalizar a folha.
+                  Nenhum elemento ainda. Use as formas, linhas de resposta ou áreas de
+                  comentário para personalizar a folha.
                 </p>
               ) : (
                 <div className="space-y-2">
@@ -2551,7 +2934,13 @@ export default function CardGeneratorForm({
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2 dark:border-gray-800">
-        <span className="inline-flex min-w-0 items-center gap-1.5 text-[10.5px] text-gray-500 dark:text-gray-400">
+        <button
+          type="button"
+          onClick={() => goStep(3)}
+          disabled={!preview || previewing}
+          title="Ver detalhes da validação"
+          className="inline-flex min-w-0 items-center gap-1.5 rounded text-[10.5px] text-gray-500 hover:text-brand-600 disabled:cursor-default dark:text-gray-400 dark:hover:text-brand-300"
+        >
           <span className={`h-2 w-2 shrink-0 rounded-full ${errorCount ? 'bg-danger-500' : warningCount ? 'bg-warning-500' : 'bg-success-500'}`} />
           <span className="truncate">
             {errorCount
@@ -2560,7 +2949,7 @@ export default function CardGeneratorForm({
                 ? `${warningCount} aviso${warningCount > 1 ? 's' : ''}`
                 : 'Pronto para ativar'}
           </span>
-        </span>
+        </button>
         <Button size="sm" variant="secondary" icon={<ShieldCheck size={13} aria-hidden />}
                 onClick={() => goStep(3)} disabled={!preview || previewing}>
           Validar
@@ -2789,18 +3178,6 @@ export default function CardGeneratorForm({
         </span>
 
         <div className="ml-auto flex items-center gap-1">
-          <button
-            type="button" onClick={undo} className="btn-icon !min-h-[34px] !min-w-[34px]"
-            title="Desfazer (Ctrl+Z)" aria-label="Desfazer" disabled={past.current.length === 0}
-          >
-            <Undo2 size={16} aria-hidden />
-          </button>
-          <button
-            type="button" onClick={redo} className="btn-icon !min-h-[34px] !min-w-[34px]"
-            title="Refazer (Ctrl+Shift+Z)" aria-label="Refazer" disabled={future.current.length === 0}
-          >
-            <Redo2 size={16} aria-hidden />
-          </button>
           <Button
             size="sm"
             onClick={() => void handleGenerate()}
@@ -2820,6 +3197,239 @@ export default function CardGeneratorForm({
         onStep={goStep} onValidate={() => goStep(3)}
       />
 
+      {/* Ribbon do editor: Início | Inserir | Layout | Exibir */}
+      <div className="shrink-0 border-b border-line bg-white dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex items-end gap-0.5 overflow-x-auto px-2 pt-1" role="tablist" aria-label="Editor do cartão">
+          {RIBBON_TABS.map((t) => {
+            const active = ribbonTab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setRibbonTab(t.id)}
+                className={`shrink-0 border-b-2 px-3 py-1.5 text-[11.5px] font-semibold transition-colors ${
+                  active
+                    ? 'border-brand-500 text-brand-700 dark:text-brand-200'
+                    : 'border-transparent text-gray-500 hover:text-ink dark:text-gray-400 dark:hover:text-white'
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+          {previewing && (
+            <span className="ml-auto hidden shrink-0 items-center gap-1 pb-1.5 pl-3 text-[10.5px] text-gray-400 sm:flex">
+              <Loader2 size={11} className="animate-spin" aria-hidden /> atualizando prévia…
+            </span>
+          )}
+        </div>
+
+        <div className="flex min-h-[50px] flex-nowrap items-stretch gap-y-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] md:flex-wrap md:overflow-visible [&::-webkit-scrollbar]:hidden">
+          {ribbonTab === 'inicio' && (
+            <>
+              <RibbonGroup label="Histórico">
+                <RibbonAction icon={<Undo2 size={14} aria-hidden />} label="Desfazer" onClick={undo}
+                              disabled={past.current.length === 0} title="Desfazer (Ctrl+Z)" />
+                <RibbonAction icon={<Redo2 size={14} aria-hidden />} label="Refazer" onClick={redo}
+                              disabled={future.current.length === 0} title="Refazer (Ctrl+Shift+Z)" />
+              </RibbonGroup>
+              <RibbonGroup label="Área de transferência">
+                <RibbonAction icon={<Copy size={14} aria-hidden />} label="Copiar" onClick={copySelection}
+                              disabled={!selection.length} title="Copiar (Ctrl+C)" />
+                <RibbonAction icon={<Scissors size={14} aria-hidden />} label="Recortar" onClick={cutSelection}
+                              disabled={!selection.length} title="Recortar (Ctrl+X)" />
+                <RibbonAction icon={<ClipboardPaste size={14} aria-hidden />} label="Colar" onClick={pasteClipboard}
+                              title="Colar (Ctrl+V)" />
+                <RibbonAction icon={<Plus size={14} aria-hidden />} label="Duplicar" onClick={duplicateSelection}
+                              disabled={!selection.length} title="Duplicar (Ctrl+D)" />
+                <RibbonAction icon={<Trash2 size={14} aria-hidden />} label="Excluir" onClick={deleteSelection}
+                              disabled={!selection.length} title="Excluir (Delete)" />
+              </RibbonGroup>
+              <RibbonGroup label="Seleção">
+                <RibbonAction icon={<MousePointer2 size={14} aria-hidden />} label="Tudo" onClick={selectAll}
+                              title="Selecionar tudo (Ctrl+A)" />
+                <RibbonAction icon={<Lock size={14} aria-hidden />} label="Bloquear" onClick={toggleSelectionLock}
+                              disabled={!selection.some((s) => s.kind === 'element' || s.kind === 'block')}
+                              title="Bloquear/desbloquear a seleção" />
+                <RibbonAction icon={<EyeOff size={14} aria-hidden />} label="Ocultar" onClick={toggleSelectionHidden}
+                              disabled={!selection.some((s) => s.kind === 'element' || s.kind === 'block')}
+                              title="Ocultar/mostrar a seleção" />
+              </RibbonGroup>
+              <RibbonGroup label="Camadas">
+                <RibbonAction icon={<BringToFront size={14} aria-hidden />} label="Frente" onClick={() => arrangeZ('front')}
+                              disabled={!selection.some((s) => s.kind === 'element')}
+                              title="Trazer os elementos decorativos para a frente (blocos de questões ficam na base)" />
+                <RibbonAction icon={<SendToBack size={14} aria-hidden />} label="Trás" onClick={() => arrangeZ('back')}
+                              disabled={!selection.some((s) => s.kind === 'element')}
+                              title="Enviar os elementos decorativos para trás (blocos de questões ficam na base)" />
+              </RibbonGroup>
+            </>
+          )}
+
+          {ribbonTab === 'inserir' && (
+            <>
+              <RibbonGroup label="Texto e formas">
+                <RibbonAction icon={<Type size={14} aria-hidden />} label="Texto" onClick={() => addElement('text')} />
+                <RibbonAction icon={<TextCursorInput size={14} aria-hidden />} label="Título" onClick={addTitle} />
+                <RibbonAction icon={<Minus size={14} aria-hidden />} label="Linha" onClick={() => addElement('line')} />
+                <RibbonAction icon={<Square size={14} aria-hidden />} label="Retângulo" onClick={() => addElement('rect')} />
+                <RibbonAction icon={<Circle size={14} aria-hidden />} label="Círculo" onClick={() => addElement('circle')} />
+              </RibbonGroup>
+              <RibbonGroup label="Áreas">
+                <RibbonAction icon={<PenLine size={14} aria-hidden />} label="Linhas de resposta"
+                              onClick={() => addElement('written_lines')} />
+                <RibbonAction icon={<MessageSquare size={14} aria-hidden />} label="Comentários"
+                              onClick={() => addElement('box')} />
+                <RibbonAction icon={<Info size={14} aria-hidden />} label="Instruções"
+                              onClick={() => addElement('instructions')} />
+              </RibbonGroup>
+              <RibbonGroup label="Questões">
+                <RibbonAction icon={<ListChecks size={14} aria-hidden />} label="Múltipla escolha" onClick={addBlock} />
+                <RibbonAction icon={<Check size={14} aria-hidden />} label="V / F" onClick={addTrueFalseBlock} />
+              </RibbonGroup>
+              <RibbonGroup label="Códigos">
+                <RibbonAction icon={<QrCode size={14} aria-hidden />} label="QR" active={spec.qr !== false}
+                              onClick={() => mutate({ qr: spec.qr === false }, 'qr')} />
+                <RibbonAction icon={<Focus size={14} aria-hidden />} label="Âncoras" active={spec.anchors !== false}
+                              onClick={() => mutate({ anchors: spec.anchors === false }, 'anchors')} />
+              </RibbonGroup>
+              <RibbonGroup label="Campos de identificação">
+                {FIELD_OPTIONS.map((f) => {
+                  const active = (spec.fields ?? []).includes(f.value);
+                  return (
+                    <RibbonAction
+                      key={f.value}
+                      icon={<Check size={13} aria-hidden className={active ? '' : 'opacity-0'} />}
+                      label={f.short}
+                      active={active}
+                      onClick={() => toggleField(f.value)}
+                      title={`${active ? 'Remover' : 'Adicionar'} campo ${f.label}`}
+                    />
+                  );
+                })}
+              </RibbonGroup>
+            </>
+          )}
+
+          {ribbonTab === 'layout' && (
+            <>
+              <RibbonGroup label="Alinhar">
+                <RibbonAction icon={<AlignStartVertical size={14} aria-hidden />} label="Esq." onClick={() => alignElements('left')}
+                              disabled={selectedElementIndexes().length < 2} title="Alinhar à esquerda" />
+                <RibbonAction icon={<AlignCenterVertical size={14} aria-hidden />} label="Centro" onClick={() => alignElements('center')}
+                              disabled={selectedElementIndexes().length < 2} title="Centralizar horizontalmente" />
+                <RibbonAction icon={<AlignEndVertical size={14} aria-hidden />} label="Dir." onClick={() => alignElements('right')}
+                              disabled={selectedElementIndexes().length < 2} title="Alinhar à direita" />
+                <RibbonAction icon={<AlignStartVertical size={14} className="rotate-90" aria-hidden />} label="Topo" onClick={() => alignElements('top')}
+                              disabled={selectedElementIndexes().length < 2} title="Alinhar ao topo" />
+                <RibbonAction icon={<AlignCenterVertical size={14} className="rotate-90" aria-hidden />} label="Meio" onClick={() => alignElements('middle')}
+                              disabled={selectedElementIndexes().length < 2} title="Centralizar verticalmente" />
+                <RibbonAction icon={<AlignEndVertical size={14} className="rotate-90" aria-hidden />} label="Base" onClick={() => alignElements('bottom')}
+                              disabled={selectedElementIndexes().length < 2} title="Alinhar à base" />
+              </RibbonGroup>
+              <RibbonGroup label="Distribuir">
+                <RibbonAction icon={<AlignHorizontalDistributeCenter size={14} aria-hidden />} label="Horizontal"
+                              onClick={() => distributeElements('x')} disabled={selectedElementIndexes().length < 3} />
+                <RibbonAction icon={<AlignVerticalDistributeCenter size={14} aria-hidden />} label="Vertical"
+                              onClick={() => distributeElements('y')} disabled={selectedElementIndexes().length < 3} />
+              </RibbonGroup>
+              <RibbonGroup label="Página">
+                <Select
+                  value={spec.page_format}
+                  aria-label="Formato da página"
+                  className="!min-h-[34px] !py-1 text-xs"
+                  onChange={(e) => changePage({ page_format: e.target.value as CardSpec['page_format'] })}
+                >
+                  <option value="A4">A4</option>
+                  <option value="A5">A5</option>
+                  <option value="Letter">Carta</option>
+                  <option value="Oficio">Ofício</option>
+                  <option value="custom">Personalizado</option>
+                </Select>
+                <RibbonAction icon={<FileText size={14} aria-hidden />} label="Retrato"
+                              active={spec.orientation !== 'landscape'}
+                              onClick={() => changePage({ orientation: 'portrait' })} />
+                <RibbonAction icon={<FileText size={14} className="rotate-90" aria-hidden />} label="Paisagem"
+                              active={spec.orientation === 'landscape'}
+                              onClick={() => changePage({ orientation: 'landscape' })} />
+              </RibbonGroup>
+              {spec.page_format === 'custom' && (
+                <RibbonGroup label="Tamanho (mm)">
+                  <Input type="number" min={50} max={1000} aria-label="Largura da página em mm"
+                         className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.page_w_mm ?? ''}
+                         onChange={(e) => changePage({ page_w_mm: numOrUndefined(e.target.value) })} />
+                  <Input type="number" min={50} max={1000} aria-label="Altura da página em mm"
+                         className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.page_h_mm ?? ''}
+                         onChange={(e) => changePage({ page_h_mm: numOrUndefined(e.target.value) })} />
+                </RibbonGroup>
+              )}
+              <RibbonGroup label="Margem de segurança">
+                <Input type="number" min={3} max={40} step={0.5} aria-label="Margem em mm"
+                       className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.margin_mm ?? ''}
+                       onChange={(e) => mutate({ margin_mm: numOrUndefined(e.target.value) }, 'margin')} />
+                <span className="text-[10.5px] text-gray-400">mm</span>
+              </RibbonGroup>
+              <RibbonGroup label="Bolhas">
+                <span className="pl-1 text-[11px] text-gray-400" aria-hidden>Ø</span>
+                <Input type="number" min={2} max={15} step={0.5} aria-label="Diâmetro da bolha em mm"
+                       className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.bubble_mm ?? ''}
+                       onChange={(e) => mutate({ bubble_mm: numOrUndefined(e.target.value) }, 'bubble-mm')} />
+                <span className="pr-1 text-[10.5px] text-gray-400">mm</span>
+                <RibbonAction icon={spec.shape === 'square' ? <Square size={14} aria-hidden /> : <CircleDot size={14} aria-hidden />}
+                              label={spec.shape === 'square' ? 'Quadrada' : 'Redonda'}
+                              title="Alternar entre bolha redonda e quadrada"
+                              onClick={() => mutate({ shape: spec.shape === 'square' ? 'circle' : 'square' }, 'shape')} />
+              </RibbonGroup>
+              <RibbonGroup label="Organização">
+                <RibbonAction icon={<RotateCcw size={14} aria-hidden />} label="Reorganizar blocos"
+                              onClick={resetBlockPositions} />
+                <RibbonAction icon={<RefreshCw size={14} aria-hidden />} label="Recomeçar folha" onClick={resetSheet} />
+              </RibbonGroup>
+            </>
+          )}
+
+          {ribbonTab === 'exibir' && (
+            <>
+              <RibbonGroup label="Zoom">
+                <RibbonAction icon={<ZoomOut size={14} aria-hidden />} label="Menos" onClick={() => zoomBy(-1)} />
+                <span className="w-11 text-center text-[11px] font-semibold text-gray-500">{Math.round(zoom * 100)}%</span>
+                <RibbonAction icon={<ZoomIn size={14} aria-hidden />} label="Mais" onClick={() => zoomBy(1)} />
+                <RibbonAction icon={<Maximize2 size={14} aria-hidden />} label="Ajustar" onClick={fitToScreen}
+                              title="Ajustar à tela (Ctrl+0)" />
+              </RibbonGroup>
+              <RibbonGroup label="Guias">
+                <RibbonAction icon={<Ruler size={14} aria-hidden />} label="Réguas" active={rulers}
+                              onClick={() => setRulers((v) => !v)} />
+                <RibbonAction icon={<Grid3x3 size={14} aria-hidden />} label="Grade" active={grid}
+                              onClick={() => setGrid((v) => !v)} />
+                <RibbonAction icon={<Crosshair size={14} aria-hidden />} label="Encaixe" active={snap}
+                              onClick={() => setSnap((v) => !v)} />
+                <RibbonAction icon={<Square size={14} aria-hidden />} label="Margem" active={showMargin}
+                              onClick={() => setShowMargin((v) => !v)} />
+                <RibbonAction icon={<Focus size={14} aria-hidden />} label="Áreas OMR" active={showOmr}
+                              onClick={() => setShowOmr((v) => !v)} />
+              </RibbonGroup>
+              <RibbonGroup label="Ferramentas">
+                <RibbonAction icon={<MousePointer2 size={14} aria-hidden />} label="Selecionar" active={tool === 'select'}
+                              onClick={() => setTool('select')} title="Selecionar e arrastar (V)" />
+                <RibbonAction icon={<Move size={14} aria-hidden />} label="Mover folha" active={tool === 'move'}
+                              onClick={() => setTool('move')} title="Mover a folha (M)" />
+                <RibbonAction icon={<Scaling size={14} aria-hidden />} label="Redimensionar" active={tool === 'resize'}
+                              onClick={() => setTool('resize')} title="Redimensionar (R)" />
+              </RibbonGroup>
+              <RibbonGroup label="Painéis">
+                <RibbonAction icon={<PanelLeft size={14} aria-hidden />} label="Camadas"
+                              onClick={() => setMobilePanel('tools')} />
+                <RibbonAction icon={<PanelRight size={14} aria-hidden />} label="Propriedades"
+                              onClick={() => setMobilePanel('props')} />
+              </RibbonGroup>
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-[236px] shrink-0 lg:block">{renderTools()}</aside>
 
@@ -2833,23 +3443,9 @@ export default function CardGeneratorForm({
             <ToolbarToggle title="Selecionar e arrastar (V)" active={tool === 'select'} onClick={() => setTool('select')} icon={<MousePointer2 size={15} aria-hidden />} />
             <ToolbarToggle title="Mover a folha (M)" active={tool === 'move'} onClick={() => setTool('move')} icon={<Move size={15} aria-hidden />} />
             <ToolbarToggle title="Redimensionar (R)" active={tool === 'resize'} onClick={() => setTool('resize')} icon={<Scaling size={15} aria-hidden />} />
-            <span className="mx-1 h-5 w-px bg-line dark:bg-gray-700" aria-hidden />
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => zoomBy(-1)} aria-label="Diminuir zoom" title="Diminuir zoom (ou Ctrl + roda do mouse)">
-              <ZoomOut size={15} aria-hidden />
-            </button>
-            <span className="w-10 text-center text-[11px] font-semibold text-gray-500">{Math.round(zoom * 100)}%</span>
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={() => zoomBy(1)} aria-label="Aumentar zoom" title="Aumentar zoom (ou Ctrl + roda do mouse)">
-              <ZoomIn size={15} aria-hidden />
-            </button>
-            <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px]" onClick={fitToScreen} aria-label="Ajustar à tela" title="Ajustar à tela (Ctrl+0)">
-              <Maximize2 size={15} aria-hidden />
-            </button>
-            <span className="mx-1 hidden h-5 w-px bg-line dark:bg-gray-700 sm:block" aria-hidden />
-            <ToolbarToggle title="Réguas" active={rulers} onClick={() => setRulers((v) => !v)} icon={<Ruler size={15} aria-hidden />} />
-            <ToolbarToggle title="Grade 5 mm (o arraste encaixa nos quadradinhos)" active={grid} onClick={() => setGrid((v) => !v)} icon={<Grid3x3 size={15} aria-hidden />} />
-            <ToolbarToggle title="Guias de alinhamento" active={snap} onClick={() => setSnap((v) => !v)} icon={<Crosshair size={15} aria-hidden />} />
             <span className="ml-auto flex items-center gap-1">
-              <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px] lg:hidden" onClick={() => setMobilePanel('tools')} aria-label="Ferramentas">
+              <span className="hidden text-[10.5px] text-gray-400 sm:inline">{Math.round(zoom * 100)}%</span>
+              <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px] lg:hidden" onClick={() => setMobilePanel('tools')} aria-label="Camadas">
                 <PanelLeft size={16} aria-hidden />
               </button>
               <button type="button" className="btn-icon !min-h-[30px] !min-w-[30px] lg:hidden" onClick={() => setMobilePanel('props')} aria-label="Propriedades">
@@ -3069,7 +3665,7 @@ export default function CardGeneratorForm({
                         key={`element-${i}`}
                         role="button"
                         tabIndex={0}
-                        aria-label={`${el.kind === 'text' ? 'Texto' : 'Linha'} ${i + 1}${el.locked ? ' (bloqueado)' : ''}`}
+                        aria-label={`${elementLabel(el.kind)} ${i + 1}${el.locked ? ' (bloqueado)' : ''}`}
                         onPointerDown={(e) => startElementDrag(e, i)}
                         onKeyDown={(e) => { if (e.key === 'Enter') selectElement(i); }}
                         className={`absolute z-20 rounded-[2px] border border-dashed transition-colors ${
@@ -3084,12 +3680,13 @@ export default function CardGeneratorForm({
                           height: `${Math.max(el.h * 100, 0.4)}%`,
                           minHeight: 10,
                           touchAction: 'none',
+                          transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                         }}
                       >
                         {elementSelected && (
                           <span className="pointer-events-none absolute -top-[16px] left-0 inline-flex items-center gap-1 rounded bg-brand-500 px-1 py-0.5 text-[8.5px] font-semibold leading-none text-white">
                             {el.locked && <Lock size={8} aria-hidden />}
-                            {el.kind === 'text' ? 'Texto' : 'Linha'} {i + 1}
+                            {elementLabel(el.kind)} {i + 1}
                           </span>
                         )}
                         {isPrimary && !el.locked && (
@@ -3119,7 +3716,7 @@ export default function CardGeneratorForm({
                   })}
 
                   {/* Âncoras ArUco: caixas de arraste/redimensionamento */}
-                  {spec.anchors !== false && ANCHOR_CORNERS.map((corner, i) => {
+                  {showOmr && spec.anchors !== false && ANCHOR_CORNERS.map((corner, i) => {
                     const g = anchorRectMm(corner);
                     if (!g) return null;
                     const anchorSelected = isSelected('anchor', i);
@@ -3181,7 +3778,7 @@ export default function CardGeneratorForm({
                   })}
 
                   {/* QR Code: caixa de arraste/redimensionamento */}
-                  {spec.qr !== false && (() => {
+                  {showOmr && spec.qr !== false && (() => {
                     const g = qrRectMm();
                     if (!g) return null;
                     const qrSelected = isSelected('qr', 0);
@@ -3267,7 +3864,7 @@ export default function CardGeneratorForm({
       {/* Barra mobile */}
       <div className="flex shrink-0 items-center gap-1 border-t border-line bg-white p-1.5 dark:border-gray-800 dark:bg-gray-900 lg:hidden">
         <button type="button" onClick={() => setMobilePanel('tools')} className="btn btn-secondary btn-sm flex-1">
-          <Layers size={14} aria-hidden /> Ferramentas
+          <Layers size={14} aria-hidden /> Camadas
         </button>
         <button type="button" onClick={() => setMobilePanel('props')} className="btn btn-secondary btn-sm flex-1">
           <PanelRight size={14} aria-hidden /> Propriedades
