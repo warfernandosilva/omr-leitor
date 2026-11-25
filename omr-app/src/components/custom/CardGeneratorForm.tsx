@@ -92,6 +92,52 @@ const DEFAULT_SPEC: CardSpec = {
 
 type StarterKind = 'quiz' | 'exam' | 'survey' | 'blank';
 
+/** Rascunho local do editor: nada vai para o servidor até gerar o cartão. */
+const DRAFT_KEY = 'omr:cardgen:draft:v1';
+
+interface CardDraft {
+  v: 1;
+  savedAt: number;
+  nome: string;
+  examId: string;
+  spec: CardSpec;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+function isImportedElement(value: unknown): value is CardElementSpec {
+  if (!isRecord(value)) return false;
+  if (typeof value.kind !== 'string' || !(value.kind in ELEMENT_LABELS)) return false;
+  return ['x', 'y', 'w', 'h'].every(
+    (key) => typeof value[key] === 'number' && Number.isFinite(value[key] as number),
+  );
+}
+
+/** Junta um spec vindo de arquivo com os padrões, descartando lixo. */
+function sanitizeImportedSpec(raw: Record<string, unknown>): CardSpec {
+  const blocks = Array.isArray(raw.blocks)
+    ? raw.blocks.filter(isRecord).map((b) => ({ ...DEFAULT_BLOCK, ...(b as Partial<CardBlockSpec>) }))
+    : [];
+  const elements = Array.isArray(raw.elements) ? raw.elements.filter(isImportedElement) : [];
+  return {
+    ...DEFAULT_SPEC,
+    ...(raw as Partial<CardSpec>),
+    blocks: blocks.length ? blocks : [{ ...DEFAULT_BLOCK }],
+    elements,
+  };
+}
+
+function slugifyName(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
 interface Starter {
   kind: StarterKind;
   title: string;
@@ -970,6 +1016,9 @@ export default function CardGeneratorForm({
   const zoomManualRef = useRef(false);
   const [showMargin, setShowMargin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  /** Rascunho encontrado no navegador (oferecido na galeria de modelos). */
+  const [draft, setDraft] = useState<CardDraft | null>(null);
+  const importJsonRef = useRef<HTMLInputElement | null>(null);
 
   const [selection, setSelection] = useState<Selection[]>([]);
   const [tool, setTool] = useState<ToolMode>('select');
@@ -997,6 +1046,40 @@ export default function CardGeneratorForm({
   const canvasScrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const fittedRef = useRef(false);
+
+  // Rascunho local: recupera o que ficou do último acesso (nada é enviado ao servidor).
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<CardDraft>;
+      if (parsed?.v !== 1 || !isRecord(parsed.spec)) return;
+      setDraft({
+        v: 1,
+        savedAt: typeof parsed.savedAt === 'number' ? parsed.savedAt : Date.now(),
+        nome: typeof parsed.nome === 'string' ? parsed.nome : 'Cartão-resposta',
+        examId: typeof parsed.examId === 'string' ? parsed.examId : '',
+        spec: sanitizeImportedSpec(parsed.spec as Record<string, unknown>),
+      });
+    } catch {
+      // Rascunho corrompido é ignorado; o usuário segue com um modelo novo.
+    }
+  }, []);
+
+  // Salva o rascunho enquanto o editor está aberto (com atraso para não escrever a cada tecla).
+  useEffect(() => {
+    if (step === 1) return;
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(DRAFT_KEY, JSON.stringify({
+          v: 1, savedAt: Date.now(), nome, examId, spec,
+        } satisfies CardDraft));
+      } catch {
+        // Sem espaço no navegador: o editor continua funcionando normalmente.
+      }
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [step, nome, examId, spec]);
 
   // Histórico (desfazer/refazer) — snapshots leves de spec + nome.
   const past = useRef<Snapshot[]>([]);
@@ -1145,6 +1228,9 @@ export default function CardGeneratorForm({
       const d = await generateCustomTemplateFromSpec(
         spec, nome.trim() || 'Cartão-resposta', exam?.id,
       );
+      // O cartão foi gravado: o rascunho local não é mais necessário.
+      try { window.localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+      setDraft(null);
       // O botão promete ativar: gerar só grava como validado/rascunho.
       try {
         const act = await activateCustomTemplate(d.id);
@@ -1176,6 +1262,67 @@ export default function CardGeneratorForm({
       return;
     }
     if (preview) setStep(3);
+  };
+
+  // ─── Rascunho local e arquivo JSON ────────────────────────────────────────
+
+  const applySpec = (next: CardSpec, name: string) => {
+    setSpec(next);
+    setNome(name.trim().slice(0, 120) || 'Cartão-resposta');
+    setExamId('');
+    setSelection([]);
+    setTool('select');
+    setGuides({ x: [], y: [] });
+    setMarquee(null);
+    setPropsTab('geral');
+    setZoom(1);
+    fittedRef.current = false;
+    zoomManualRef.current = false;
+    past.current = [];
+    future.current = [];
+    lastCoalesce.current = null;
+    setHistoryTick((n) => n + 1);
+    setPreview(null);
+    setStep(2);
+  };
+
+  const resumeDraft = () => {
+    if (!draft) return;
+    applySpec(draft.spec, draft.nome);
+    setExamId(draft.examId);
+    setDraft(null);
+    notify('Rascunho retomado.', 'info');
+  };
+
+  const discardDraft = () => {
+    try { window.localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+    setDraft(null);
+    notify('Rascunho descartado.', 'info');
+  };
+
+  const exportCardJson = () => {
+    const payload = { version: 1, nome, spec };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${slugifyName(nome) || 'cartao'}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    notify('JSON do cartão exportado.', 'info');
+  };
+
+  const importCardJson = async (file: File) => {
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      if (!isRecord(parsed)) throw new Error('O arquivo não contém um cartão válido.');
+      const specRaw = isRecord(parsed.spec) ? parsed.spec : parsed;
+      const name = typeof parsed.nome === 'string' ? parsed.nome : file.name.replace(/\.json$/i, '');
+      applySpec(sanitizeImportedSpec(specRaw), name);
+      notify('Cartão importado. Revise a folha e gere quando estiver pronto.', 'info');
+    } catch (e) {
+      notify(e instanceof Error ? e.message : 'Não foi possível ler o JSON.', 'error');
+    }
   };
 
   const changePage = (patch: Partial<CardSpec>) => {
@@ -2977,8 +3124,47 @@ export default function CardGeneratorForm({
                   já vêm prontas para leitura.
                 </p>
               </div>
-              <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  ref={importJsonRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    if (file) void importCardJson(file);
+                  }}
+                />
+                <Button
+                  variant="secondary"
+                  icon={<FileText size={15} aria-hidden />}
+                  onClick={() => importJsonRef.current?.click()}
+                >
+                  Importar JSON
+                </Button>
+                <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
+              </div>
             </div>
+
+            {draft && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/50 p-3 dark:border-brand-700/60 dark:bg-brand-700/10">
+                <div className="flex min-w-0 items-start gap-2">
+                  <RotateCcw size={16} className="mt-0.5 shrink-0 text-brand-600 dark:text-brand-300" aria-hidden />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-ink dark:text-white">Rascunho não publicado</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      {draft.nome} · salvo em{' '}
+                      {new Date(draft.savedAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" onClick={resumeDraft}>Continuar rascunho</Button>
+                  <Button size="sm" variant="ghost" onClick={discardDraft}>Descartar</Button>
+                </div>
+              </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {STARTERS.map((starter) => {
@@ -3264,6 +3450,10 @@ export default function CardGeneratorForm({
                 <RibbonAction icon={<SendToBack size={14} aria-hidden />} label="Trás" onClick={() => arrangeZ('back')}
                               disabled={!selection.some((s) => s.kind === 'element')}
                               title="Enviar os elementos decorativos para trás (blocos de questões ficam na base)" />
+              </RibbonGroup>
+              <RibbonGroup label="Arquivo">
+                <RibbonAction icon={<FileDown size={14} aria-hidden />} label="Exportar JSON" onClick={exportCardJson}
+                              title="Baixar o desenho do cartão em JSON" />
               </RibbonGroup>
             </>
           )}

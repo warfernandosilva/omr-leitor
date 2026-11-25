@@ -95,6 +95,56 @@ Regras oficiais:
 - Enquanto o editor tiver alterações não ativadas, a API devolve
   `pending_version = true` e a UI avisa antes de gerar arquivo.
 
+### 3.1 Editor "Criar do zero" (Gabaritos → Gabaritos personalizados)
+
+Três etapas: **Modelo inicial → Editor da folha → Validar e gerar**.
+
+Etapa 1 (modelo inicial): quatro modelos prontos (Questionário, Prova final,
+Pesquisa, Padrão livre), botão **Importar JSON** (arquivo exportado do próprio
+sistema) e, quando existe trabalho não publicado, o aviso **Rascunho não
+publicado** com *Continuar rascunho* / *Descartar*.
+
+Etapa 2 (editor): ribbon com quatro abas.
+
+- **Início** — histórico (desfazer/refazer), área de transferência
+  (copiar/recortar/colar/duplicar/excluir), seleção (tudo, bloquear, ocultar),
+  camadas (frente/trás dos elementos decorativos) e exportação do desenho em
+  JSON.
+- **Inserir** — texto, título, linha, retângulo, círculo, linhas de resposta,
+  área de comentários, instruções; blocos de questões (múltipla escolha e
+  verdadeiro/falso); QR e âncoras; campos de identificação (nome, matrícula,
+  turma, prova, disciplina, data, código).
+- **Layout** — alinhar e distribuir elementos decorativos, formato/orientação
+  da página, tamanho personalizado, margem de segurança, diâmetro e forma das
+  bolhas, reorganizar blocos e recomeçar a folha.
+- **Exibir** — zoom (menos/mais/ajustar), guias (réguas, grade, encaixe,
+  margem, áreas OMR) e ferramentas (selecionar, mover folha, redimensionar).
+
+Painéis: à esquerda **ordem de desenho** (camadas, do topo para a base, com
+ocultar/bloquear/remover); à direita **propriedades** (Documento, Questões,
+Elementos, Página). No celular os dois painéis viram gavetas acessíveis pela
+barra inferior, e o ribbon vira uma única faixa com rolagem horizontal.
+
+Regras do desenho:
+
+- Elementos novos nascem no primeiro espaço livre (fora de blocos, âncoras, QR
+  e outros elementos); sem espaço livre, entram em cascata.
+- Só elementos decorativos têm rotação livre. Âncoras, QR, blocos de questões
+  e matrícula/ID são movidos e redimensionados, mas não girados.
+- Só decorativos alinham/distribuem; blocos têm posição própria.
+- Não há lista/mala direta, fundo de página, designer com IA local nem
+  "imprimir pelo navegador" neste editor. Imagem só existe em modelos
+  importados: o gerador do zero não emite `image`.
+
+Rascunho e JSON:
+
+- O estado da folha é salvo em `localStorage` (`omr:cardgen:draft:v1`) com
+  atraso, enquanto o editor está aberto, e é oferecido na etapa 1.
+- **Exportar JSON** (Início → Arquivo) baixa `{ version, nome, spec }`;
+  **Importar JSON** revalida e saneia o arquivo (descartando itens inválidos)
+  antes de abrir o editor.
+- O rascunho local é apagado quando o cartão é gerado.
+
 ## 4. Leitura e correção
 
 ### 4.1 Quem ainda falta corrigir

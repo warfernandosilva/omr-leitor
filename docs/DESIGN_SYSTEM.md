@@ -76,6 +76,26 @@ Fonte principal: **Inter**.
   registradas e auditoria.
 - `ProvasPage` — catálogo de provas (estrutura reutilizável).
 
+### Editor "Criar do zero" (Gabaritos personalizados)
+
+- Ribbon próprio (`CardGeneratorForm`): abas **Início | Inserir | Layout |
+  Exibir** em `.border-b-2` + texto 11.5px/600; abaixo, as ações em grupos com
+  rótulo minúsculo (9px, `uppercase`) sob os botões.
+- No celular a faixa de ações vira uma única linha com rolagem horizontal
+  (scrollbar oculta); de `md` em diante os grupos quebram linha — nunca
+  escondem ação sem permitir rolar.
+- Painel lateral esquerdo = **ordem de desenho** (camadas), direito =
+  **propriedades** com `Tabs` (Documento, Questões, Elementos, Página);
+  no celular os dois viram gavetas próprias abertas pela barra inferior.
+- Cartão do elemento (`ElementCard`): cantos `rounded-lg`, borda `line`,
+  seleção em `brand-300`/`brand-50`, ícone do tipo no cabeçalho e ações
+  secundárias de 26px (ocultar, bloquear, remover).
+- Rascunho local: banner `brand-50` com ação primária (*Continuar rascunho*) e
+  ação fantasma (*Descartar*); nunca aparece com texto vago — sempre mostra o
+  nome do rascunho e quando foi salvo.
+- Toasts do editor usam o `Toast` padrão (info/erro/sucesso) e são a única
+  forma de confirmar copiar/descartar/exportar/importar.
+
 ## Regras de uso
 
 - Não usar glassmorphism em formulários densos, tabelas, overlays de leitura OMR
