@@ -74,7 +74,41 @@ describe('turmaPorResultado', () => {
         },
       }),
     ]);
-    expect(mapa.has('A')).toBe(false);
+    expect(mapa.get('A')).toBeNull();
+  });
+
+  it('rótulo legado da avaliação não é usado quando há 2+ turmas (regressão)', () => {
+    const mapa = turmaPorResultado([
+      res({
+        codigo_unico: 'A',
+        aluno: { id: 1, nome: 'Sem Origem', matricula: null },
+        avaliacao: {
+          id: 1, external_id: 'aval-1', titulo: 'Prova', questions_per_subject: 4,
+          layout_mode: 'dual', grade_scale: '0-10', template: 'padrao',
+          turma: '5 ANO C', turma_id: 30,
+          turmas: [{ id: 10, nome: '5 ANO A' }, { id: 20, nome: '5 ANO B' }],
+        },
+      }),
+    ]);
+    expect(mapa.get('A')).toBeNull();
+    // ...e o resultado conhecido do servidor não ganha o fallback da prova local.
+    expect(turmaDoResultado('A', mapa, { id: 30, nome: '5 ANO C' })).toBeNull();
+  });
+
+  it('usa o rótulo legado quando a avaliação tem turma única', () => {
+    const mapa = turmaPorResultado([
+      res({
+        codigo_unico: 'A',
+        aluno: { id: 1, nome: 'Sem Origem', matricula: null },
+        avaliacao: {
+          id: 1, external_id: 'aval-1', titulo: 'Prova', questions_per_subject: 4,
+          layout_mode: 'dual', grade_scale: '0-10', template: 'padrao',
+          turma: 'Turma Única', turma_id: 10,
+          turmas: [{ id: 10, nome: 'Turma Única' }],
+        },
+      }),
+    ]);
+    expect(mapa.get('A')).toEqual({ id: 10, nome: 'Turma Única' });
   });
 });
 
@@ -98,6 +132,13 @@ describe('turmaDoResultado / casaComTurma', () => {
   it('usa o fallback informado quando não há dado do servidor', () => {
     expect(turmaDoResultado('Z', new Map(), { id: 1, nome: '5 ANO A' }))
       .toEqual({ id: 1, nome: '5 ANO A' });
+  });
+
+  it('servidor conhecido sem turma não cai no fallback', () => {
+    const mapa = turmaPorResultado([
+      res({ codigo_unico: 'X', aluno: { id: 1, nome: 'Ana', matricula: null } }),
+    ]);
+    expect(turmaDoResultado('X', mapa, { id: 1, nome: '5 ANO A' })).toBeNull();
   });
 
   it('sem turma conhecida, nenhum filtro de turma casa', () => {

@@ -41,6 +41,12 @@ function turmaUnicaDaAvaliacao(avaliacao: DBResultado['avaliacao'] | undefined):
 
 /** Turma legada da avaliação (primeira vinculada) — último recurso. */
 function turmaLegada(avaliacao: DBResultado['avaliacao'] | undefined): TurmaRef | null {
+  const turmas = avaliacao?.turmas ?? [];
+  // Em avaliação multi-turma o rótulo legado guarda apenas a primeira turma
+  // vinculada: usá-lo aqui devolveria a mesma turma para todos os cartões
+  // (regressão já corrigida uma vez). Sem origem no aluno, o honesto é não
+  // mostrar turma nenhuma — o histórico exibe "—" em vez de inventar.
+  if (turmas.length > 1) return null;
   return turmaValida(limparId(avaliacao?.turma_id), limparNome(avaliacao?.turma));
 }
 
@@ -48,16 +54,20 @@ function turmaLegada(avaliacao: DBResultado['avaliacao'] | undefined): TurmaRef 
  * Mapa `codigo_unico → turma do aluno`.
  *
  * Ordem de preferência: turma do aluno (catálogo) → turma única da avaliação
- * → turma legada da avaliação.
+ * → turma legada da avaliação (só quando há no máximo uma turma).
+ *
+ * Todo resultado conhecido entra no mapa, com `null` quando não há turma
+ * possível: assim o chamador não cai no fallback da prova local e não repete
+ * o rótulo da primeira turma para todo mundo.
  */
-export function turmaPorResultado(db: DBResultado[]): Map<string, TurmaRef> {
-  const mapa = new Map<string, TurmaRef>();
+export function turmaPorResultado(db: DBResultado[]): Map<string, TurmaRef | null> {
+  const mapa = new Map<string, TurmaRef | null>();
   for (const r of db) {
     if (!r?.codigo_unico || mapa.has(r.codigo_unico)) continue;
     const turma = turmaDoAluno(r.aluno)
       ?? turmaUnicaDaAvaliacao(r.avaliacao)
       ?? turmaLegada(r.avaliacao);
-    if (turma) mapa.set(r.codigo_unico, turma);
+    mapa.set(r.codigo_unico, turma);
   }
   return mapa;
 }
@@ -65,12 +75,13 @@ export function turmaPorResultado(db: DBResultado[]): Map<string, TurmaRef> {
 /** Turma de um resultado, com fallback para a prova local (resultado só neste aparelho). */
 export function turmaDoResultado(
   codigoUnico: string | undefined,
-  mapa: Map<string, TurmaRef>,
+  mapa: Map<string, TurmaRef | null>,
   fallback?: TurmaRef | null,
 ): TurmaRef | null {
-  if (codigoUnico) {
-    const t = mapa.get(codigoUnico);
-    if (t) return t;
+  if (codigoUnico && mapa.has(codigoUnico)) {
+    // O servidor respondeu por este cartão: `null` significa "sem turma
+    // conhecida" e não deve ser substituído pelo rótulo da prova.
+    return mapa.get(codigoUnico) ?? null;
   }
   if (!fallback) return null;
   return turmaValida(limparId(fallback.id), limparNome(fallback.nome));
