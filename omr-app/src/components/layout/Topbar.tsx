@@ -91,7 +91,7 @@ function GlobalSearch({ onNavigate }: { onNavigate: Navigate }) {
           setOpen(true);
         }}
         onKeyDown={onKey}
-        className="input !pl-9 !min-h-[40px]"
+        className="input !pl-9 !min-h-[34px] !py-1.5"
       />
       {open && norm ? (
         <div className="absolute z-50 mt-1 w-full bg-white dark:bg-gray-900 border border-line dark:border-gray-700 rounded-xl shadow-modal overflow-hidden">
@@ -152,13 +152,13 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
 
   return (
     <header className="sticky top-0 z-30 glass border-b border-line dark:border-gray-800">
-      <div className="flex items-center gap-2 md:gap-3 px-4 py-2.5">
-        <button onClick={onOpenMenu} className="btn-icon lg:hidden" aria-label="Abrir menu">
-          <Menu size={20} />
+      <div className="flex items-center gap-2 px-3 py-1.5 md:gap-3 md:px-4 md:py-2">
+        <button onClick={onOpenMenu} className="btn-icon !min-h-[34px] !min-w-[34px] lg:hidden" aria-label="Abrir menu">
+          <Menu size={19} />
         </button>
-        <div className="flex-1 min-w-0 py-0.5">
-          <p className="text-[11px] font-medium text-[#71809A] dark:text-gray-400 leading-none truncate">{meta.group}</p>
-          <p className="text-[15px] font-bold text-[#172B4D] dark:text-white leading-tight truncate">
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-medium text-[#71809A] dark:text-gray-400 leading-none truncate">{meta.group}</p>
+          <p className="text-[14px] font-bold text-[#172B4D] dark:text-white leading-tight truncate">
             {meta.title}
             {contextExam ? (
               <span className="font-medium text-[#71809A] dark:text-gray-400"> · {contextExam.name}</span>
@@ -171,7 +171,7 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
 
         <Popover
           triggerLabel={pending.length > 0 ? `Notificações (${pending.length} pendentes)` : 'Notificações'}
-          triggerClassName="btn-icon relative"
+          triggerClassName="btn-icon relative !min-h-[34px] !min-w-[34px]"
           panelClassName="w-[320px] max-w-[calc(100vw-2rem)]"
           trigger={
             <>
@@ -239,7 +239,7 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
           )}
         </Popover>
 
-        <ThemeToggle />
+        <ThemeToggle className="!min-h-[34px] !min-w-[34px]" />
 
         <Popover
           triggerLabel="Menu do usuário"
@@ -289,7 +289,7 @@ export default function Topbar({ currentView, examId, onNavigate, onOpenMenu }: 
           )}
         </Popover>
       </div>
-      <div className="sm:hidden px-4 pb-2.5">
+      <div className="sm:hidden px-3 pb-1.5">
         <GlobalSearch onNavigate={onNavigate} />
       </div>
     </header>

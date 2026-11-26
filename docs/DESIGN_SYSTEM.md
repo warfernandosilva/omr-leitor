@@ -79,8 +79,11 @@ Fonte principal: **Inter**.
 ### Editor "Criar do zero" (Gabaritos personalizados)
 
 - Ribbon próprio (`CardGeneratorForm`): abas **Início | Inserir | Layout |
-  Exibir** em `.border-b-2` + texto 11.5px/600; abaixo, as ações em grupos com
-  rótulo minúsculo (9px, `uppercase`) sob os botões.
+  Exibir** em `.border-b-2` + texto 11px/600; abaixo, as ações ficam numa faixa
+  de 32px, separadas por divisores verticais (`role="group"` + `aria-label`),
+  sem legenda visível — cada ação tem `title`/tooltip. A topbar do editor reúne
+  nome, os três passos e as ações (*Validar* / *Gerar e ativar*) numa única
+  linha; no celular os passos descem para uma faixa própria.
 - No celular a faixa de ações vira uma única linha com rolagem horizontal
   (scrollbar oculta); de `md` em diante os grupos quebram linha — nunca
   escondem ação sem permitir rolar.

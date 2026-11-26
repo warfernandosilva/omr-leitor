@@ -104,7 +104,9 @@ Pesquisa, Padrão livre), botão **Importar JSON** (arquivo exportado do própri
 sistema) e, quando existe trabalho não publicado, o aviso **Rascunho não
 publicado** com *Continuar rascunho* / *Descartar*.
 
-Etapa 2 (editor): ribbon com quatro abas.
+Etapa 2 (editor): ribbon com quatro abas. A topbar reúne nome do cartão, os
+três passos e as ações *Validar* / *Gerar e ativar* numa única faixa; no
+celular os passos aparecem numa linha própria abaixo do nome.
 
 - **Início** — histórico (desfazer/refazer), área de transferência
   (copiar/recortar/colar/duplicar/excluir), seleção (tudo, bloquear, ocultar),

@@ -477,7 +477,7 @@ function RibbonAction({
       disabled={disabled}
       title={title ?? label}
       aria-pressed={active}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium transition-colors ${
+      className={`inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 text-[10.5px] font-medium leading-4 transition-colors ${
         active
           ? 'border-brand-200 bg-brand-50 text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
           : 'border-transparent text-gray-600 hover:bg-surface dark:text-gray-300 dark:hover:bg-gray-800'
@@ -491,11 +491,12 @@ function RibbonAction({
 
 function RibbonGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex shrink-0 flex-col gap-0.5 rounded-md px-1 py-0.5">
-      <div className="flex items-center gap-0.5">{children}</div>
-      <span className="text-center text-[9px] font-semibold uppercase tracking-[0.06em] text-gray-400">
-        {label}
-      </span>
+    <div
+      role="group"
+      aria-label={label}
+      className="flex shrink-0 items-center gap-0.5 border-r border-line px-1 last:border-r-0 dark:border-gray-800"
+    >
+      {children}
     </div>
   );
 }
@@ -516,6 +517,58 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
+function StepPills({
+  step, hasModel, hasPreview, onStep, compact = false,
+}: {
+  step: Step;
+  hasModel: boolean;
+  hasPreview: boolean;
+  onStep: (step: Step) => void;
+  /** Versão para a topbar do editor: rótulos só aparecem em telas largas. */
+  compact?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 overflow-x-auto">
+      {STEP_LABELS.map((label, i) => {
+        const n = (i + 1) as Step;
+        const disabled = (n === 2 && !hasModel) || (n === 3 && !hasPreview);
+        const active = n === step;
+        const done = n < step;
+        return (
+          <div key={label} className="flex items-center gap-0.5">
+            {i > 0 && <span className="h-px w-3 bg-line dark:bg-gray-700" aria-hidden />}
+            <button
+              type="button"
+              onClick={() => !disabled && onStep(n)}
+              disabled={disabled}
+              aria-current={active ? 'step' : undefined}
+              title={`${n}. ${label}`}
+              className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                active
+                  ? 'bg-brand-50 text-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
+                  : done
+                    ? 'text-success-700 hover:bg-success-50 dark:text-success-100 dark:hover:bg-success-700/20'
+                    : 'text-gray-500 hover:bg-surface hover:text-ink dark:text-gray-400 dark:hover:bg-gray-800'
+              }`}
+            >
+              <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-full text-[9px] font-bold ${
+                active
+                  ? 'bg-brand-500 text-white'
+                  : done
+                    ? 'bg-success-100 text-success-700 dark:bg-success-700/30 dark:text-success-100'
+                    : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+              }`}>
+                {done ? <Check size={10} aria-hidden /> : n}
+              </span>
+              <span className={compact ? 'hidden lg:inline' : 'hidden sm:inline'}>{label}</span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Stepper({
   step, hasModel, hasPreview, meta, onStep, onValidate,
 }: {
@@ -527,48 +580,12 @@ function Stepper({
   onValidate: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-white px-3 py-2 dark:border-gray-800 dark:bg-gray-900">
-      <div className="flex items-center gap-1 overflow-x-auto">
-        {STEP_LABELS.map((label, i) => {
-          const n = (i + 1) as Step;
-          const disabled = (n === 2 && !hasModel) || (n === 3 && !hasPreview);
-          const active = n === step;
-          const done = n < step;
-          return (
-            <div key={label} className="flex items-center gap-1">
-              {i > 0 && <span className="h-px w-4 bg-line dark:bg-gray-700" aria-hidden />}
-              <button
-                type="button"
-                onClick={() => !disabled && onStep(n)}
-                disabled={disabled}
-                aria-current={active ? 'step' : undefined}
-                className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2 py-1 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-                  active
-                    ? 'bg-brand-50 text-brand-700 dark:bg-brand-700/20 dark:text-brand-200'
-                    : done
-                      ? 'text-success-700 hover:bg-success-50 dark:text-success-100 dark:hover:bg-success-700/20'
-                      : 'text-gray-500 hover:bg-surface hover:text-ink dark:text-gray-400 dark:hover:bg-gray-800'
-                }`}
-              >
-                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
-                  active
-                    ? 'bg-brand-500 text-white'
-                    : done
-                      ? 'bg-success-100 text-success-700 dark:bg-success-700/30 dark:text-success-100'
-                      : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                }`}>
-                  {done ? <Check size={11} aria-hidden /> : n}
-                </span>
-                <span className="hidden sm:inline">{label}</span>
-              </button>
-            </div>
-          );
-        })}
-      </div>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-white px-3 py-1.5 dark:border-gray-800 dark:bg-gray-900">
+      <StepPills step={step} hasModel={hasModel} hasPreview={hasPreview} onStep={onStep} />
       <div className="flex items-center gap-2">
-        <span className="hidden text-[10.5px] text-gray-400 md:inline">{meta}</span>
+        <span className="hidden text-[10px] text-gray-400 md:inline">{meta}</span>
         {step === 2 && hasPreview && (
-          <Button size="sm" onClick={onValidate} icon={<ArrowRight size={14} aria-hidden />}>
+          <Button size="sm" onClick={onValidate} icon={<ArrowRight size={13} aria-hidden />}>
             Validar
           </Button>
         )}
@@ -3334,58 +3351,75 @@ export default function CardGeneratorForm({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-line bg-white shadow-card dark:border-gray-800 dark:bg-gray-900">
-      {/* Topbar */}
-      <div className="flex items-center gap-2 border-b border-line bg-white px-2.5 py-2 dark:border-gray-800 dark:bg-gray-900">
-        <button
-          type="button"
-          onClick={() => setStep(1)}
-          className="btn-icon !min-h-[34px] !min-w-[34px]"
-          title="Voltar aos modelos"
-          aria-label="Voltar aos modelos"
-        >
-          <ArrowLeft size={17} aria-hidden />
-        </button>
-        <span className="hidden h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-white sm:flex">
-          <LayoutGrid size={16} aria-hidden />
-        </span>
-        <div className="min-w-0 flex-1">
-          <span className="hidden text-[10px] font-semibold uppercase tracking-wide text-gray-400 sm:block">
-            Criar gabarito personalizado
-          </span>
-          <input
-            value={nome}
-            onChange={(e) => rename(e.target.value)}
-            aria-label="Nome do cartão"
-            className="w-full min-w-0 rounded-lg border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-ink outline-none transition-colors hover:border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 dark:text-white dark:hover:border-gray-700"
-          />
-        </div>
-        <span className="hidden text-[11px] text-gray-400 md:block">
-          {previewing ? 'Atualizando…' : preview?.image ? 'Prévia pronta' : 'Sem prévia'}
-        </span>
-
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            size="sm"
-            onClick={() => void handleGenerate()}
-            loading={busy}
-            disabled={!preview || previewing || errorCount > 0}
-            icon={<FileDown size={15} aria-hidden />}
-            className="ml-1 hidden sm:inline-flex"
+      {/* Topbar compacta: nome, passos e ações na mesma linha */}
+      <div className="shrink-0 border-b border-line bg-white dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex items-center gap-1.5 px-2 py-1">
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className="btn-icon !min-h-[28px] !min-w-[28px]"
+            title="Voltar aos modelos"
+            aria-label="Voltar aos modelos"
           >
-            Gerar e ativar
-          </Button>
+            <ArrowLeft size={15} aria-hidden />
+          </button>
+          <span className="hidden h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-white md:flex">
+            <LayoutGrid size={14} aria-hidden />
+          </span>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <input
+              value={nome}
+              onChange={(e) => rename(e.target.value)}
+              aria-label="Nome do cartão"
+              className="w-full min-w-0 max-w-[280px] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[13px] font-semibold text-ink outline-none transition-colors hover:border-line focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 dark:text-white dark:hover:border-gray-700"
+            />
+            <span className="hidden shrink-0 text-[10px] text-gray-400 xl:inline">
+              {previewing ? 'Atualizando…' : preview?.image ? 'Prévia pronta' : 'Sem prévia'}
+            </span>
+          </div>
+          <div className="ml-auto hidden items-center gap-1.5 md:flex">
+            <StepPills step={step} hasModel hasPreview={!!preview} onStep={goStep} compact />
+            <span className="h-5 w-px shrink-0 bg-line dark:bg-gray-700" aria-hidden />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => goStep(3)}
+              disabled={!preview || previewing}
+              className="!min-h-[28px] !px-2 !py-0.5"
+            >
+              Validar
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => void handleGenerate()}
+              loading={busy}
+              disabled={!preview || previewing || errorCount > 0}
+              icon={<FileDown size={13} aria-hidden />}
+              className="!min-h-[28px] !px-2 !py-0.5"
+            >
+              Gerar e ativar
+            </Button>
+          </div>
+          <div className="ml-auto flex items-center gap-1 md:hidden">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => goStep(3)}
+              disabled={!preview || previewing}
+              className="!min-h-[28px] !px-2 !py-0.5"
+            >
+              Validar
+            </Button>
+          </div>
+        </div>
+        <div className="flex items-center border-t border-line px-2 py-1 md:hidden dark:border-gray-800">
+          <StepPills step={step} hasModel hasPreview={!!preview} onStep={goStep} />
         </div>
       </div>
 
-      <Stepper
-        step={step} hasModel hasPreview={!!preview}
-        meta={`${spec.page_format === 'custom' ? 'Personalizado' : spec.page_format} · ${spec.orientation === 'landscape' ? 'paisagem' : 'retrato'}`}
-        onStep={goStep} onValidate={() => goStep(3)}
-      />
-
       {/* Ribbon do editor: Início | Inserir | Layout | Exibir */}
       <div className="shrink-0 border-b border-line bg-white dark:border-gray-800 dark:bg-gray-900">
-        <div className="flex items-end gap-0.5 overflow-x-auto px-2 pt-1" role="tablist" aria-label="Editor do cartão">
+        <div className="flex items-end gap-0.5 overflow-x-auto px-1.5" role="tablist" aria-label="Editor do cartão">
           {RIBBON_TABS.map((t) => {
             const active = ribbonTab === t.id;
             return (
@@ -3395,7 +3429,7 @@ export default function CardGeneratorForm({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setRibbonTab(t.id)}
-                className={`shrink-0 border-b-2 px-3 py-1.5 text-[11.5px] font-semibold transition-colors ${
+                className={`shrink-0 border-b-2 px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                   active
                     ? 'border-brand-500 text-brand-700 dark:text-brand-200'
                     : 'border-transparent text-gray-500 hover:text-ink dark:text-gray-400 dark:hover:text-white'
@@ -3406,13 +3440,13 @@ export default function CardGeneratorForm({
             );
           })}
           {previewing && (
-            <span className="ml-auto hidden shrink-0 items-center gap-1 pb-1.5 pl-3 text-[10.5px] text-gray-400 sm:flex">
+            <span className="ml-auto hidden shrink-0 items-center gap-1 pb-1 pl-3 text-[10px] text-gray-400 sm:flex">
               <Loader2 size={11} className="animate-spin" aria-hidden /> atualizando prévia…
             </span>
           )}
         </div>
 
-        <div className="flex min-h-[50px] flex-nowrap items-stretch gap-y-1 overflow-x-auto px-2 py-1.5 [scrollbar-width:none] md:flex-wrap md:overflow-visible [&::-webkit-scrollbar]:hidden">
+        <div className="flex min-h-[32px] flex-nowrap items-center gap-y-1 overflow-x-auto px-1.5 py-0.5 [scrollbar-width:none] md:flex-wrap md:overflow-visible [&::-webkit-scrollbar]:hidden">
           {ribbonTab === 'inicio' && (
             <>
               <RibbonGroup label="Histórico">
@@ -3529,7 +3563,7 @@ export default function CardGeneratorForm({
                 <Select
                   value={spec.page_format}
                   aria-label="Formato da página"
-                  className="!min-h-[34px] !py-1 text-xs"
+                  className="!min-h-[30px] !py-1 text-xs"
                   onChange={(e) => changePage({ page_format: e.target.value as CardSpec['page_format'] })}
                 >
                   <option value="A4">A4</option>
@@ -3548,23 +3582,23 @@ export default function CardGeneratorForm({
               {spec.page_format === 'custom' && (
                 <RibbonGroup label="Tamanho (mm)">
                   <Input type="number" min={50} max={1000} aria-label="Largura da página em mm"
-                         className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.page_w_mm ?? ''}
+                         className="!min-h-[30px] w-[76px] !py-1 text-xs" value={spec.page_w_mm ?? ''}
                          onChange={(e) => changePage({ page_w_mm: numOrUndefined(e.target.value) })} />
                   <Input type="number" min={50} max={1000} aria-label="Altura da página em mm"
-                         className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.page_h_mm ?? ''}
+                         className="!min-h-[30px] w-[76px] !py-1 text-xs" value={spec.page_h_mm ?? ''}
                          onChange={(e) => changePage({ page_h_mm: numOrUndefined(e.target.value) })} />
                 </RibbonGroup>
               )}
               <RibbonGroup label="Margem de segurança">
                 <Input type="number" min={3} max={40} step={0.5} aria-label="Margem em mm"
-                       className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.margin_mm ?? ''}
+                       className="!min-h-[30px] w-[76px] !py-1 text-xs" value={spec.margin_mm ?? ''}
                        onChange={(e) => mutate({ margin_mm: numOrUndefined(e.target.value) }, 'margin')} />
                 <span className="text-[10.5px] text-gray-400">mm</span>
               </RibbonGroup>
               <RibbonGroup label="Bolhas">
                 <span className="pl-1 text-[11px] text-gray-400" aria-hidden>Ø</span>
                 <Input type="number" min={2} max={15} step={0.5} aria-label="Diâmetro da bolha em mm"
-                       className="!min-h-[34px] w-[76px] !py-1 text-xs" value={spec.bubble_mm ?? ''}
+                       className="!min-h-[30px] w-[76px] !py-1 text-xs" value={spec.bubble_mm ?? ''}
                        onChange={(e) => mutate({ bubble_mm: numOrUndefined(e.target.value) }, 'bubble-mm')} />
                 <span className="pr-1 text-[10.5px] text-gray-400">mm</span>
                 <RibbonAction icon={spec.shape === 'square' ? <Square size={14} aria-hidden /> : <CircleDot size={14} aria-hidden />}
